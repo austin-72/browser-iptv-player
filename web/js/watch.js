@@ -438,26 +438,35 @@ V.cast = function (btn) {
 V.chromecast = function () {
   var p = V.player, it = V.watch.it;
   var ctx = cast.framework.CastContext.getInstance();
-  ctx.requestSession().then(function () {
-    var path = p.sessionId ? '/api/session/' + p.sessionId + '/index.m3u8' : null;
-    var go = function (pq, type) {
-      return V.api('/api/cast/link', { body: { path: pq } }).then(function (r) {
-        var info = new chrome.cast.media.MediaInfo(location.origin + r.url, type);
-        info.metadata = new chrome.cast.media.GenericMediaMetadata();
-        info.metadata.title = it.n;
-        if (it.i) info.metadata.images = [new chrome.cast.Image(it.i)];
-        info.streamType = p.vod ? chrome.cast.media.StreamType.BUFFERED : chrome.cast.media.StreamType.LIVE;
-        var req = new chrome.cast.media.LoadRequest(info);
-        req.currentTime = p.vod ? p.position - p.base : 0;
-        return ctx.getCurrentSession().loadMedia(req).then(function () { p.video.pause(); V.toast('Casting ' + it.n); });
-      });
-    };
-    if (path) return go(path, 'application/x-mpegURL');
+  var send = function (full, type) {
+    var info = new chrome.cast.media.MediaInfo(full, type);
+    info.metadata = new chrome.cast.media.GenericMediaMetadata();
+    info.metadata.title = it.n;
+    if (it.i) info.metadata.images = [new chrome.cast.Image(it.i)];
+    info.streamType = p.vod ? chrome.cast.media.StreamType.BUFFERED : chrome.cast.media.StreamType.LIVE;
+    var req = new chrome.cast.media.LoadRequest(info);
+    req.currentTime = p.vod ? p.position - p.base : 0;
+    return ctx.getCurrentSession().loadMedia(req).then(function () { p.video.pause(); V.toast('Casting ' + it.n); });
+  };
+  var go = function (pq, type) { return V.api('/api/cast/link', { body: { path: pq } }).then(function (r) { return send(location.origin + r.url, type); }); };
+  var viaServer = function () {
+    if (p.sessionId) return go('/api/session/' + p.sessionId + '/index.m3u8', 'application/x-mpegURL');
     // Not converting right now: ask the server to relay it (receivers can't send headers or get past CORS).
     return V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: p.alt, url: it.t === 'catchup' ? it.u : undefined, sniff: true } }).then(function (r) {
       if (r.kind === 'ffmpeg' || r.kind === 'ts') return V.api('/api/play/session', { body: { k: it.k, alt: p.alt, mode: 'remux', seek: p.vod ? p.position : 0, live: !p.vod, codecs: ['h264'] } }).then(function (s) { return go(s.url, 'application/x-mpegURL'); });
       return go(r.url, r.kind === 'hls' ? 'application/x-mpegURL' : r.kind === 'dash' ? 'application/dash+xml' : 'video/mp4');
     });
+  };
+  ctx.requestSession().then(function () {
+    // Straight from the provider when the Chromecast can take it: a plain video file needs no permission, and
+    // HLS/DASH do when the provider allows web players. If the Chromecast can't load it, the server relays it.
+    var a = p.attempt, hdrs = p.headers || {};
+    var type = !a || a.via !== 'direct' || !a.url || !/^https?:/i.test(a.url) || Object.keys(hdrs).length ? '' :
+      a.kind === 'native' && !a.mkv ? 'video/mp4' :
+      a.kind === 'hls' && (!a.native || (p.reachInfo && p.reachInfo.mse)) ? 'application/x-mpegURL' :
+      a.kind === 'dash' && !it.dr ? 'application/dash+xml' : '';
+    if (type && !p.sessionId) return send(a.url, type).catch(function () { return viaServer(); });
+    return viaServer();
   }).catch(function (e) { if (e && e !== 'cancel' && e.code !== 'cancel') V.toast('Casting failed: ' + (e.description || e.code || e), { error: true }); });
 };
 

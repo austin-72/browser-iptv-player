@@ -351,6 +351,7 @@ function publicSettings() {
     ffmpeg: media.available, tmdb: !!s.tmdbKey, version: cfg.version, defaultLangs: s.defaultLangs, showUnknownLang: s.showUnknownLang !== false,
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
+    features: ['browserRoute', 'copyCodecs'],
   };
 }
 
@@ -834,14 +835,11 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
   if (b.forget) { reach.forget(src.input, origin); return { ok: true }; }
   const alt = Number.isInteger(b.alt) ? b.alt : -1;
   if (videoViaProxy(srcList(it, alt))) return { kind: '', url: src.input, blocked: 'proxy' };
-  const out = await reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt) });
-  // Films in MKV/AVI: Chrome and Edge play many MKV files themselves when the codecs suit — the provider says which.
-  if (out.kind === 'ffmpeg' && it.t === 'movie' && it.xt && /\.mkv(\?|$)/i.test(src.input)) {
-    try {
-      const info = await lists.xtVod(it.xt.l, it.xt.id);
-      const v = info && (info.video || {}), a = info && (info.audio || {});
-      if (v && v.codec_name) out.codecs = { v: String(v.codec_name).toLowerCase(), a: String(a.codec_name || '').toLowerCase(), pix: String(v.pix_fmt || '') };
-    } catch {}
+  const out = await reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt), mixedOk: !!b.mixedOk });
+  // Films and episodes: Chrome and Edge play many MKV files themselves when the codecs suit — the provider says which.
+  if (out.kind === 'ffmpeg' || out.kind === 'native') {
+    const cx = await copyCodecs(it, alt).catch(() => null);
+    if (cx) out.codecs = cx;
   }
   return out;
 });
@@ -861,6 +859,50 @@ function listUsage() {
   return use;
 }
 /**
+ * What's inside one copy of a film or episode — { v: 'h264', a: 'ac3', pix } — as its Xtream provider describes it
+ * (episodes carry it from the series details; films ask get_vod_info once, cached for a week). null when unknown.
+ */
+const codecMemo = new Map();
+async function copyCodecs(it, alt = -1) {
+  const a = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt] : null;
+  if (it.t === 'episode') return (a ? a.cx : it.cx) || null;
+  if (it.t !== 'movie') return null;
+  const url = a ? a.u : it.u;
+  const m = /\/movie\/[^/]+\/[^/]+\/(\d+)\.\w+(?:\?|$)/.exec(url || '');
+  const lid = a ? a.l : (it.xt && it.xt.l) || it.src;
+  const id = a ? m && m[1] : (it.xt && it.xt.id) || (m && m[1]);
+  const l = lid && lists.all().find((x) => x.id === lid);
+  if (!id || !l || l.type !== 'xtream') return null;
+  const key = `${lid}:${id}`;
+  if (codecMemo.has(key)) return codecMemo.get(key);
+  const info = await lists.xtVod(lid, id);
+  const v = (info && info.video) || {}, au = (info && info.audio) || {};
+  const cx = v.codec_name ? { v: String(v.codec_name).toLowerCase(), a: String(au.codec_name || '').toLowerCase(), pix: String(v.pix_fmt || '') } : null;
+  if (codecMemo.size > 5000) codecMemo.clear();
+  codecMemo.set(key, cx);
+  return cx;
+}
+/**
+ * How well this browser can play one copy straight from the provider: 0 as it is, 1 probably as it is (an MKV
+ * Chrome/Edge plays, MPEG-TS), 2 by converting it in the browser, 3 only by converting on the server.
+ * caps: what the browser said it can do { mkv, hevc, vp9, av1, ac3, eac3, mb }.
+ */
+function playScore(url, cx, caps) {
+  const ext = (((url || '').split(/[?#]/)[0].match(/\.([a-z0-9]{2,5})$/i) || [])[1] || '').toLowerCase();
+  const vOk = !cx || (cx.v === 'h264' && !/10|12|422|444/.test(cx.pix || '')) || (cx.v === 'hevc' && caps.hevc) || (cx.v === 'vp9' && caps.vp9) || (cx.v === 'av1' && caps.av1);
+  const aOk = !cx || !cx.a || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].includes(cx.a) || (cx.a === 'ac3' && caps.ac3) || (cx.a === 'eac3' && caps.eac3);
+  const mbAudio = cx && ['ac3', 'eac3', 'flac', 'aac', 'mp3', 'opus', 'vorbis'].includes(cx.a); // what the browser can convert
+  if (/^(mp4|m4v|mov|webm|m3u8)$/.test(ext)) return vOk && aOk ? 0 : vOk && caps.mb && mbAudio ? 2 : 3;
+  if (ext === 'mkv') {
+    if (!cx) return caps.mkv ? 1 : caps.mb ? 2 : 3;
+    if (vOk && aOk && caps.mkv) return 1;
+    return vOk && caps.mb && mbAudio ? 2 : 3;
+  }
+  if (ext === 'ts' || !ext) return cx && !aOk ? (caps.mb && mbAudio ? 2 : 3) : 1;
+  return 3; // AVI, WMV…
+}
+
+/**
  * Which copy of a title to play first: copies whose provider has a free connection, and that this page can play
  * straight from the provider (an https page can't play http streams directly). When every copy's provider is busy
  * with someone in the household, say who — so the viewer can take over or wait.
@@ -873,6 +915,13 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   const use = listUsage();
   const out = [];
   const copies = [-1, ...(it.alts || []).map((x, i) => i)];
+  // Films and episodes: also what each copy's file is like, so the one this browser plays as it is goes first
+  // (the same episode is often an MP4 on one provider and an MKV with Dolby sound on another).
+  const caps = b.caps && typeof b.caps === 'object' ? b.caps : null;
+  const vodItem = it.t === 'movie' || it.t === 'episode';
+  const cxs = caps && vodItem && copies.length > 1
+    ? await Promise.race([Promise.all(copies.map((alt) => copyCodecs(it, alt).catch(() => null))), new Promise((r) => setTimeout(() => r(copies.map(() => null)), 2500))])
+    : copies.map(() => null);
   for (const alt of copies) {
     const lid = srcList(it, alt);
     const l = lid && lists.all().find((x) => x.id === lid);
@@ -880,14 +929,15 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
     const limit = connLimit(it, alt);
     const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn));
     const busy = limit > 0 && users.length >= limit;
-    const mixed = https && /^http:/i.test(url || '');
+    const mixed = https && /^http:/i.test(url || '') && !b.mixedOk;
     out.push({
       alt, list: lid || '', name: (l && l.name) || '', limit, busy, mixed, proxy: videoViaProxy(lid),
+      fmt: caps && vodItem ? playScore(url, cxs[copies.indexOf(alt)], caps) : 0,
       by: busy ? users.map((c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, mine: c.pid === prof.id })) : [],
     });
   }
   // Free first; then ones this page can play directly; then the list order.
-  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
+  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
   return { sources: order, allBusy: out.every((x) => x.busy), directAddress: settings().directAddress || '' };
 });
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).

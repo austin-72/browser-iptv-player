@@ -1,5 +1,7 @@
 /* Downloads for watching offline. On https (or the server's own computer) videos are kept inside the app;
-   otherwise they're saved as an MP4 file. The server converts anything a browser can't play. */
+   otherwise they're saved as an MP4 file. In the original quality they come straight from the provider when it lets
+   web pages read its files: as they are when the browser plays them, or turned into an MP4 in the browser (MKV,
+   MPEG-TS, Dolby sound). Otherwise — or for a smaller copy — the server fetches and converts them. */
 'use strict';
 V.downloads = (function () {
   var queue = [];
@@ -7,6 +9,62 @@ V.downloads = (function () {
   var items = new Map(); // k -> record
   var canStore = function () { return window.isSecureContext && navigator.storage && navigator.storage.getDirectory && window.FileSystemFileHandle && 'createWritable' in FileSystemFileHandle.prototype; };
   var fileName = function (k) { return 'dl-' + k.replace(/[^\w-]/g, '_'); };
+  /** The provider's own address for a download straight from it ('' when it can't be: special headers, http on https…). */
+  var directUrl = function (it) {
+    var u = it.u || '';
+    if (!/^https?:/i.test(u) || (it.h && Object.keys(it.h).length) || S.settings.routing === 'server') return '';
+    if (location.protocol === 'https:' && /^http:/i.test(u) && !(V._mixedHosts && V._mixedHosts[(/^http:\/\/([^/?#]+)/i.exec(u) || [])[1]])) return '';
+    var g = V.guessKind(u, it);
+    return g === 'native' || (V.mbSupported() && (g === 'ffmpeg' || g === 'ts' || g === 'unknown')) ? u : '';
+  };
+
+  /**
+   * Copies a film or episode from the provider into `w` (a file being written): as it is when it's a file browsers
+   * play, else converted to MP4 in this browser. r gets bytes/size (or a 0–1000 progress) as it goes.
+   */
+  function directTo(url, w, r, ac) {
+    var g = V.guessKind(url, {});
+    if (g === 'native') {
+      return fetch(url, { signal: ac.signal, credentials: 'omit', referrerPolicy: 'no-referrer' }).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var ct = res.headers.get('Content-Type') || '';
+        if (/text\/|json|mpegurl/i.test(ct)) throw new Error('not a video file');
+        r.size = Number(res.headers.get('Content-Length')) || 0;
+        r.type = /^(video|audio)\//.test(ct) ? ct : 'video/mp4';
+        var reader = res.body.getReader(), last = 0;
+        var copy = function () {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) return;
+            return w.write(chunk.value).then(function () {
+              r.bytes += chunk.value.length;
+              if (Date.now() - last > 700) { last = Date.now(); save(r); }
+              return copy();
+            });
+          });
+        };
+        return copy();
+      });
+    }
+    return V.mbLoad().then(function (M) {
+      var input = new M.Input({ source: new M.UrlSource(url, { getRetryDelay: function (n, err) { return n < 2 && !(err instanceof TypeError) ? 2 : null; } }), formats: M.ALL_FORMATS });
+      return input.getPrimaryAudioTrack().then(function (at) {
+        return Promise.all([at ? at.getCodecParameterString() : null, M.getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: 48000 })]);
+      }).then(function (c) {
+        var ap = c[0], enc = c[1];
+        var keep = ap && /^(mp4a|opus|mp3|flac|fLaC)/.test(ap);
+        var out = new WritableStream({ write: function (chunk) { return w.write({ type: 'write', position: chunk.position, data: chunk.data }); } });
+        var output = new M.Output({ format: new M.Mp4OutputFormat({ fastStart: false }), target: new M.StreamTarget(out, { chunked: true }) });
+        return M.Conversion.init({ input: input, output: output, tracks: 'primary', audio: keep || !enc ? {} : { codec: enc, numberOfChannels: 2 }, showWarnings: false });
+      }).then(function (conv) {
+        if (!conv.isValid || (conv.discardedTracks || []).some(function (d) { return d.track && d.track.type === 'audio'; })) throw new Error('can’t be converted in the browser');
+        r.type = 'video/mp4'; r.size = 0; r.progress = 0;
+        var last = 0;
+        conv.onProgress = function (p) { r.progress = p; if (Date.now() - last > 700) { last = Date.now(); save(r); } };
+        ac.signal.addEventListener('abort', function () { conv.cancel().catch(function () {}); });
+        return conv.execute();
+      }).then(function () { if (input.dispose) input.dispose(); }, function (e) { if (input.dispose) input.dispose(); throw e; });
+    });
+  }
 
   function load() {
     return V.idb.all('dl').then(function (list) {
@@ -25,6 +83,23 @@ V.downloads = (function () {
     if (it.t === 'live' || it.t === 'show') return V.toast('Only movies, episodes and audio can be downloaded.', { error: true });
     if (opts.quality === undefined) return chooser(it);
     var url = '/api/download/' + encodeURIComponent(it.k) + (opts.quality ? '?height=' + opts.quality : '');
+    var du = opts.quality ? '' : directUrl(it);
+    // Saving it as a file, in the original quality, in Chrome/Edge: straight from the provider into the file.
+    if ((!canStore() || opts.asFile) && du && window.showSaveFilePicker) {
+      var name = String(it.n || 'video').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 120) + '.mp4';
+      var rr = { k: it.k, n: it.n, bytes: 0, size: 0 }, ac0 = new AbortController();
+      window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Video', accept: { 'video/mp4': ['.mp4'] } }] }).then(function (fh) {
+        return fh.createWritable().then(function (w) {
+          V.toast('Downloading straight from the provider…');
+          return directTo(du, w, rr, ac0).then(function () { return w.close(); }, function (e) { return w.abort().catch(function () {}).then(function () { throw e; }); });
+        });
+      }).then(function () { V.toast('Saved: ' + it.n); }, function (e) {
+        if (e && e.name === 'AbortError') return; // (the viewer closed the save window)
+        V.toast('The provider doesn’t allow that from a web page — the server will fetch it instead.');
+        var a0 = document.createElement('a'); a0.href = url; a0.download = ''; document.body.appendChild(a0); a0.click(); a0.remove();
+      });
+      return;
+    }
     if (!canStore() || opts.asFile) {
       var a = document.createElement('a');
       a.href = url; a.download = '';
@@ -33,7 +108,7 @@ V.downloads = (function () {
       return;
     }
     var show = V.showOf(it);
-    var r = { k: it.k, n: it.n, t: it.t, i: it.i || (show || {}).i || '', sk: it.sk || '', show: show ? show.n : '', s: it.s, e: it.e, et: it.et, d: it.d || 0, pid: S.profile.id, status: 'queued', bytes: 0, size: 0, at: Date.now(), quality: opts.quality || 0 };
+    var r = { k: it.k, n: it.n, t: it.t, i: it.i || (show || {}).i || '', sk: it.sk || '', show: show ? show.n : '', s: it.s, e: it.e, et: it.et, d: it.d || 0, pid: S.profile.id, status: 'queued', bytes: 0, size: 0, at: Date.now(), quality: opts.quality || 0, u: du };
     save(r);
     queue.push(r);
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
@@ -47,7 +122,7 @@ V.downloads = (function () {
       title: 'Download “' + it.n + '”',
       body: '<label class="field"><span>Quality</span><select class="input" data-q><option value="0">Original</option><option value="1080">1080p</option><option value="720" selected>720p (smaller)</option><option value="480">480p (smallest)</option></select></label>' +
         (stored ? '<label class="check"><input type="checkbox" data-file><span>Save as a file on this device instead of inside the app</span></label>' : '<p class="dim small">This address isn’t secure (https), so the video is saved as an MP4 file you open with any player. On https it can be kept inside the app for offline watching.</p>') +
-        '<p class="dim small">Anything a browser can’t play is converted to MP4 on the server while it downloads.</p>',
+        '<p class="dim small">In the original quality it comes straight from the provider when it allows that (converted to MP4 in this browser if needed); otherwise, and for the smaller sizes, the server fetches and converts it.</p>',
       actions: [{ label: 'Cancel' }, { label: 'Download', primary: true, fn: function (d) { var q = +V.$('[data-q]', d).value; var f = V.$('[data-file]', d); start(it, { quality: q, asFile: !stored || (f && f.checked) }); } }],
     });
   }
@@ -57,6 +132,28 @@ V.downloads = (function () {
     var r = queue.shift();
     active = { r: r, ac: new AbortController() };
     r.status = 'downloading'; save(r);
+    if (r.u && !r.viaServer) {
+      var ac = active.ac, wd = null;
+      r.direct = true;
+      navigator.storage.getDirectory().then(function (dir) { return dir.getFileHandle(fileName(r.k), { create: true }); })
+        .then(function (fh) { return fh.createWritable(); })
+        .then(function (w) { wd = w; return directTo(r.u, w, r, ac); })
+        .then(function () { return wd.close(); })
+        .then(function () {
+          r.status = 'done'; r.doneAt = Date.now();
+          return navigator.storage.getDirectory().then(function (dir) { return dir.getFileHandle(fileName(r.k)); }).then(function (fh) { return fh.getFile(); }).then(function (f) { r.size = r.bytes = f.size; });
+        })
+        .then(function () { save(r); V.toast('Downloaded: ' + r.n); active = null; pump(); }, function (e) {
+          var stop = function () { active = null; };
+          (wd ? wd.abort().catch(function () {}) : Promise.resolve()).then(function () {
+            if (e && e.name === 'AbortError' || ac.signal.aborted) { r.status = 'cancelled'; stop(); remove(r.k, true); pump(); return; }
+            // The provider doesn't let web pages read it (or the file is something else): the server does it.
+            r.viaServer = true; r.direct = false; r.bytes = 0; r.progress = 0; stop();
+            queue.unshift(r); pump();
+          });
+        });
+      return;
+    }
     var res, w, reader, last = 0;
     // Copy the download into the app's private storage piece by piece.
     var copy = function () {
@@ -121,7 +218,7 @@ V.downloads = (function () {
     if (p && p.w && r && r.status === 'done') remove(k, true);
   });
 
-  return { start: start, remove: remove, play: play, load: load, list: function () { return Array.from(items.values()).sort(function (a, b) { return b.at - a.at; }); }, canStore: canStore, retry: function (k) { var r = items.get(k); if (r) { r.status = 'queued'; r.bytes = 0; save(r); queue.push(r); pump(); } } };
+  return { start: start, remove: remove, play: play, load: load, list: function () { return Array.from(items.values()).sort(function (a, b) { return b.at - a.at; }); }, canStore: canStore, retry: function (k) { var r = items.get(k); if (r) { r.status = 'queued'; r.bytes = 0; r.viaServer = false; save(r); queue.push(r); pump(); } } };
 })();
 
 V.route('downloads', function (view) {
@@ -132,8 +229,8 @@ V.route('downloads', function (view) {
       (list.length ? '<ul class="dl-list">' + list.map(function (r) {
         var pct = r.size ? r.bytes / r.size : 0;
         return '<li data-k="' + V.esc(r.k) + '">' + V.art(r.i, r.n, 'art dl-art') + '<div class="dl-b"><b>' + V.esc(r.show ? r.show + ' · S' + r.s + ':E' + r.e : r.n) + '</b>' +
-          '<span class="dim">' + (r.status === 'done' ? V.fmtSize(r.size) + (r.quality ? ' · ' + r.quality + 'p' : '') : r.status === 'downloading' ? V.fmtSize(r.bytes) + (r.size ? ' of ' + V.fmtSize(r.size) : ' (converting on the server)') : r.status === 'failed' ? 'Failed: ' + V.esc(r.error || '') : 'Waiting…') + '</span>' +
-          (r.status === 'downloading' ? '<span class="bar"><i style="width:' + (r.size ? pct * 100 : 30) + '%"' + (r.size ? '' : ' class="indet"') + '></i></span>' : '') + '</div>' +
+          '<span class="dim">' + (r.status === 'done' ? V.fmtSize(r.size) + (r.quality ? ' · ' + r.quality + 'p' : '') : r.status === 'downloading' ? (r.progress !== undefined && r.direct && !r.size ? 'Converting in this browser · ' + Math.round(r.progress * 100) + '%' : V.fmtSize(r.bytes) + (r.size ? ' of ' + V.fmtSize(r.size) : r.direct ? ' (straight from the provider)' : ' (converting on the server)')) : r.status === 'failed' ? 'Failed: ' + V.esc(r.error || '') : 'Waiting…') + '</span>' +
+          (r.status === 'downloading' ? (r.progress !== undefined && r.direct && !r.size ? '<span class="bar"><i style="width:' + Math.round(r.progress * 100) + '%"></i></span>' : '<span class="bar"><i style="width:' + (r.size ? pct * 100 : 30) + '%"' + (r.size ? '' : ' class="indet"') + '></i></span>') : '') + '</div>' +
           (r.status === 'done' ? '<button class="btn sm primary" data-d="play">' + V.icon('play') + ' Play</button>' : r.status === 'failed' ? '<button class="btn sm" data-d="retry">Retry</button>' : '') +
           '<button class="icon-btn" data-d="del" aria-label="Delete download">' + V.icon('trash') + '</button></li>';
       }).join('') + '</ul>' : V.empty('No downloads', 'Use ' + V.icon('download', 'tiny') + ' on a movie or episode to watch it without a connection.')) +

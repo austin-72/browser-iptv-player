@@ -92,11 +92,24 @@ When a page's JavaScript reads video from another site, the browser asks that si
 2. **Direct, built-in player.** No permission needed:
    - MP4/WebM films play in every browser;
    - HLS plays on Safari, iPhone/iPad, Android, most smart TVs and current Chrome/Edge.
-3. **Direct, HLS copy.** A raw MPEG-TS channel from an Xtream Codes panel is also served as HLS (`/live/user/pass/123.m3u8`), which routes 1, 2 or 4 can use.
+3. **Direct, HLS copy.** A raw MPEG-TS channel from an Xtream Codes panel is also served as HLS (`/live/user/pass/123.m3u8`), which routes 1, 2 or 4 can use. The player also tries that address with the browser's own HLS player when the account doesn't list HLS, since that needs no permission.
 4. **Direct video, playlist via the server.** When only the playlists are blocked, the server passes on the playlist text (a few KB every few seconds) and the browser fetches all the video straight from the provider.
-5. **Through the server (relay).** This is the last resort, for streams that are blocked completely, need special headers, or are http on an https page. It still uses one provider connection per viewer, as direct would.
-6. **Convert.** When the browser can't decode the format (AC-3 audio, HEVC on some browsers, MKV/AVI, UDP/RTMP), ffmpeg repackages or transcodes it.
-7. **Backup sources.** When the same channel appears in several lists, any copy can take over.
+5. **Another copy, direct.** When this copy could only go through the server, the player checks up to three other copies of the title (other providers) for a direct route first, skipping any whose connection someone in the household is using.
+6. **Converted in the browser.** MKV and MPEG-TS films and episodes, and files whose sound browsers can't play (AC-3, E-AC-3, FLAC), are read straight from the provider and turned into something the browser plays, inside the page. It uses [Mediabunny](https://mediabunny.dev) (MPL-2.0, in `public/vendor/`) with its WebAssembly AC-3/E-AC-3 decoder. The picture is copied as it is (or re-encoded when the browser can't take it), and the sound becomes AAC or Opus. Seeking within what's loaded is instant; further away it starts again from there. It needs WebCodecs (Chrome, Edge, Safari 16.4+, Firefox 130+) and a provider that lets web pages read its files. Turn it off for a profile with the `noBrowserConvert` preference.
+7. **Through the server (relay).** This is the last resort, for streams that are blocked completely, need special headers, or are http on an https page. It still uses one provider connection per viewer, as direct would.
+8. **Convert on the server.** For what's left: DTS sound, live channels with AC-3 sound, UDP/RTMP, a quality you picked, or a provider that doesn't let web pages read its files. ffmpeg repackages or transcodes it.
+9. **Backup sources.** When the same channel appears in several lists, any copy can take over.
+
+**Which copy plays first.** For films and episodes, the browser tells the server what it plays by itself (MKV, HEVC, Dolby sound, in-browser conversion). The server ranks each copy: an MP4 with AAC sound plays as it is; an MKV with H.264 + AAC plays as it is in Chrome and Edge; others need converting. The ranking uses the codecs the Xtream provider reports for each episode and film.
+
+**http streams on an https site.** Browsers refuse plain-http video on an https page unless the viewer allows *insecure content* for the site (Chrome/Edge: the icon left of the address → Site settings → Insecure content → Allow). The player checks whether this browser allows it and then plays such streams directly. Settings → http streams shows the state and the steps, and the player suggests it once when an http stream goes through the server.
+
+**Downloads, casting and audio tracks.**
+- Downloads in the original quality come straight from the provider when it allows that: as they are, or converted to MP4 in the browser. In Chrome/Edge, "save as a file" streams straight to the file you pick.
+- Casting gives the Chromecast the provider's own address when it can play it, and the server's otherwise.
+- Sound tracks are switched by the browser itself where it lists them, or by the in-browser conversion.
+
+The routes that still need the server: streams that need headers browsers can't send; an admin's proxy for video; RTMP/RTSP/UDP; DTS sound; subtitles stored inside a file (the server reads them); your own media folders; and preview pictures and intro detection, which are background work, not watching.
 
 **The direct-streams helper.** On desktop Chrome, Edge, Brave or Opera, a small browser extension makes *every* stream direct. Settings → Direct streaming has a download button and three steps. It only adds the permission header to responses for requests made by this site's pages; nothing else is touched. The source is in `extension/`. Firefox can load it too, but only until the next restart.
 

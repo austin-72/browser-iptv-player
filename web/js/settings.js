@@ -43,12 +43,21 @@ V.route('settings', function (view) {
     '<label class="check"><input type="checkbox" data-askprofile' + (V.ls.get('askProfile', false) ? ' checked' : '') + '><span>Ask “Who’s watching?” every time the app opens on this device</span></label>' +
     '<div class="btn-row">' + (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
-    V.directHelperSection() +
+    V.mixedSection() + V.directHelperSection() +
 
     (!pr.admin ? '<section class="card-sec danger-zone"><h2>Remove this profile</h2><p class="dim">Deletes your history, lists and settings.</p><button class="btn danger" data-a="delete">Remove my profile</button></section>' : '') +
     '<p class="dim small center">' + V.esc((S.settings.brand || {}).name) + ' · version ' + V.esc(S.settings.version) + '</p>' +
     (S.settings.tmdb ? '<p class="dim small center tmdb-credit">' + 'Data and images from ' + V.TMDB_LOGO + '.<br>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>' : '') + '</div>';
 
+  // http streams on this https site: does this browser let them through?
+  var ms = V.$('.mixed-state', view);
+  if (ms) {
+    var hit = null;
+    // (Addresses on this machine are always allowed, so they say nothing: use a provider's.)
+    for (var mi = 0; mi < S.items.length && !hit; mi++) if (/^http:/i.test(S.items[mi].u || '') && !/^http:\/\/(localhost|127\.|\[::1\])/i.test(S.items[mi].u)) hit = S.items[mi].u;
+    if (!hit) ms.textContent = 'None of the streams here use plain http.';
+    else V.mixedOk(hit).then(function (ok) { ms.innerHTML = ok ? V.icon('check', 'tiny ok') + ' Allowed in this browser — http streams play straight from the provider.' : V.icon('info', 'tiny') + ' Not allowed in this browser yet, so http streams play through the server.'; });
+  }
   view.addEventListener('change', function (e) {
     var t = e.target;
     if (t.hasAttribute('data-askprofile')) { V.ls.set('askProfile', t.checked); V.toast(t.checked ? 'This device will ask who’s watching' : 'This device opens straight into your profile'); return; }
@@ -82,6 +91,7 @@ V.route('settings', function (view) {
     else if (a === 'install' && V.installPrompt) { V.installPrompt.prompt(); V.installPrompt = null; }
     else if (a === 'keys') V.shortcutsHelp();
     else if (a === 'pair') V.pairDialog();
+    else if (a === 'mixedhelp') V.mixedHelp();
     else if (a === 'delete') V.prompt('Remove your profile? Enter your PIN (or leave empty if you have none) to confirm.', { type: 'password', ok: 'Remove' }).then(function (pin) { if (pin === null) return; V.del('/api/me', { pin: pin }).then(function () { V.leaveProfile(); }).catch(V.fail); });
   });
 });
@@ -129,6 +139,15 @@ V.directHelperSection = function () {
     (chromium ? '<ol class="steps"><li><a class="btn sm" href="/api/direct-helper.zip" download>' + V.icon('download') + ' Download the helper</a> and unzip it.</li><li>Open <code>' + where + '</code> and turn on <b>Developer mode</b>.</li><li>Click <b>Load unpacked</b> and choose the unzipped folder.</li><li>Reload this page.</li></ol>'
       : '<p class="dim small">Firefox can only load it until the next restart: <a href="/api/direct-helper.zip" download>download it</a>, unzip, then open <code>about:debugging</code> → This Firefox → Load Temporary Add-on → pick <code>manifest.json</code>. Chrome and Edge keep it permanently.</p>') +
     '</section>';
+};
+
+/** On an https address: whether this browser plays the providers' plain-http streams directly, and how to let it. */
+V.mixedSection = function () {
+  if (location.protocol !== 'https:' || S.settings.routing === 'server') return '';
+  var how = V.mixedHowTo();
+  return '<section class="card-sec"><h2>http streams</h2><p class="dim">This site is https. Streams sent over plain http only play straight from the provider when this browser allows “insecure content” for this site; otherwise they go through the server.</p>' +
+    '<p class="mixed-state dim">' + V.icon('clock', 'tiny') + ' Checking…</p>' +
+    (how ? '<button class="btn" data-a="mixedhelp">How to allow it in ' + how.browser + '</button>' : '') + '</section>';
 };
 
 /** TMDB's required attribution notice, with a link to them, shown wherever TMDB data is in use. */

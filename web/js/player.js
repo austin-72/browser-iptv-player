@@ -56,6 +56,7 @@ var MODE_LABEL = {
   'split:hls': 'Direct video · playlist via the server', 'split:dash': 'Direct video · manifest via the server',
   'native:hls': 'Direct · built-in player', 'native:native': 'Direct · built-in player', 'helper': 'Direct · via the browser helper',
   'local:native': 'From the server', 'session:remux': 'Server conversion (remux)', 'session:transcode': 'Server conversion (transcode)',
+  'browser:mb': 'Direct · converted in this browser',
 };
 
 V.Player = function (host) {
@@ -176,10 +177,10 @@ PP.load = function (it, opts) {
       console.warn('[player] attempt failed', a.via, a.kind || a.mode, e.message);
       self._teardownMedia();
       // The browser can't decode it: another route to the same bytes won't help — go straight to conversion.
-      if (/decode|format|codec/i.test(e.message) && a.via !== 'session') { var rest = plan.slice(i + 1).filter(function (x) { return x.via === 'session'; }); plan = plan.slice(0, i + 1).concat(rest); }
+      if (/decode|format|codec/i.test(e.message) && a.via !== 'session') { var rest = plan.slice(i + 1).filter(function (x) { return x.via === 'session' || (x.via === 'browser' && a.via !== 'browser'); }); plan = plan.slice(0, i + 1).concat(rest); }
       // The server said the provider allows this, but it didn't load: have it check again next time.
       if (a.via === 'direct' && !a.native && !a.helper && a.kind !== 'native' && !/decode|format|codec/i.test(e.message)) V.api('/api/play/reach', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: self.alt, url: it.t === 'catchup' ? it.u : undefined, origin: location.origin, forget: true } }).catch(function () {});
-      if (i < plan.length - 1) self._msg({ spin: true, title: plan[i + 1].via === 'relay' ? 'Connecting through the server…' : plan[i + 1].via === 'session' ? 'Converting on the server…' : 'Trying another way…' });
+      if (i < plan.length - 1) self._msg({ spin: true, title: plan[i + 1].via === 'relay' ? 'Connecting through the server…' : plan[i + 1].via === 'session' ? 'Converting on the server…' : plan[i + 1].via === 'browser' ? 'Converting in this browser…' : 'Trying another way…' });
       return next(i + 1);
     });
   };
@@ -192,7 +193,7 @@ PP.load = function (it, opts) {
   };
   return (pickSource ? this._sources(it, token, opts) : Promise.resolve(true)).then(function (go) {
     if (!go || token !== self.token) return;
-    return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force)).then(function (p) {
+    return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
       plan = p;
       return next(0);
     }, function (e) { if (token === self.token) self._failed(e); });
@@ -202,7 +203,9 @@ PP.load = function (it, opts) {
   /** Picks the copy to play (see /api/play/sources). Returns false when it asked the viewer something instead. */
 PP._sources = function (it, token, opts) {
   var self = this;
-  return V.api('/api/play/sources', { body: { k: it.k, origin: location.origin } }).then(function (r) { return self._useSources(r, it, token, opts); }, function () { return true; });
+  return (location.protocol === 'https:' && /^http:/i.test(it.u || '') ? V.mixedOk(it.u) : Promise.resolve(false)).then(function (mok) {
+    return V.api('/api/play/sources', { body: { k: it.k, origin: location.origin, caps: V._caps || (V._caps = V.playCaps()), mixedOk: mok || undefined } });
+  }).then(function (r) { return self._useSources(r, it, token, opts); }, function () { return true; });
 };
 PP._useSources = function (r, it, token, opts) {
   if (token !== this.token) return false;
@@ -233,6 +236,8 @@ PP._useSources = function (r, it, token, opts) {
   }
   var first = srcs[0];
   this.alt = first.alt;
+  this._connLimit = first.limit || 0;
+  this._busyAlts = srcs.filter(function (x) { return x.busy; }).map(function (x) { return x.alt; });
   this._altsLeft = srcs.slice(1).map(function (x) { return x.alt; });
   // An http-only provider on an https page: browsers block it, so the stream would have to go through the server.
   // With a direct (http) address set up, this device can switch to it and play straight from the provider.
@@ -268,6 +273,31 @@ Object.defineProperty(PP, 'headers', { configurable: true, get: function () {
   return it.h || {};
 } });
 
+  /**
+   * This copy can only play through the server (its provider blocks web players, needs special headers…): if another
+   * copy of the same title can play straight from its provider, use that one instead (checks up to three).
+   */
+PP._directCopy = function (it, force, plan) {
+  var self = this;
+  var direct = function (p) { return p.some(function (a) { return a.via === 'direct' || a.via === 'split' || a.via === 'browser' || a.via === 'local'; }); };
+  if (force || direct(plan) || !this._altsLeft || !this._altsLeft.length || it.t === 'catchup') return Promise.resolve(plan);
+  var orig = { alt: this.alt, info: this.reachInfo, mok: this._mixedOk, vod: this.vod };
+  var busy = this._busyAlts || [];
+  var cands = this._altsLeft.filter(function (x) { return busy.indexOf(x) < 0; }).slice(0, 3); // (not one someone here is already using)
+  var token = this.token;
+  var at = function (i) {
+    if (i >= cands.length || token !== self.token) { self.alt = orig.alt; self.reachInfo = orig.info; self._mixedOk = orig.mok; self.vod = orig.vod; return plan; }
+    self.alt = cands[i];
+    return self._plan(it, force).then(function (p) {
+      if (!direct(p)) return at(i + 1);
+      // Use this copy; the first one stays as a backup.
+      self._altsLeft = [orig.alt].concat(self._altsLeft.filter(function (x) { return x !== cands[i]; }));
+      return p;
+    }, function () { return at(i + 1); });
+  };
+  return at(0);
+};
+
   /** The ways to try, best first (a promise). */
 PP._plan = function (it, force) {
   var self = this;
@@ -280,6 +310,8 @@ PP._planNow = function (it, force) {
   if (!url) throw new Error('This has no stream address.');
   var ff = S.settings.ffmpeg;
   var sessions = ff ? [{ via: 'session', mode: 'remux' }, { via: 'session', mode: 'transcode' }] : [];
+  // The sound didn't play (AC-3…): convert in this browser, else on the server.
+  if (force === 'browser') return [{ via: 'browser', kind: 'mb', url: (this.reachInfo && this.reachInfo.url) || url }].concat(ff ? [{ via: 'session', mode: 'remux' }] : []);
   if (force === 'remux' || force === 'transcode') {
     if (!ff) throw new Error('The server can’t convert videos (ffmpeg isn’t installed).');
     return [{ via: 'session', mode: force }];
@@ -306,15 +338,26 @@ PP._planNow = function (it, force) {
   var key = it.t === 'catchup' ? it.catchupOf : it.k;
   // Ask the server how this browser can reach the provider itself (it checks what the browser would be told).
   var fallback = function () { return self._planGuess(it, url, g, hasHeaders, mixed, routing, sessions, plan); };
-  if (!(routing !== 'server' && /^https?:/i.test(url) && g !== 'ffmpeg')) return fallback();
-  return V.api('/api/play/reach', { body: { k: key, alt: this.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent } }).then(null, function () { return null; }).then(function (info) {
+  if (!(routing !== 'server' && /^https?:/i.test(url))) return fallback();
+  // An http stream on this https page: fine when this browser has been told to allow it for the site.
+  return (mixed ? V.mixedOk(url) : Promise.resolve(false)).then(function (mok) {
+  if (mok) mixed = false;
+  self._mixedOk = mok;
+  return V.api('/api/play/reach', { body: { k: key, alt: self.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } }).then(null, function () { return null; }).then(function (info) {
     if (!info) return fallback();
+    // (A server from before it knew about this still says "blocked": go by what the browser said.)
+    if (info.blocked === 'mixed' && mok) { self.reachInfo = info; return fallback(); }
     {
       self.reachInfo = info;
       if (info.finite) self.vod = it.t !== 'live';
       if (!info.blocked && info.kind !== 'ffmpeg') plan = self._directRoutes(info, it);
       // MKV films whose codecs this browser decodes (Chrome, Edge): try the browser's own player first.
       if (info.kind === 'ffmpeg' && !info.blocked && V.mkvPlays(info.codecs)) plan = [{ via: 'direct', kind: 'native', url: info.url || url, mkv: true }];
+      // Files the provider lets this page read: this browser can convert them itself (MKV, AC-3 sound…) before the
+      // server has to.
+      // (For files the server doesn't ask whether the page may read them — a <video> doesn't need it — so the
+      // conversion finds out itself, at once.)
+      if (!info.blocked && !q && V.mbSupported() && (it.t === 'movie' || it.t === 'episode' || (info.finite && it.t !== 'live' && it.t !== 'radio')) && (info.kind === 'ffmpeg' || info.kind === 'native' || (info.kind === 'ts' && info.mse))) plan.push({ via: 'browser', kind: 'mb', url: info.url || url });
       if (info.kind === 'ffmpeg') return plan.concat(routing === 'direct-only' ? [] : sessions);
       if (routing === 'direct-only') {
         if (!plan.length) throw new Error(info.blocked === 'headers' ? 'This channel needs special headers that browsers can’t send. Ask the admin to allow playback through the server.' : info.blocked === 'mixed' ? 'This page is https but the stream is plain http, which browsers block. Ask the admin to allow playback through the server.' : 'The provider doesn’t let browsers play this directly. Ask the admin to allow playback through the server.');
@@ -323,6 +366,68 @@ PP._planNow = function (it, force) {
       plan.push({ via: 'relay', kind: info.kind === 'dash' ? 'dash' : '?', url: url });
       return info.kind === 'dash' && it.dr ? plan : plan.concat(sessions);
     }
+  });
+  });
+};
+
+/**
+ * Does this browser let this https page load plain-http addresses from the stream's host? Browsers block it ("mixed
+ * content") unless the viewer allows it for this site — Chrome/Edge: the icon left of the address → Site settings →
+ * Insecure content → Allow. A tiny request to the host answers it; remembered for the visit.
+ */
+V.mixedOk = (function () {
+  var memo = {};
+  return function (url) {
+    if (location.protocol !== 'https:' || !/^http:/i.test(url || '')) return Promise.resolve(true);
+    var m = /^http:\/\/([^/?#]+)/i.exec(url);
+    if (!m || !window.fetch) return Promise.resolve(false);
+    var host = m[1];
+    if (memo[host]) return memo[host];
+    memo[host] = new Promise(function (res) {
+      var t = setTimeout(function () { res(false); }, 4000);
+      fetch('http://' + host + '/favicon.ico', { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })
+        .then(function () { clearTimeout(t); res(true); }, function () { clearTimeout(t); res(false); });
+    }).then(function (ok) { (V._mixedHosts || (V._mixedHosts = {}))[host] = ok; return ok; });
+    return memo[host];
+  };
+})();
+/** Where this browser keeps the "Insecure content" switch for a site (null: it has none). */
+V.mixedHowTo = function () {
+  var ua = navigator.userAgent;
+  if (/SamsungBrowser|Tizen|Web0S|webOS|SMART-TV|CrKey|Android|iPhone|iPad/i.test(ua)) return null;
+  if (/Edg\//.test(ua)) return { browser: 'Edge', steps: ['Click the lock (or “Not secure”) icon to the left of the address.', 'Choose <b>Permissions for this site</b>.', 'Set <b>Insecure content</b> to <b>Allow</b>.', 'Reload this page.'] };
+  if (/Chrome\//.test(ua)) return { browser: 'Chrome', steps: ['Click the icon to the left of the address (the sliders or lock).', 'Choose <b>Site settings</b>.', 'Set <b>Insecure content</b> to <b>Allow</b>.', 'Come back to this tab and reload it.'] };
+  if (/Firefox\//.test(ua)) return { browser: 'Firefox', steps: ['Click the lock icon to the left of the address.', 'Click the arrow next to <b>Connection secure</b>.', 'Click <b>Disable protection for now</b> (Firefox asks again in a new visit).'] };
+  return null;
+};
+/** Once per device: playing an http stream through the server because of https — tell the viewer how to go direct. */
+V.mixedTip = function () {
+  var how = V.mixedHowTo();
+  if (!how || V.ls.get('mixedTipShown', 0)) return;
+  V.ls.set('mixedTipShown', Date.now());
+  V.toast('This plays through the server because the stream is http and this page is https. You can let ' + how.browser + ' play it directly.', { ms: 15000, action: { label: 'How', fn: V.mixedHelp } });
+};
+V.mixedHelp = function () {
+  var how = V.mixedHowTo();
+  V.dialog({
+    title: 'Play http streams directly',
+    body: '<p>Most providers send their streams over plain <b>http</b>. This site is <b>https</b>, and browsers refuse to load http video into an https page unless you allow it for this site — so those streams go through the server instead.</p>' +
+      (how ? '<p>In ' + how.browser + ':</p><ol>' + how.steps.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ol><p class="dim small">This only affects this site. Nothing else on the page changes.</p>' : '<p>This browser has no setting for it. Opening the site at its plain http address (on your home network) plays these streams directly.</p>'),
+    actions: [{ label: 'Close', value: true }, { label: 'Check now', primary: true, fn: function (d) {
+      var it = V.player && V.player.it;
+      var url = (it && (V.player.url || it.u)) || '';
+      // (Not playing one: any provider address that's plain http — not this machine's, which is always allowed.)
+      for (var mi = 0; mi < S.items.length && !/^http:/i.test(url); mi++) if (/^http:/i.test(S.items[mi].u || '') && !/^http:\/\/(localhost|127\.|\[::1\])/i.test(S.items[mi].u)) url = S.items[mi].u;
+      if (!/^http:/i.test(url)) { V.toast('None of the streams here use plain http.'); return false; }
+      return new Promise(function (res) { setTimeout(res, 50); }).then(function () {
+        var m = /^http:\/\/([^/?#]+)/i.exec(url);
+        return fetch('http://' + (m ? m[1] : '') + '/favicon.ico', { mode: 'no-cors', cache: 'no-store', credentials: 'omit' }).then(function () { return true; }, function () { return false; });
+      }).then(function (ok) {
+        V.toast(ok ? 'Allowed — http streams now play straight from the provider.' : 'Not allowed yet. Follow the steps, then reload the page.');
+        if (ok) setTimeout(function () { location.reload(); }, 1200);
+        return ok;
+      });
+    } }],
   });
 };
   /** The server couldn't check (or routing is server-only): the old way — guess, try direct, then the server. */
@@ -346,6 +451,7 @@ PP._planGuess = function (it, url, g, hasHeaders, mixed, routing, sessions, plan
     var order = { hls: ['hls'], ts: ['ts'], native: ['native'], dash: ['dash'], unknown: ['ts', 'hls', 'native'] }[g] || ['native'];
     order.forEach(function (k) { plan.push({ via: 'direct', kind: k, url: url }); });
   }
+  if (routing !== 'server' && !hasHeaders && !mixed && (g === 'ffmpeg' || g === 'native') && self.vod && !self._quality() && V.mbSupported()) plan.push({ via: 'browser', kind: 'mb', url: url });
   if (routing === 'direct-only') {
     if (!plan.length) throw new Error(hasHeaders ? 'This channel needs special headers that browsers can’t send. Ask the admin to allow playback through the server.' : mixed ? 'This page is https but the stream is plain http, which browsers block. Ask the admin to allow playback through the server.' : 'Browsers can’t play this format directly. Ask the admin to allow playback through the server.');
     return plan;
@@ -378,6 +484,13 @@ PP._directRoutes = function (info, it) {
     if (alt.mse) add({ via: 'direct', kind: 'hls', url: alt.url });
     if (V.nativePlays('hls')) add({ via: 'direct', kind: 'hls', native: true, url: alt.url });
     if (alt.split) add({ via: 'split', kind: 'hls', url: alt.splitUrl });
+  }
+  // 3b. The same, worked out here: Xtream Codes panels serve every raw TS channel as HLS too (…/123.ts →
+  // …/live/user/pass/123.m3u8), and browsers with their own HLS player (Safari, phones, TVs, Chrome 142+) need no
+  // permission for it. A wrong guess fails in a moment.
+  if (k === 'ts' && !info.mse && !alt && V.nativePlays('hls') && it.t === 'live') {
+    var xm = /^(https?:\/\/[^/]+)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.ts)?(\?.*)?$/.exec(u || '');
+    if (xm && xm[2] !== 'movie' && xm[2] !== 'series') add({ via: 'direct', kind: 'hls', native: true, url: xm[1] + '/live/' + xm[2] + '/' + xm[3] + '/' + xm[4] + '.m3u8' + (xm[5] || '') });
   }
   // 4. Playlists through the server (a few KB), all the video straight from the provider.
   if (k === 'hls' && info.split) add({ via: 'split', kind: 'hls', url: info.splitUrl });
@@ -415,7 +528,7 @@ PP._attempt = function (a, token, startAt) {
     v.addEventListener('error', onErr);
     v.addEventListener('canplay', onCanPlay);
     // Direct attempts give up quickly so the server can take over.
-    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'direct' || a.via === 'split' ? 12000 : 25000);
+    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'browser' ? 45000 : a.via === 'direct' || a.via === 'split' ? 12000 : 25000);
     self._failNow = fail;
     self._attach(a, token, startAt).catch(fail);
   });
@@ -486,6 +599,21 @@ PP._attachMedia = function (a, token, startAt, kind, url) {
     return (window.mpegts ? Promise.resolve() : V.loadScript('/vendor/mpegts.js')).then(function () { return self._attachTs(url); });
   } else if (kind === 'dash') {
     return this._attachDash(url, rel, bufGoal, a.via === 'relay' ? 'all' : a.via === 'split' ? 'manifest' : '', token).then(function () { if (token === self.token) self._play(); });
+  } else if (kind === 'mb') {
+    var lim = this._connLimit || 0;
+    return V.mbStart(v, url, this.vod ? (startAt || 0) : 0, {
+      parallel: lim && lim <= 2 ? 1 : 2,
+      audioTrack: this.audioTrack === undefined || this.audioTrack === null ? -1 : this.audioTrack,
+      lang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '',
+      onError: function (e) { if (token === self.token) self._fatal(new Error('The conversion in this browser stopped (' + (e && e.message || e) + ').')); },
+    }).then(function (ctl) {
+      if (token !== self.token) { ctl.stop(); return; }
+      self.mb = ctl;
+      if (ctl.audioTrack >= 0) self.audioTrack = ctl.audioTrack;
+      self.offset = ctl.offset;
+      self.sessionDuration = ctl.duration || 0;
+      self._play();
+    });
   } else {
     v.src = url;
     if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
@@ -732,6 +860,7 @@ PP._afterStart = function () {
   this._pickLangs();
   this._loadExtras();
   this._checkSound();
+  if (this._routeReason(this._routeName(this.attempt)) === 'https' || (this.attempt && this.attempt.via === 'session' && location.protocol === 'https:' && /^http:/i.test(this.url) && !this._mixedOk)) V.mixedTip();
   if (this.onPlaying) this.onPlaying(this);
   V.rt.presence({ k: this.it.t === 'catchup' ? this.it.catchupOf : this.it.k, n: this.it.n, pos: this.vod ? this.position : 0, alt: this.alt, force: true });
   this._mediaSession();
@@ -745,14 +874,16 @@ PP._afterStart = function () {
    */
 PP._checkSound = function () {
   var a = this.attempt, v = this.video, tok = this.token, self = this;
-  if (!a || a.via !== 'direct' || a.kind !== 'native' || !this.vod || v.webkitAudioDecodedByteCount === undefined || !S.settings.ffmpeg) return;
+  if (!a || a.via !== 'direct' || a.kind !== 'native' || !this.vod || v.webkitAudioDecodedByteCount === undefined) return;
+  if (!S.settings.ffmpeg && !(this.reachInfo && this.reachInfo.mse && V.mbSupported())) return;
   var t0 = v.currentTime;
   setTimeout(function () {
     if (tok !== self.token || v.paused || v.muted || v.currentTime - t0 < 1.5) return;
     if (v.webkitAudioDecodedByteCount === 0 && !(v.audioTracks && v.audioTracks.length === 0)) {
       if (a.mkv) V.ls.set('mkvSoundFail', (V.ls.get('mkvSoundFail', 0) || 0) + 1);
-      self.osd('No sound from this file — converting on the server…', 2500);
-      self.load(self.it, { force: 'remux', startAt: self.position, quiet: true, alt: self.alt });
+      var here = self.reachInfo && self.reachInfo.mse && V.mbSupported();
+      self.osd(here ? 'No sound from this file — converting it in this browser…' : 'No sound from this file — converting on the server…', 2500);
+      self.load(self.it, { force: here ? 'browser' : 'remux', startAt: self.position, quiet: true, alt: self.alt });
     }
   }, 4000);
 };
@@ -762,6 +893,7 @@ PP._checkSound = function () {
 PP._routeName = function (a) {
   if (!a) return '';
   if (a.via === 'direct') return a.helper ? 'helper' : (a.native || a.kind === 'native') ? 'native' : 'direct';
+  if (a.via === 'browser') return S.settings && (S.settings.features || []).indexOf('browserRoute') >= 0 ? 'browser' : 'direct';
   return { split: 'split', relay: 'relay', session: 'convert', local: 'local' }[a.via] || '';
 };
   /** Why a stream went through the server. */
@@ -835,6 +967,7 @@ PP._teardownMedia = function () {
   if (this.shaka) { var sp = this.shaka; this.shaka = null; this._shakaGone = sp.destroy().catch(function () {}); }
   clearInterval(this._pinger);
   if (this.sessionId) { V.api('/api/session/' + this.sessionId, { method: 'DELETE', keepalive: true }).catch(function () {}); this.sessionId = null; }
+  if (this.mb) { this.mb.stop(); this.mb = null; }
   var v = this.video;
   try { v.pause(); } catch (e) {}
   V.$$('track', v).forEach(function (t) { t.remove(); });
@@ -866,7 +999,7 @@ PP.stop = function () {
 };
 
   // ------------------------------------------------------------ position
-Object.defineProperty(PP, 'base', { configurable: true, get: function () { return (this.sessionId ? this.offset : 0) + ((this.it && this.it.startOffset) || 0); } });
+Object.defineProperty(PP, 'base', { configurable: true, get: function () { return (this.sessionId || this.mb ? this.offset : 0) + ((this.it && this.it.startOffset) || 0); } });
 Object.defineProperty(PP, 'position', { configurable: true, get: function () { return this.base + (this.video.currentTime || 0); } });
 Object.defineProperty(PP, 'duration', { configurable: true, get: function () {
   if (this.it && this.it.t === 'catchup') return this.it.d;
@@ -894,6 +1027,12 @@ PP.seek = function (t, fromRemote) {
   if (this.it.t === 'catchup') {
     if (rel >= 0 && rel <= end - 2) v.currentTime = rel;
     else if (this.onCatchupSeek) this.onCatchupSeek(this.it, t);
+  } else if (this.mb) {
+    // Converting in this browser: within what's ready, just move; elsewhere, start converting from there.
+    var b = v.buffered, inside = false;
+    for (var bi = 0; bi < b.length; bi++) if (rel >= b.start(bi) && rel <= b.end(bi) - 1) inside = true;
+    if (inside) v.currentTime = rel;
+    else this.load(this.it, { startAt: t, only: this.attempt, quiet: true, alt: this.alt });
   } else if (!this.sessionId) v.currentTime = t;
   else if (rel >= 0 && rel <= end - 2) v.currentTime = rel;
   else this.load(this.it, { startAt: t, only: this.attempt, quiet: true, alt: this.alt });
@@ -1080,8 +1219,10 @@ PP._loadExtras = function () {
   if (this.sessionInfo) this._fileTracks = { audio: this.sessionInfo.audio || [], subs: this.sessionInfo.subs || [] };
   else if (S.settings.ffmpeg && !this.hls && !this.shaka && !this.mts) {
     var me = this;
-    V.api('/api/probe/' + encodeURIComponent(it.k) + '?alt=' + this.alt).then(function (p) { if (tok === me.token) { me._fileTracks = { audio: p.audio || [], subs: (p.subs || []).filter(function (s) { return s.text; }) }; me._menuRefresh(); me._autoSubs(); } }).catch(function () {});
-  }
+    // (Converting in this browser: it already knows the sound tracks; the server only looks for subtitles.)
+    if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
+    V.api('/api/probe/' + encodeURIComponent(it.k) + '?alt=' + this.alt).then(function (p) { if (tok === me.token) { me._fileTracks = { audio: me.mb ? me.mb.audioTracks || [] : p.audio || [], subs: (p.subs || []).filter(function (s) { return s.text; }) }; me._menuRefresh(); me._autoSubs(); } }).catch(function () {});
+  } else if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
   if (this.sessionInfo) this._autoSubs();
   if (it.t === 'episode' || it.t === 'movie') {
     var me2 = this;
@@ -1119,6 +1260,14 @@ PP.fileSub = function (i) {
   /** Switches to another audio track in the file (restarts the conversion at the same spot). */
 PP.fileAudio = function (i) {
   this.audioTrack = i;
+  var v = this.video, a = this.attempt;
+  // The browser's own player can switch itself where it lists the tracks (Safari; Chrome with a flag).
+  if (a && a.via === 'direct' && a.kind === 'native' && v.audioTracks && v.audioTracks.length > i) {
+    for (var j = 0; j < v.audioTracks.length; j++) v.audioTracks[j].enabled = j === i;
+    return this._menuRefresh();
+  }
+  // Converting in this browser: start again on that track, at the same spot.
+  if (this.mb) return this.load(this.it, { startAt: this.position, only: a, quiet: true, alt: this.alt });
   this.load(this.it, { force: 'remux', startAt: this.position, quiet: true, alt: this.alt });
 };
 
@@ -1156,7 +1305,11 @@ PP._tracks = function () {
     var tt = Array.prototype.slice.call(v.textTracks);
     out.subs = { value: (tt.filter(function (t) { return t.mode === 'showing'; })[0] || {}).label || 'Off', items: [{ label: 'Off', on: tt.every(function (t) { return t.mode !== 'showing'; }), fn: function () { tt.forEach(function (t) { t.mode = 'disabled'; }); } }].concat(tt.map(function (t, i) { return { label: t.label || V.langName(t.language) || 'Track ' + (i + 1), on: t.mode === 'showing', fn: function () { tt.forEach(function (x) { x.mode = x === t ? 'showing' : 'disabled'; }); } }; })) };
   }
-  if (ft && ft.audio.length > 1 && !out.audio && S.settings.ffmpeg) {
+  if (!out.audio && !(ft && ft.audio.length > 1) && v.audioTracks && v.audioTracks.length > 1) {
+    var at = Array.prototype.slice.call(v.audioTracks);
+    out.audio = { value: (at.filter(function (t) { return t.enabled; })[0] || {}).label || '', items: at.map(function (t, i) { return { label: t.label || V.langName(t.language) || 'Track ' + (i + 1), on: t.enabled, fn: function () { self.fileAudio(i); } }; }) };
+  }
+  if (ft && ft.audio.length > 1 && !out.audio && (S.settings.ffmpeg || this.mb)) {
     out.audio = { value: (ft.audio[this.audioTrack || 0] || {}).title || V.langName((ft.audio[this.audioTrack || 0] || {}).lang) || 'Track ' + ((this.audioTrack || 0) + 1), items: ft.audio.map(function (a) { return { label: [a.title || V.langName(a.lang) || 'Track ' + (a.i + 1), a.codec ? a.codec.toUpperCase() : '', a.channels > 2 ? a.channels + 'ch' : ''].filter(Boolean).join(' · '), on: (self.audioTrack || 0) === a.i, fn: function () { self.fileAudio(a.i); } }; }) };
   }
   return out;
@@ -1571,12 +1724,28 @@ V.setSleep = function (min) {
 };
 
 /** Can the browser's own player handle this MKV (from the provider's codec info)? Chrome and Edge usually can. */
+/** What this browser plays by itself (sent to the server so it can pick the copy that needs no conversion). */
+V.playCaps = function () {
+  var c = V.codecs();
+  var MS = window.ManagedMediaSource || window.MediaSource;
+  var v = document.createElement('video');
+  var ok = function (t) { try { return (MS && MS.isTypeSupported(t)) || v.canPlayType(t) === 'probably'; } catch (e) { return false; } };
+  return {
+    mkv: V.mkvBrowser(), hevc: c.indexOf('hevc') >= 0, vp9: c.indexOf('vp9') >= 0, av1: c.indexOf('av1') >= 0,
+    ac3: ok('audio/mp4; codecs="ac-3"'), eac3: ok('audio/mp4; codecs="ec-3"'), mb: V.mbSupported(),
+  };
+};
+/** Chrome and Edge (not the TV versions) play MKV files themselves. */
+V.mkvBrowser = function () {
+  if ((V.ls.get('mkvSoundFail', 0) || 0) >= 3) return false; // this device keeps failing: stop trying
+  return /Chrome\//.test(navigator.userAgent) && !/SamsungBrowser|Tizen|Web0S|webOS|SMART-TV/i.test(navigator.userAgent);
+};
 V.mkvPlays = function (c) {
   if (!c || !c.v) return false;
-  if ((V.ls.get('mkvSoundFail', 0) || 0) >= 3) return false; // this device keeps failing: stop trying
-  if (!/Chrome\//.test(navigator.userAgent) || /SamsungBrowser|Tizen|Web0S|webOS|SMART-TV/i.test(navigator.userAgent)) return false;
+  if (!V.mkvBrowser()) return false;
   var vOk = c.v === 'h264' ? !/10|12|422|444/.test(c.pix || '') : c.v === 'vp9' || c.v === 'av1' ? V.codecs().indexOf(c.v) >= 0 : (c.v === 'hevc' || c.v === 'h265') && V.codecs().indexOf('hevc') >= 0;
-  var aOk = !c.a || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].indexOf(c.a) >= 0;
+  var caps = V._caps || (V._caps = V.playCaps());
+  var aOk = !c.a || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].indexOf(c.a) >= 0 || (c.a === 'ac3' && caps.ac3) || (c.a === 'eac3' && caps.eac3);
   return vOk && aOk;
 };
 
