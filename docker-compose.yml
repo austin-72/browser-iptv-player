@@ -1,0 +1,27 @@
+# docker compose up -d   →   open http://<this computer's IP>:8080
+services:
+  iptv:
+    build: .
+    image: browser-iptv-player:latest
+    container_name: iptv
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # this computer's port : the app's port (keep the second number equal to PORT)
+    environment:
+      - TZ=America/Chicago
+      - PORT=8080
+      # The site password used the very first time (change it in Admin → Security afterwards):
+      # - SITE_PASSWORD=changeme
+      # Domain names this server answers to while the default password is in use (IPs and .local names always work):
+      # - ALLOWED_HOSTS=tv.example.com
+      # Behind a reverse proxy (Caddy, nginx, Traefik) that adds https:
+      # - TRUST_PROXY=1
+      # Hardware transcoding (also uncomment "devices" below): vaapi | qsv | nvenc
+      # - HWACCEL=vaapi
+    volumes:
+      - ./data:/data
+      # Folders of your own videos, read-only. Add them in Admin → Lists → "Folder on the server" as /media/…
+      # - /path/to/your/movies:/media/movies:ro
+      # - /path/to/your/shows:/media/shows:ro
+    # devices:
+    #   - /dev/dri:/dev/dri

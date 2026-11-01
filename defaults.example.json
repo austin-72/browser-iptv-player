@@ -1,0 +1,10 @@
+{
+  "brand": {
+    "name": "IPTV Player",
+    "accent": ""
+  },
+  "sitePassword": "changeme",
+  "port": 8080,
+  "allowedHosts": [],
+  "trustProxy": false
+}

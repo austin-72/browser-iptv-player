@@ -1,0 +1,150 @@
+/* Downloads for watching offline. On https (or the server's own computer) videos are kept inside the app;
+   otherwise they're saved as an MP4 file. The server converts anything a browser can't play. */
+'use strict';
+V.downloads = (function () {
+  var queue = [];
+  var active = null;
+  var items = new Map(); // k -> record
+  var canStore = function () { return window.isSecureContext && navigator.storage && navigator.storage.getDirectory && window.FileSystemFileHandle && 'createWritable' in FileSystemFileHandle.prototype; };
+  var fileName = function (k) { return 'dl-' + k.replace(/[^\w-]/g, '_'); };
+
+  function load() {
+    return V.idb.all('dl').then(function (list) {
+      items.clear();
+      // An interrupted download starts over; waiting ones go back in the queue (they'd otherwise wait forever).
+      (list || []).forEach(function (r) { if (r.status === 'downloading') r.status = 'failed'; items.set(r.k, r); if (r.status === 'queued' && queue.indexOf(r) < 0) queue.push(r); });
+      V.emit('downloads');
+      if (queue.length && S.profile && S.profile.id) pump();
+    });
+  }
+  function save(r) { items.set(r.k, r); V.idb.set(r.k, r, 'dl'); V.emit('downloads'); }
+
+  function start(it, opts) {
+    opts = opts || {};
+    if (!S.settings.allowDownloads && !S.profile.admin) return V.toast('Downloads are turned off on this server.', { error: true });
+    if (it.t === 'live' || it.t === 'show') return V.toast('Only movies, episodes and audio can be downloaded.', { error: true });
+    if (opts.quality === undefined) return chooser(it);
+    var url = '/api/download/' + encodeURIComponent(it.k) + (opts.quality ? '?height=' + opts.quality : '');
+    if (!canStore() || opts.asFile) {
+      var a = document.createElement('a');
+      a.href = url; a.download = '';
+      document.body.appendChild(a); a.click(); a.remove();
+      V.toast('Download started — the server converts it to MP4 if needed.');
+      return;
+    }
+    var show = V.showOf(it);
+    var r = { k: it.k, n: it.n, t: it.t, i: it.i || (show || {}).i || '', sk: it.sk || '', show: show ? show.n : '', s: it.s, e: it.e, et: it.et, d: it.d || 0, pid: S.profile.id, status: 'queued', bytes: 0, size: 0, at: Date.now(), quality: opts.quality || 0 };
+    save(r);
+    queue.push(r);
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
+    V.toast('Added to Downloads', { action: { label: 'View', fn: function () { V.router.go('#/downloads'); } } });
+    pump();
+  }
+
+  function chooser(it) {
+    var stored = canStore();
+    V.dialog({
+      title: 'Download “' + it.n + '”',
+      body: '<label class="field"><span>Quality</span><select class="input" data-q><option value="0">Original</option><option value="1080">1080p</option><option value="720" selected>720p (smaller)</option><option value="480">480p (smallest)</option></select></label>' +
+        (stored ? '<label class="check"><input type="checkbox" data-file><span>Save as a file on this device instead of inside the app</span></label>' : '<p class="dim small">This address isn’t secure (https), so the video is saved as an MP4 file you open with any player. On https it can be kept inside the app for offline watching.</p>') +
+        '<p class="dim small">Anything a browser can’t play is converted to MP4 on the server while it downloads.</p>',
+      actions: [{ label: 'Cancel' }, { label: 'Download', primary: true, fn: function (d) { var q = +V.$('[data-q]', d).value; var f = V.$('[data-file]', d); start(it, { quality: q, asFile: !stored || (f && f.checked) }); } }],
+    });
+  }
+
+  async function pump() {
+    if (active || !queue.length) return;
+    var r = queue.shift();
+    active = { r: r, ac: new AbortController() };
+    r.status = 'downloading'; save(r);
+    try {
+      var res = await fetch('/api/download/' + encodeURIComponent(r.k) + (r.quality ? '?height=' + r.quality : ''), { signal: active.ac.signal, credentials: 'same-origin' });
+      if (!res.ok) { var j = await res.json().catch(function () { return {}; }); throw new Error(j.error || 'HTTP ' + res.status); }
+      r.size = Number(res.headers.get('Content-Length')) || 0;
+      r.dur = Number(res.headers.get('X-Duration')) || r.d || 0;
+      r.type = res.headers.get('Content-Type') || 'video/mp4';
+      var dir = await navigator.storage.getDirectory();
+      var fh = await dir.getFileHandle(fileName(r.k), { create: true });
+      var w = await fh.createWritable();
+      var reader = res.body.getReader();
+      var last = 0;
+      for (;;) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        await w.write(chunk.value);
+        r.bytes += chunk.value.length;
+        if (Date.now() - last > 700) { last = Date.now(); save(r); }
+      }
+      await w.close();
+      r.status = 'done'; r.size = r.bytes; r.doneAt = Date.now();
+      save(r);
+      V.toast('Downloaded: ' + r.n);
+    } catch (e) {
+      if (e.name === 'AbortError') { r.status = 'cancelled'; remove(r.k, true); } else { r.status = 'failed'; r.error = e.message; save(r); V.toast('Download failed: ' + e.message, { error: true }); }
+    }
+    active = null;
+    pump();
+  }
+
+  async function remove(k, quiet) {
+    if (active && active.r.k === k) active.ac.abort();
+    queue = queue.filter(function (x) { return x.k !== k; });
+    try { var dir = await navigator.storage.getDirectory(); await dir.removeEntry(fileName(k)); } catch (e) {}
+    items.delete(k);
+    await V.idb.del(k, 'dl');
+    V.emit('downloads');
+    if (!quiet) V.toast('Removed from this device');
+  }
+
+  async function play(k) {
+    var r = items.get(k);
+    if (!r) return;
+    try {
+      var dir = await navigator.storage.getDirectory();
+      var fh = await dir.getFileHandle(fileName(k));
+      var file = await fh.getFile();
+      var url = URL.createObjectURL(file);
+      var base = V.entry(k) || { k: r.k, n: r.n, t: r.t, i: r.i, sk: r.sk, s: r.s, e: r.e, et: r.et, d: r.dur || r.d };
+      V.play(Object.assign({}, base, { offlineUrl: url, d: r.dur || base.d }));
+    } catch (e) { V.toast('That download is missing. Download it again.', { error: true }); }
+  }
+
+  // Remove downloads you've finished watching (if the profile wants that).
+  V.on('progress', function (k) {
+    if (!V.pref('autoDeleteWatched')) return;
+    var p = V.progressOf(k), r = items.get(k);
+    if (p && p.w && r && r.status === 'done') remove(k, true);
+  });
+
+  return { start: start, remove: remove, play: play, load: load, list: function () { return Array.from(items.values()).sort(function (a, b) { return b.at - a.at; }); }, canStore: canStore, retry: function (k) { var r = items.get(k); if (r) { r.status = 'queued'; r.bytes = 0; save(r); queue.push(r); pump(); } } };
+})();
+
+V.route('downloads', function (view) {
+  var draw = function () {
+    var list = V.downloads.list().filter(function (r) { return !S.profile || !S.profile.id || r.pid === S.profile.id || !r.pid; });
+    view.innerHTML = V.pageHead('Downloads', '<div class="page-tools"><span class="dim" data-usage></span></div>') +
+      (V.downloads.canStore() ? '' : '<p class="note">' + V.icon('info') + ' This address isn’t secure (https), so downloads are saved as MP4 files instead of inside the app. See the README to turn on https.</p>') +
+      (list.length ? '<ul class="dl-list">' + list.map(function (r) {
+        var pct = r.size ? r.bytes / r.size : 0;
+        return '<li data-k="' + V.esc(r.k) + '">' + V.art(r.i, r.n, 'art dl-art') + '<div class="dl-b"><b>' + V.esc(r.show ? r.show + ' · S' + r.s + ':E' + r.e : r.n) + '</b>' +
+          '<span class="dim">' + (r.status === 'done' ? V.fmtSize(r.size) + (r.quality ? ' · ' + r.quality + 'p' : '') : r.status === 'downloading' ? V.fmtSize(r.bytes) + (r.size ? ' of ' + V.fmtSize(r.size) : ' (converting on the server)') : r.status === 'failed' ? 'Failed: ' + V.esc(r.error || '') : 'Waiting…') + '</span>' +
+          (r.status === 'downloading' ? '<span class="bar"><i style="width:' + (r.size ? pct * 100 : 30) + '%"' + (r.size ? '' : ' class="indet"') + '></i></span>' : '') + '</div>' +
+          (r.status === 'done' ? '<button class="btn sm primary" data-d="play">' + V.icon('play') + ' Play</button>' : r.status === 'failed' ? '<button class="btn sm" data-d="retry">Retry</button>' : '') +
+          '<button class="icon-btn" data-d="del" aria-label="Delete download">' + V.icon('trash') + '</button></li>';
+      }).join('') + '</ul>' : V.empty('No downloads', 'Use ' + V.icon('download', 'tiny') + ' on a movie or episode to watch it without a connection.')) +
+      '<label class="check"><input type="checkbox" data-auto' + (V.pref('autoDeleteWatched') ? ' checked' : '') + '><span>Delete downloads automatically once watched</span></label>';
+    if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { var u = V.$('[data-usage]', view); if (u) u.textContent = V.fmtSize(e.usage || 0) + ' used of ' + V.fmtSize(e.quota || 0) + ' available'; });
+    var auto = V.$('[data-auto]', view);
+    if (auto) auto.onchange = function (e) { V.setPref('autoDeleteWatched', e.target.checked); };
+  };
+  draw();
+  view.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-d]'); if (!b) return;
+    var k = b.closest('[data-k]').dataset.k;
+    if (b.dataset.d === 'play') V.downloads.play(k);
+    else if (b.dataset.d === 'retry') V.downloads.retry(k);
+    else V.confirm('Delete this download from this device?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.downloads.remove(k); });
+  });
+  var off = V.on('downloads', V.throttle(draw, 500));
+  V.pageCleanup = off;
+});

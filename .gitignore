@@ -1,0 +1,8 @@
+data/
+node_modules/
+*.zip
+.env
+defaults.json
+test/shots/
+test/tmp/
+.DS_Store

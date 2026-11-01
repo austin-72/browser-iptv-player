@@ -1,0 +1,35 @@
+{
+  "js": [
+    "core.js",
+    "avatars.js",
+    "themes.js",
+    "catchup.js",
+    "store.js",
+    "epg.js",
+    "search.js",
+    "realtime.js",
+    "player.js",
+    "watch.js",
+    "ui.js",
+    "home.js",
+    "browse.js",
+    "guide.js",
+    "title.js",
+    "searchpage.js",
+    "mine.js",
+    "downloads.js",
+    "social.js",
+    "profiles.js",
+    "settings.js",
+    "admin.js",
+    "adminstats.js",
+    "tv.js",
+    "main.js"
+  ],
+  "css": [
+    "base.css",
+    "app.css",
+    "player.css",
+    "pages.css"
+  ]
+}
