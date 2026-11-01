@@ -471,3 +471,31 @@ ol.steps code { background: var(--card2); padding: .1rem .35rem; border-radius: 
 .api-ref { margin-top: .8rem; }
 [data-a=newkey], [data-a=newhook] { margin: .6rem 0 1rem; }
 .int-fields { display: grid; gap: .2rem; max-width: 36rem; }
+
+/* Admin → Error reports (adminerrors.js) */
+.er-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1rem; }
+.er-issue { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r); }
+.er-issue.fixed { opacity: .7; }
+.er-issue > summary { display: flex; gap: .8rem; align-items: flex-start; padding: .8rem 1rem; cursor: pointer; list-style: none; }
+.er-issue > summary::-webkit-details-marker { display: none; }
+.er-issue > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: var(--r); }
+.er-issue[open] > summary { border-bottom: 1px solid var(--line); }
+.er-kind-ic .i { width: 1.2rem; height: 1.2rem; color: var(--accent); margin-top: .15rem; }
+.er-sum { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.er-title { font-weight: 700; overflow-wrap: anywhere; }
+.er-sum code { overflow-wrap: anywhere; }
+.er-body { padding: .8rem 1rem 1rem; min-width: 0; }
+.er-acts { margin-bottom: .6rem; }
+.er-msg { font-weight: 700; overflow-wrap: anywhere; }
+.er-pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; font: .8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; }
+.er-sample h4 { margin: 1rem 0 .35rem; font-size: .9rem; }
+.er-kv { display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; font-size: .82rem; margin: 0; }
+.er-kv span { overflow-wrap: anywhere; min-width: 0; }
+.er-kv b { color: var(--dim); font-weight: 600; margin-right: .2rem; }
+.er-att, .er-crumbs { margin: 0; padding-left: 1.4rem; font-size: .82rem; overflow-wrap: anywhere; }
+.er-att li, .er-crumbs li { margin: .15rem 0; }
+.er-att code { font-size: .78rem; }
+.er-more { margin-top: 1rem; }
+.er-more > summary { cursor: pointer; font-weight: 600; }
+.er-more .er-sample { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .6rem; }
+select.input.er-kind { width: auto; max-width: 100%; }

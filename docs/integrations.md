@@ -1,4 +1,4 @@
-# Subtitles, Trakt, the viewing dashboard, speed test and automations
+# Subtitles, Trakt, the viewing dashboard, speed test, error reports and automations
 
 [← Back to the README](../README.md)
 
@@ -48,6 +48,31 @@ Below that it shows how many provider connections each list is using out of how 
 **Settings → Connection → Test my connection** (also in Admin → Overview) measures this device's delay, download and upload speed to the server, then the speed from your provider. It reads straight from the provider when the provider lets web pages do that; otherwise the server measures it and says so. A provider whose connections are all in use isn't tested, so nobody gets cut off.
 
 The result is in plain words, for example *Good for HD (1080p); may struggle with 4K*, and it says which part is slow: your network, the distance to the server, or the provider.
+
+## Error reports (Admin → Error reports)
+
+Problems are reported to the server automatically, from every device, so they can be fixed without anyone having to describe them:
+
+| Kind | When |
+| --- | --- |
+| Error / unhandled promise error / logged error | A bug in the app's code |
+| Error shown to the viewer | A failure the viewer saw as a red message (not the server just saying no, and not being offline) |
+| Playback failed | Every way of playing a title failed (direct, through the server, converted, backups) |
+| Page froze | Nothing ran for over 8 seconds while the page was on screen |
+| File didn't load | A script or style sheet didn't load |
+| App didn't start | The app hadn't started 30 seconds after opening, e.g. a TV browser too old to read it |
+| Server error | A server request failed unexpectedly, or an exception nothing caught |
+
+Each report has:
+
+- **The error:** the message and stack, mapped from the bundled `/app.js` back to `web/js/<file>:<line>`, with that line of code. Server errors point at `server.js` / `lib/…`.
+- **The device:** name, browser, screen and window size, TV or touch, network, memory, how long the page had been open, and the profile.
+- **The player:** what was playing, the way it was playing, position, buffer, picture size and the player's state. For *Playback failed*, every way it tried, how long each took and what each one said (HLS/MPEG-TS/media error codes and HTTP statuses).
+- **What happened before:** the last 50 pages, clicks, remote/arrow keys, server calls (path, status, time), player events, messages shown and console warnings.
+
+Reports are grouped: the same problem from many devices is one issue with a count, a device list and, for playback, the titles affected. The newest 5 full reports of each are kept, and at most 300 issues. A new issue is also written to the server log. **Copy report** gives the whole issue as text; *Download* gives all open ones. The same text is kept in `error-reports.txt` in the data folder. **Mark fixed** hides an issue until it happens again on a newer version of the app.
+
+**Never included:** passwords, PINs (not even which digits were pressed), what's typed into fields, or the logins and tokens in stream addresses. Those are removed on the device and again on the server. Turn reporting off with the switch at the top of the page.
 
 ## API and automations (Home Assistant)
 

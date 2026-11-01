@@ -211,10 +211,11 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Playback settings:** routing (*direct first*, *always through the server*, *direct only*), transcoding limits, hardware acceleration (VAAPI, QSV, NVENC, VideoToolbox), and HTTP/SOCKS5 proxies per list.
 - **Other apps:** an **Xtream Codes login per profile** for TiviMate, IPTV Smarters and other apps, an **HDHomeRun tuner** for Plex, Jellyfin and Emby, and the merged list and guide as M3U/XMLTV links.
 - **API & automations:** API keys with scopes, and signed webhooks, for Home Assistant and scripts (what's playing, play on a device, pause, change channel…).
+- **Error reports:** when something goes wrong on any device (a bug, a title that won't play, a frozen page, an app that won't start on an old TV), the device tells the server automatically. Each report has the error with the file and line of code, the device and browser, what was playing and how each way of playing it failed, and the last clicks, keys, pages and server calls before it. Admin → **Error reports** groups them, shows how often and on which devices, and has *Copy report* and *Mark fixed*. Passwords, PINs and stream logins are never included.
 - **Backups:** nightly backups (kept in `data/backups`), plus one-click backup and restore of all settings and profiles.
 - **Updates without restarts:** with the app folder mounted (see `docker-compose.yml`), new web-app files are picked up and open pages reload. New server files wait until *you* restart; the server never restarts on its own unless you set `SELF_RESTART=1`.
 
-**More detail:** [Watching: player extras, multiview and watch parties](docs/watching.md) · [Channels, the guide, your lists and parental locks](docs/channels-and-guide.md) · [More lists, 24/7 channels and other apps (Xtream login, HDHomeRun)](docs/sources-and-other-apps.md) · [Subtitles, Trakt, dashboard, speed test and automations (Home Assistant)](docs/integrations.md)
+**More detail:** [Watching: player extras, multiview and watch parties](docs/watching.md) · [Channels, the guide, your lists and parental locks](docs/channels-and-guide.md) · [More lists, 24/7 channels and other apps (Xtream login, HDHomeRun)](docs/sources-and-other-apps.md) · [Subtitles, Trakt, dashboard, speed test, error reports and automations (Home Assistant)](docs/integrations.md)
 
 ---
 
@@ -305,7 +306,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 
 ## Data
 
-Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json` and `cache/`. Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
+Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json`, `error-reports.json` (with a readable copy, `error-reports.txt`) and `cache/`. Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
 
 ## Limits
 

@@ -48,12 +48,15 @@ const { listUsage: usageOf } = require('./lib/usage');
 const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
+const { ErrorReports } = require('./lib/errors');
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
 
 // ---------------------------------------------------------------- storage & settings
 const D = cfg.dataDir;
+// Problems on viewers' devices and server errors, kept for fixing (Admin → Error reports; lib/errors.js).
+const reports = new ErrorReports({ dataDir: D, log, version: cfg.version, root: cfg.root });
 fs.mkdirSync(D, { recursive: true });
 const preset = cfg.presets || {};
 const DEFAULT_SETTINGS = {
@@ -1418,7 +1421,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
       dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()), mem: process.memoryUsage().rss, items: catalog.items.length,
-      defaultPassword: accounts.d.site.isDefault, needsRestart: !!update.needsRestart, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(),
+      defaultPassword: accounts.d.site.isDefault, needsRestart: !!update.needsRestart, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(), errors: reports.summary(),
     },
     watching: [...hub.conns].filter((c) => c.playing).map((c) => ({ pid: c.pid, device: c.deviceName, k: c.playing.k, n: c.playing.n, at: c.playing.at })),
   };
@@ -1872,6 +1875,9 @@ const p5 = require('./lib/routes-p5')({
 });
 p5Public = p5.publicFlags;
 
+// [routes:errors] Error reports from devices (and the admin's view of them).
+reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
+
 // ---- exports for other apps (VLC, Kodi, Plex…): /k/<exportKey>/playlist.m3u and /k/<exportKey>/epg.xml
 function exportM3U(req, res, key) {
   const b = `${req.headers['x-forwarded-proto'] && cfg.trustProxy ? req.headers['x-forwarded-proto'] : secureReq(req) ? 'https' : 'http'}://${req.headers.host}/k/${key}`;
@@ -1905,12 +1911,14 @@ const PUBLIC = path.join(cfg.root, 'public');
 let bundle = null;
 function buildBundle() {
   const order = JSON.parse(fs.readFileSync(path.join(WEB, 'order.json'), 'utf8'));
-  const js = order.js.map((f) => `/* ${f} */\n` + fs.readFileSync(path.join(WEB, 'js', f), 'utf8')).join('\n;\n');
+  const parts = order.js.map((f) => ({ file: f, text: fs.readFileSync(path.join(WEB, 'js', f), 'utf8') }));
+  const js = parts.map((p) => `/* ${p.file} */\n` + p.text).join('\n;\n');
   const css = cssFallbacks(order.css.map((f) => fs.readFileSync(path.join(WEB, 'css', f), 'utf8')).join('\n'));
   const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const v = crypto.createHash('sha1').update(js + css + html).digest('hex').slice(0, 10);
   const mk = (s) => { const raw = Buffer.from(s); return { raw, gz: zlib.gzipSync(raw, { level: 9 }), etag: `"${crypto.createHash('sha1').update(raw).digest('hex').slice(0, 16)}"` }; };
   bundle = { v, js: mk(js), css: mk(css), html, sw: mk(fs.readFileSync(path.join(WEB, 'sw.js'), 'utf8').replace('__VERSION__', v)) };
+  reports.setBundle(v, parts); // (so error reports can name the file and line in web/js)
   return bundle;
 }
 const getBundle = () => (process.env.DEV ? buildBundle() : bundle || buildBundle());
@@ -2058,7 +2066,10 @@ async function handle(req, res) {
     return serveFile(req, res, file, { cache: pathname.startsWith('/vendor/') ? 'public, max-age=2592000, immutable' : 'no-cache' });
   } catch (err) {
     const status = err.status || 500;
-    if (status >= 500 && ![501, 502, 503, 504].includes(status)) console.error(err);
+    if (status >= 500 && ![501, 502, 503, 504].includes(status)) {
+      console.error(err);
+      if (!err.status) reports.addServer(err, { method: req.method, path: pathname, profile: ctx.profile && ctx.profile.name, device: ctx.sess && ctx.sess.name });
+    }
     if (!res.headersSent) sendJSON(res, status, { error: err.message || 'Server error' });
     else res.destroy();
   }
@@ -2079,8 +2090,8 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 // A home server should keep running: log unexpected errors instead of dropping everyone's streams.
-process.on('uncaughtException', (e) => { console.error('Unexpected error (the server keeps running):', e && e.stack || e); });
-process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejection (the server keeps running):', e && e.stack || e); });
+process.on('uncaughtException', (e) => { console.error('Unexpected error (the server keeps running):', e && e.stack || e); reports.addServer(e, { where: 'uncaught exception' }); });
+process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejection (the server keeps running):', e && e.stack || e); reports.addServer(e instanceof Error ? e : new Error(String(e)), { where: 'unhandled promise rejection' }); });
 
 (async () => {
   const T = { modules: process.uptime() };

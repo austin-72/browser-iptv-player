@@ -1,6 +1,7 @@
 {
   "js": [
     "compat.js",
+    "errors.js",
     "core.js",
     "avatars.js",
     "themes.js",
@@ -36,6 +37,7 @@
     "adminsources.js",
     "mychannels.js",
     "adminstats.js",
+    "adminerrors.js",
     "integrations.js",
     "channeleditor.js",
     "remote.js",

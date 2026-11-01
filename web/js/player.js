@@ -137,6 +137,8 @@ PP.load = function (it, opts) {
   var token = ++this.token;
   if (!opts.quiet) { this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; }
   this._triedDirect = false;
+  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; }
+  if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; }
   else if (opts.alt !== undefined) this.alt = opts.alt;
   this._teardown();
@@ -168,13 +170,20 @@ PP.load = function (it, opts) {
     if (token !== self.token) return;
     if (i >= plan.length) return giveUp();
     var a = plan[i];
+    var t0 = Date.now();
     return self._attempt(a, token, opts.startAt || 0).then(function () {
       if (token !== self.token) return;
       self.attempt = a;
+      if (V.crumb) V.crumb('player', 'started via ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' in ' + (Date.now() - t0) + ' ms');
       self._afterStart();
     }, function (e) {
       if (token !== self.token) return;
       errs.push(e);
+      // What each way of playing it said (for error reports).
+      var log = self._attemptLog || (self._attemptLog = []);
+      log.push({ via: a.via, kind: a.kind || a.mode || '', alt: self.alt, ms: Date.now() - t0, msg: e.message, detail: e.detail });
+      if (log.length > 12) log.shift();
+      if (V.crumb) V.crumb('player', 'attempt failed: ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' — ' + e.message);
       if (a.via === 'direct' || a.via === 'split') self._triedDirect = true;
       console.warn('[player] attempt failed', a.via, a.kind || a.mode, e.message);
       self._teardownMedia();
@@ -553,7 +562,7 @@ PP._attempt = function (a, token, startAt) {
       done = true; cleanup(); resolve();
     };
     var fail = function (e) { if (!done) { done = true; cleanup(); reject(e instanceof Error ? e : new Error(String(e))); } };
-    var onErr = function () { fail(new Error(self._mediaErr())); };
+    var onErr = function () { fail(V.techErr(self._mediaErr(), self._mediaDetail())); };
     var onCanPlay = function () { if (self._blocked) ok(); };
     v.addEventListener('playing', ok);
     v.addEventListener('error', onErr);
@@ -701,7 +710,7 @@ PP._attachTs = function (url) {
     };
     if (V.tune) V.tune.mts(mcfg, this);
     var p = mpegts.createPlayer({ type: 'mpegts', isLive: !this.vod, url: new URL(url, location.href).href }, mcfg);
-    p.on(mpegts.Events.ERROR, function (type, detail, info) { self2._fatal(new Error(self2._mtsErr(type, detail, info))); });
+    p.on(mpegts.Events.ERROR, function (type, detail, info) { if (V.crumb) V.crumb('player', 'mpegts ' + type + '/' + detail); self2._fatal(V.techErr(self2._mtsErr(type, detail, info), { mpegts: type + '/' + detail, http: info && info.code, msg: info && info.msg })); });
     p.on(mpegts.Events.LOADING_COMPLETE, function () { if (!self2.vod && self2.started) self2._fatal(new Error('The stream ended.')); });
     p.on(mpegts.Events.MEDIA_INFO, function (mi) {
       self2._menuRefresh();
@@ -767,7 +776,7 @@ PP._shakaLoad = function (sp, url, rel, bufGoal, viaServer, token) {
     });
   }
   var self = this;
-  sp.addEventListener('error', function (ev) { self._fatal(new Error(self._shakaErr(ev.detail))); });
+  sp.addEventListener('error', function (ev) { var d = ev.detail || {}; self._fatal(V.techErr(self._shakaErr(ev.detail), { shaka: d.code, category: d.category, severity: d.severity })); });
   sp.addEventListener('trackschanged', function () { self._pickLangs(); self._menuRefresh(); });
   sp.addEventListener('variantchanged', function () { self._menuRefresh(); });
   return sp.load(url, this.vod && rel > 0 ? rel : undefined).then(function () {
@@ -821,7 +830,11 @@ V.httpStreamMsg = function (code) {
   if (code >= 500) return 'The provider’s server had a problem (' + code + '). Try again in a moment.';
   return 'The stream server answered HTTP ' + code + '.';
 };
+/** An error with the technical details kept for error reports (errors.js): what the player library said. */
+V.techErr = function (msg, detail) { var e = new Error(msg); e.detail = detail; return e; };
+PP._mediaDetail = function () { var e = this.video && this.video.error; return e ? { mediaError: e.code, msg: e.message || '' } : {}; };
 PP._hlsError = function (d) {
+  if (V.crumb) V.crumb('player', 'hls ' + (d.fatal ? 'fatal ' : '') + d.type + '/' + d.details + (d.response && d.response.code ? ' http ' + d.response.code : ''));
   if (!d.fatal) return;
   if (d.type === Hls.ErrorTypes.NETWORK_ERROR && this.started && !this._netRetry) { this._netRetry = true; this.hls.startLoad(); return; }
   if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !this._mediaRetry) { this._mediaRetry = true; this.hls.recoverMediaError(); return; }
@@ -834,7 +847,7 @@ PP._hlsError = function (d) {
   else if (/manifestParsingError/i.test(d.details)) msg = 'That address doesn’t point to a playable stream.';
   else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) msg = this.attemptVia === 'direct' ? 'The provider doesn’t allow direct playback in a browser.' : 'Couldn’t load the stream.';
   else msg = 'Playback error (' + d.details + ').';
-  this._fatal(new Error(msg));
+  this._fatal(V.techErr(msg, { hls: d.type + '/' + d.details, http: code || undefined, reason: d.reason || (d.error && d.error.message) || undefined, frag: d.frag ? d.frag.sn : undefined }));
 };
 PP._mtsErr = function (type, detail, info) {
   var code = info && info.code;
@@ -889,6 +902,7 @@ PP._failed = function (err) {
 
 PP._afterStart = function () {
   this.started = true;
+  this._everStarted = true;
   this._msg(null);
   var vod = this.vod;
   var lb = V.$('[data-a=golive]', this.host);
@@ -987,6 +1001,15 @@ PP._error = function (err) {
   if (this.it && (this.it.t === 'live' || this.it.t === 'radio') && V.zap) acts.push({ label: 'Next channel', fn: function () { V.zap(1); } });
   var sub = err.message;
   this._msg({ title: 'Can’t play this right now', sub: sub, actions: acts });
+  // Every way of playing it failed: report it, with what each way said.
+  if (V.reportError && this.it) {
+    var it2 = this.it;
+    V.reportError('playback', { message: err.message }, { // (no stack: what each way said is what matters)
+      item: { k: it2.k, t: it2.t, n: it2.n, g: it2.g, backups: (it2.a || []).length, offline: !!it2.offlineUrl, drm: !!it2.dr, ext: (String(it2.u || '').split('?')[0].match(/\.(\w{2,5})$/) || [])[1] || '' },
+      final: err.detail, attempts: (this._attemptLog || []).slice(), reconnects: this.reconnects, started: !!this._everStarted,
+      caps: V._caps || undefined, reach: this.reachInfo ? Object.keys(this.reachInfo).filter(function (x) { return !/^(url|u|input|src)$/.test(x); }).reduce(function (o, x) { o[x] = this.reachInfo[x]; return o; }.bind(this), {}) : undefined,
+    });
+  }
   V.announce('Playback failed: ' + sub);
 };
 
@@ -1637,7 +1660,7 @@ PP._bindVideo = function (v) {
     if (self.vod) { self._saveProgress(true); if (self.onEnded) self.onEnded(self); }
     else self._fatal(new Error('The stream ended.'));
   });
-  v.addEventListener('error', function () { if (self.started && !self._failNow && self.video === v) self._fatal(new Error(self._mediaErr())); });
+  v.addEventListener('error', function () { if (self.started && !self._failNow && self.video === v) self._fatal(V.techErr(self._mediaErr(), self._mediaDetail())); });
   v.addEventListener('enterpictureinpicture', function () { self.el.classList.add('pip'); });
   v.addEventListener('leavepictureinpicture', function () { self.el.classList.remove('pip'); });
 };

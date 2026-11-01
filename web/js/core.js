@@ -162,6 +162,7 @@ V.toast = function (msg, o) {
   var box = V.$('#toasts');
   if (!box) return;
   var t = document.createElement('div');
+  if (V.crumb) V.crumb('toast', (o.error ? 'error: ' : '') + msg);
   t.className = 'toast' + (o.error ? ' error' : '');
   t.setAttribute('role', o.error ? 'alert' : 'status');
   t.innerHTML = '<span>' + V.esc(msg) + '</span>' + (o.action ? '<button class="toast-act">' + V.esc(o.action.label) + '</button>' : '') + '<button class="toast-x" aria-label="Dismiss">' + V.icon('x') + '</button>';
@@ -173,7 +174,13 @@ V.toast = function (msg, o) {
   setTimeout(close, o.ms || (o.action ? 8000 : 4200));
   return close;
 };
-V.fail = function (e) { if (e && e.name === 'AbortError') return; console.warn(e); V.toast((e && e.message) || String(e), { error: true }); };
+V.fail = function (e) {
+  if (e && e.name === 'AbortError') return;
+  console.warn(e);
+  V.toast((e && e.message) || String(e), { error: true });
+  // A failure that isn't the server saying no or the network being down is a bug: report it (errors.js).
+  if (V.reportError && e && !e.offline && !(e.status && e.status < 500)) V.reportError('shown', e instanceof Error ? e : { message: String((e && e.message) || e) }, e.status ? { status: e.status } : {});
+};
 
 // ---------- dialogs (native <dialog>, so focus and Escape work everywhere)
 V.dialog = function (o) {
