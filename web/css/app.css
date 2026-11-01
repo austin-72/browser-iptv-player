@@ -13,7 +13,12 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
 .me-btn { border: 0; background: none; padding: 4px; border-radius: 8px; margin-left: .3rem; display: flex; }
 .unread-badge { position: absolute; top: 2px; right: 0; min-width: 1.1rem; height: 1.1rem; padding: 0 4px; border-radius: 9px; background: var(--accent); color: var(--on); font-size: .7rem; font-weight: 800; display: flex; align-items: center; justify-content: center; }
 .view { padding: calc(var(--top) + 16px) var(--gutter) calc(48px + var(--tab)); min-height: 100vh; outline: none; }
+/* A new page fades in (a re-draw of the same page doesn't). */
+.view.enter { animation: viewIn .18s ease-out; }
+@keyframes viewIn { from { opacity: 0; } }
 .view-home { padding-top: 0; }
+/* (Home starts under the see-through top bar, for the big picture; with nothing to show, keep clear of the bar.) */
+.view-home > .empty:first-child, .view-home .rows > .empty:first-child { padding-top: calc(var(--top) + 3rem); }
 #tabbar { display: none; }
 
 /* Mobile: bottom tab bar */
@@ -30,7 +35,13 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
   #tabbar .unread-badge { top: 6px; right: calc(50% - 22px); }
   body.watching #tabbar, body.watching #topbar { display: none; }
 }
-@media (min-width: 761px) and (max-width: 1100px) { .mainnav a { padding: .45rem .45rem; font-size: .9rem; } .brand { margin-right: .6rem; } }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .mainnav a { padding: .45rem .45rem; font-size: .9rem; } .brand { margin-right: .6rem; }
+  /* Tablets: the name stays readable; the links scroll sideways if they don't all fit. */
+  .brand { flex: none; max-width: 13rem; } .brand-name { max-width: 11rem; }
+  .mainnav { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .mainnav::-webkit-scrollbar { display: none; }
+}
 
 /* Profiles screen */
 .screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem var(--gutter); }
@@ -89,6 +100,8 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
 .card.channel .card-art { background: linear-gradient(135deg, var(--card2), var(--card)); }
 .card .ini { font-size: 1.6rem; font-weight: 800; color: rgba(255,255,255,.75); }
 .card-tt { position: absolute; left: 8px; right: 8px; bottom: 10px; font-weight: 700; font-size: .9rem; text-shadow: 0 1px 3px rgba(0,0,0,.8); color: #fff; text-align: left; }
+.card-tt.big { top: 0; bottom: 0; left: 0; right: 0; padding: 14% 12%; display: flex; flex-direction: column; justify-content: center; text-align: center; font-size: clamp(.95rem, 1.6vw, 1.25rem); line-height: 1.2; letter-spacing: -.01em; overflow: hidden; overflow-wrap: anywhere; text-shadow: none; background: linear-gradient(160deg, rgba(255,255,255,.08), rgba(0,0,0,.22)); }
+.card-tt.big::after { content: ''; display: block; width: 28px; height: 3px; margin: .7em auto 0; border-radius: 2px; background: rgba(255,255,255,.45); }
 .card-art .bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 4px; background: rgba(255,255,255,.3); }
 .card-art .bar.live i { background: var(--live); }
 .badges { position: absolute; top: 6px; left: 6px; display: flex; gap: 4px; }
@@ -134,6 +147,13 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
 .page-tools { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 .page-tools .input { width: auto; min-width: 10rem; }
 .page-tools .sel select { max-width: 16rem; }
+/* Phones: the film and series filters in one row you swipe along, instead of four rows above the posters. */
+@media (max-width: 600px) {
+  .view-movies .page-tools, .view-series .page-tools { position: relative; flex: 1 1 100%; min-width: 0; max-width: calc(100% + 2 * var(--gutter)); flex-wrap: nowrap; overflow-x: auto; margin: 0 calc(-1 * var(--gutter)); padding: 2px var(--gutter) 6px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .view-movies .page-tools::-webkit-scrollbar, .view-series .page-tools::-webkit-scrollbar { display: none; }
+  .view-movies .page-tools > *, .view-series .page-tools > * { flex: none; }
+  .view-movies .page-tools .input, .view-series .page-tools .input { min-width: 0; width: auto; }
+}
 .count { margin: 0 0 .8rem; font-size: .9rem; }
 
 /* Hero */
@@ -169,3 +189,14 @@ body.mini-playing .view { padding-bottom: calc(220px + var(--tab)); }
 .av-upload { display: flex; align-items: center; gap: .8rem; margin-bottom: .8rem; }
 .av-upload .btn { cursor: pointer; }
 .badge.warn { background: #b45309; color: #fff; }
+
+/* Light themes: the picture at the top of Home and of a title stays dark behind its white text (instead of fading
+   to the pale page colour under the words), and the bar over Home's picture is dark with light text. */
+.theme-light .hero-bg::after { background: linear-gradient(to top, var(--bg) 0, rgba(0,0,0,.55) 1.5rem, rgba(0,0,0,.2) 45%, transparent 70%), linear-gradient(to right, rgba(0,0,0,.75) 0%, rgba(0,0,0,.25) 55%, transparent 80%); }
+.theme-light .tp-bg::after { background: linear-gradient(to top, var(--bg) 0, rgba(0,0,0,.62) 1.5rem, rgba(0,0,0,.4) 50%, rgba(0,0,0,.3)), linear-gradient(to right, rgba(0,0,0,.6), transparent 70%); }
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar { background: linear-gradient(to bottom, rgba(0,0,0,.55), transparent); }
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar .mainnav a { color: rgba(255,255,255,.78); }
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar .mainnav a.on,
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar .mainnav a:hover,
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar .icon-btn:not(.on) { color: #fff; }
+.theme-light body[data-page=home]:not(.scrolled):has(#view .hero) #topbar .brand-name { color: #fff; }

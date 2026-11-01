@@ -45,10 +45,16 @@
     #pair { background: #fff; border-color: #dfe2ea; }
     .alt { border-color: #d4d8e2; }
     .err { color: #c62828; }
+    #pair ol, #pair .wait { color: #5b6476; }
+    #pair .link { color: #1a5fd0; }
   }
+  /* A TV is read from across the room: everything bigger. */
+  html.tv body { zoom: 1.45; }
+  @media (max-height: 760px) { html.tv body { zoom: 1.1; } }
 </style>
 </head>
 <body>
+<main style="display:contents">
 <form id="f" autocomplete="on">
   <h1>Sign in</h1>
   <p>Enter the password for this server.</p>
@@ -74,7 +80,22 @@
   <div class="wait" id="pwait">Waiting for your phone…</div>
   <button type="button" class="alt" id="usepw">Use the password instead</button>
 </section>
+</main>
 <script>
+// Older TV browsers (before Chrome 42) have no fetch(): a small stand-in, enough for this page.
+if (!window.fetch && window.Promise) window.fetch = function (url, o) {
+  o = o || {};
+  return new Promise(function (resolve, reject) {
+    var x = new XMLHttpRequest();
+    x.open(o.method || 'GET', url, true);
+    var h = o.headers || {};
+    for (var k in h) if (Object.prototype.hasOwnProperty.call(h, k)) x.setRequestHeader(k, h[k]);
+    x.withCredentials = true;
+    x.onload = function () { var t = x.responseText; resolve({ ok: x.status >= 200 && x.status < 300, status: x.status, json: function () { return Promise.resolve(t ? JSON.parse(t) : null); } }); };
+    x.onerror = function () { reject(new TypeError('Failed to fetch')); };
+    x.send(o.body || null);
+  });
+};
 (function () {
   var f = document.getElementById('f'), pw = document.getElementById('pw'), go = document.getElementById('go'), err = document.getElementById('err'), eye = document.getElementById('eye');
   eye.onclick = function () { var show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; eye.setAttribute('aria-pressed', show); eye.setAttribute('aria-label', show ? 'Hide password' : 'Show password'); pw.focus(); };
@@ -82,15 +103,18 @@
     e.preventDefault();
     go.disabled = true; err.textContent = '';
     fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-App': '1' }, body: JSON.stringify({ password: pw.value }) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Sign-in failed'); location.replace('/' + location.hash); }); })
-      .catch(function (x) { err.textContent = x.message === 'Failed to fetch' ? 'Can’t reach the server.' : x.message; go.disabled = false; pw.select(); });
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || (r.status >= 500 ? 'The server isn’t answering properly right now (' + r.status + '). Try again in a moment.' : 'Sign-in failed')); location.replace('/' + location.hash); }); })
+      .catch(function (x) { err.textContent = x instanceof TypeError ? 'Can’t reach the server.' : x.message; go.disabled = false; pw.select(); });
   };
 
   // Sign in with a phone: show a code (and QR code); a signed-in phone approves it.
   var pair = document.getElementById('pair'), timer = null, cur = null;
   function start() {
-    fetch('/api/pair/start', { method: 'POST', headers: { 'X-App': '1' } }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn’t get a code'); return j; }); }).then(function (j) {
+    var prev = (cur && cur.id) || '';
+    try { prev = prev || sessionStorage.getItem('pairId') || ''; } catch (e) {}
+    fetch('/api/pair/start', { method: 'POST', headers: { 'X-App': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ prev: prev }) }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn’t get a code.'); return j; }); }).then(function (j) {
       cur = j;
+      try { sessionStorage.setItem('pairId', j.id); } catch (e) {}
       document.getElementById('code').textContent = j.code;
       document.getElementById('qr').innerHTML = j.qr;
       document.getElementById('plink').textContent = j.link.replace(/^https?:\/\//, '');
@@ -98,7 +122,13 @@
       clearInterval(timer);
       timer = setInterval(poll, 2000);
       setTimeout(function () { if (cur === j) start(); }, Math.max(60000, j.expires - Date.now() - 15000));
-    }).catch(function (e) { document.getElementById('pwait').textContent = e.message; });
+    }).catch(function (e) {
+      // Couldn't get a code (offline, or too many asked for): say so and try again in a little while.
+      cur = null; clearInterval(timer);
+      document.getElementById('pwait').textContent = (e instanceof TypeError || !e || !e.message ? 'Can’t reach the server.' : e.message) + ' Trying again shortly…';
+      clearTimeout(start._retry);
+      start._retry = setTimeout(function () { if (!pair.classList.contains('hide') && !cur) start(); }, 20000);
+    });
   }
   function poll() {
     if (!cur) return;
@@ -114,7 +144,7 @@
   document.getElementById('usephone').onclick = function () { show(true); };
   document.getElementById('usepw').onclick = function () { show(false); };
   // TVs: typing a password with a remote is no fun — start with the code.
-  if (/SMART-TV|SmartTV|Tizen|Web0S|webOS|BRAVIA|AFT|CrKey|GoogleTV|Android TV|HbbTV|NetCast|Viera|AQUOS|PhilipsTV/i.test(navigator.userAgent)) show(true);
+  if (/SMART-TV|SmartTV|Tizen|Web0S|webOS|BRAVIA|AFT|CrKey|GoogleTV|Android TV|HbbTV|NetCast|Viera|AQUOS|PhilipsTV/i.test(navigator.userAgent)) { document.documentElement.className += ' tv'; show(true); }
 })();
 </script>
 </body>

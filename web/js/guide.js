@@ -23,7 +23,7 @@ V.route('guide', function (view, r) {
     '<select class="input" data-grp aria-label="Group"><option value="">All channels</option><option value="__fav"' + (g === '__fav' ? ' selected' : '') + '>Favourites</option>' + groups.map(function (x) { return '<option' + (x.name === g ? ' selected' : '') + '>' + V.esc(x.name) + '</option>'; }).join('') + '</select>' +
     '<label class="check"><input type="checkbox" data-only' + (onlyEpg ? ' checked' : '') + '><span>Only with listings</span></label>' +
     '<button class="btn" data-now>' + V.icon('clock') + ' Now</button>' +
-    '<form class="inline" data-sf><input class="input" type="search" placeholder="Search listings" aria-label="Search listings" data-sq><button class="btn">' + V.icon('search') + '</button></form></div>') +
+    '<form class="inline" data-sf><input class="input" type="search" placeholder="Search listings" aria-label="Search listings" data-sq><button class="btn" aria-label="Search">' + V.icon('search') + '</button></form></div>') +
     '<div class="guide" tabindex="-1"><div class="g-corner">' + V.esc(V.fmtDay(start + 3600e3)) + '</div><div class="g-times"></div><div class="g-chans"></div><div class="g-body"><div class="g-canvas"></div><div class="g-nowline"></div></div></div>';
   if (!chans.length) { V.$('.guide', view).outerHTML = V.empty('No guide listings', S.live.length ? 'None of these channels have TV listings. Untick “Only with listings” to see them anyway.' : 'There are no live channels.'); bindTools(); return; }
   var body = V.$('.g-body', view), canvas = V.$('.g-canvas', view), times = V.$('.g-times', view), side = V.$('.g-chans', view), nowline = V.$('.g-nowline', view);
@@ -51,7 +51,7 @@ V.route('guide', function (view, r) {
       need.forEach(function (i) {
         var c = chans[i];
         var list = res[c.k] || [];
-        if (!list.length) html += '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px">No listings</div>';
+        if (!list.length) html += '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">No listings</span></div>';
         list.forEach(function (p) {
           var l = Math.max(0, px(p.s)), rr = Math.min(width, px(p.e));
           if (rr - l < 2) return;
@@ -59,18 +59,33 @@ V.route('guide', function (view, r) {
           var rem = V.hasReminder(c, p);
           html += '<button class="gp ' + cls + '" style="top:' + i * ROW + 'px;left:' + l + 'px;width:' + (rr - l - 2) + 'px" data-k="' + V.esc(c.k) + '" data-s="' + p.s + '" title="' + V.esc(p.t + ' · ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e)) + '"><b class="truncate">' + (rem ? V.icon('bellf', 'tiny') : '') + V.esc(p.t) + '</b><small class="truncate">' + V.fmtClock(p.s) + (p.st ? ' · ' + V.esc(p.st) : '') + '</small></button>';
         });
+        // The listings stop part-way through the day: say so in the empty space rather than leave it blank.
+        var last = list.length ? list[list.length - 1].e : 0;
+        if (last && last < end - 30 * 60e3) { var ll = Math.max(0, px(last)); html += '<div class="gp none" style="top:' + i * ROW + 'px;left:' + ll + 'px;width:' + (width - ll) + 'px"><span class="gp-stick">' + (last > start ? 'No listings after ' + V.fmtClock(last) : 'No listings') + '</span></div>'; }
       });
       canvas.insertAdjacentHTML('beforeend', html);
+      if (wantNow) focusNow();
     });
   }
   var placeNow = function () { var n = Date.now(); nowline.hidden = n < start || n > end; nowline.style.left = px(n) + 'px'; nowline.style.height = chans.length * ROW + 'px'; };
   placeNow();
   var tdraw = V.throttle(draw, 80);
   body.addEventListener('scroll', function () { times.scrollLeft = body.scrollLeft; side.scrollTop = body.scrollTop; tdraw(); }, { passive: true });
-  var scrollNow = function () { body.scrollLeft = Math.max(0, px(Date.now()) - 120); };
+  // From the start of the current half hour, so what's on now shows with its title (and the now line just after).
+  var scrollNow = function () { body.scrollLeft = Math.max(0, px(Math.floor(Date.now() / 1800e3) * 1800e3) - 16); };
   if (dayOff === 0) scrollNow(); else body.scrollLeft = px(start + 18 * 3600e3);
   draw();
   setTimeout(draw, 50);
+  // With a remote: start on what's on now on the first channel, not on the buttons above the guide.
+  // (Once the programmes have arrived, and only if nothing else has been picked yet.)
+  var wantNow = V.tvMode && dayOff === 0;
+  function focusNow() {
+    var a = document.activeElement;
+    if (a && a !== document.body && !(a.closest && a.closest('.page-tools, .page-head'))) { wantNow = false; return; }
+    var cur = V.$('.gp.now', canvas);
+    if (cur) { wantNow = false; cur.focus({ preventScroll: true }); }
+  }
+  if (wantNow) setTimeout(function () { if (wantNow) focusNow(); }, 120);
   var tick = setInterval(placeNow, 30000);
   V.pageCleanup = function () { clearInterval(tick); };
   side.addEventListener('click', function (e) { var b = e.target.closest('[data-k]'); if (b) V.play(V.entry(b.dataset.k), { list: chans }); });
@@ -85,6 +100,7 @@ V.route('guide', function (view, r) {
     var cur = e.target.closest('.gp');
     if (!cur || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.key) < 0) return;
     e.preventDefault(); e.stopPropagation();
+    if (cur.classList.contains('none')) return;
     var top = parseFloat(cur.style.top), left = parseFloat(cur.style.left), w = parseFloat(cur.style.width);
     var all = V.$$('.gp[data-s]', canvas);
     var best = null, bd = Infinity;
@@ -96,6 +112,11 @@ V.route('guide', function (view, r) {
       if (dd < bd) { bd = dd; best = x; }
     });
     if (best) { best.focus(); best.scrollIntoView({ block: 'nearest', inline: 'nearest' }); setTimeout(draw, 60); }
+    // At the edge of the guide (top row, first programme): on to the buttons above or the channel list.
+    else if ((e.key === 'ArrowUp' || e.key === 'ArrowLeft') && V.tvMove) {
+      if (e.key === 'ArrowLeft') { var ch = V.$('.g-ch[style*="top:' + top + 'px"]', side); if (ch) { ch.focus({ preventScroll: true }); return; } }
+      V.tvMove(e.key === 'ArrowUp' ? 'up' : 'left', cur);
+    }
   });
   function bindTools() {
     var go = function (k, v) { var q = new URLSearchParams(r.q); if (v) q.set(k, v); else q.delete(k); V.router.go('#/guide' + (q.toString() ? '?' + q : ''), true); };

@@ -52,61 +52,66 @@ V.downloads = (function () {
     });
   }
 
-  async function pump() {
+  function pump() {
     if (active || !queue.length) return;
     var r = queue.shift();
     active = { r: r, ac: new AbortController() };
     r.status = 'downloading'; save(r);
-    try {
-      var res = await fetch('/api/download/' + encodeURIComponent(r.k) + (r.quality ? '?height=' + r.quality : ''), { signal: active.ac.signal, credentials: 'same-origin' });
-      if (!res.ok) { var j = await res.json().catch(function () { return {}; }); throw new Error(j.error || 'HTTP ' + res.status); }
+    var res, w, reader, last = 0;
+    // Copy the download into the app's private storage piece by piece.
+    var copy = function () {
+      return reader.read().then(function (chunk) {
+        if (chunk.done) return;
+        return w.write(chunk.value).then(function () {
+          r.bytes += chunk.value.length;
+          if (Date.now() - last > 700) { last = Date.now(); save(r); }
+          return copy();
+        });
+      });
+    };
+    fetch('/api/download/' + encodeURIComponent(r.k) + (r.quality ? '?height=' + r.quality : ''), { signal: active.ac.signal, credentials: 'same-origin' }).then(function (x) {
+      res = x;
+      if (!res.ok) return res.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.error || 'HTTP ' + res.status); });
       r.size = Number(res.headers.get('Content-Length')) || 0;
       r.dur = Number(res.headers.get('X-Duration')) || r.d || 0;
       r.type = res.headers.get('Content-Type') || 'video/mp4';
-      var dir = await navigator.storage.getDirectory();
-      var fh = await dir.getFileHandle(fileName(r.k), { create: true });
-      var w = await fh.createWritable();
-      var reader = res.body.getReader();
-      var last = 0;
-      for (;;) {
-        var chunk = await reader.read();
-        if (chunk.done) break;
-        await w.write(chunk.value);
-        r.bytes += chunk.value.length;
-        if (Date.now() - last > 700) { last = Date.now(); save(r); }
-      }
-      await w.close();
-      r.status = 'done'; r.size = r.bytes; r.doneAt = Date.now();
-      save(r);
-      V.toast('Downloaded: ' + r.n);
-    } catch (e) {
-      if (e.name === 'AbortError') { r.status = 'cancelled'; remove(r.k, true); } else { r.status = 'failed'; r.error = e.message; save(r); V.toast('Download failed: ' + e.message, { error: true }); }
-    }
-    active = null;
-    pump();
+      return navigator.storage.getDirectory();
+    }).then(function (dir) { return dir.getFileHandle(fileName(r.k), { create: true }); })
+      .then(function (fh) { return fh.createWritable(); })
+      .then(function (writable) { w = writable; reader = res.body.getReader(); return copy(); })
+      .then(function () { return w.close(); })
+      .then(function () {
+        r.status = 'done'; r.size = r.bytes; r.doneAt = Date.now();
+        save(r);
+        V.toast('Downloaded: ' + r.n);
+      }, function (e) {
+        if (e.name === 'AbortError') { r.status = 'cancelled'; remove(r.k, true); } else { r.status = 'failed'; r.error = e.message; save(r); V.toast('Download failed: ' + e.message, { error: true }); }
+      }).then(function () { active = null; pump(); });
   }
 
-  async function remove(k, quiet) {
+  function remove(k, quiet) {
     if (active && active.r.k === k) active.ac.abort();
     queue = queue.filter(function (x) { return x.k !== k; });
-    try { var dir = await navigator.storage.getDirectory(); await dir.removeEntry(fileName(k)); } catch (e) {}
-    items.delete(k);
-    await V.idb.del(k, 'dl');
-    V.emit('downloads');
-    if (!quiet) V.toast('Removed from this device');
+    var gone = navigator.storage && navigator.storage.getDirectory ? navigator.storage.getDirectory().then(function (dir) { return dir.removeEntry(fileName(k)); }).catch(function () {}) : Promise.resolve();
+    return gone.then(function () {
+      items.delete(k);
+      return V.idb.del(k, 'dl');
+    }).then(function () {
+      V.emit('downloads');
+      if (!quiet) V.toast('Removed from this device');
+    });
   }
 
-  async function play(k) {
+  function play(k) {
     var r = items.get(k);
-    if (!r) return;
-    try {
-      var dir = await navigator.storage.getDirectory();
-      var fh = await dir.getFileHandle(fileName(k));
-      var file = await fh.getFile();
-      var url = URL.createObjectURL(file);
-      var base = V.entry(k) || { k: r.k, n: r.n, t: r.t, i: r.i, sk: r.sk, s: r.s, e: r.e, et: r.et, d: r.dur || r.d };
-      V.play(Object.assign({}, base, { offlineUrl: url, d: r.dur || base.d }));
-    } catch (e) { V.toast('That download is missing. Download it again.', { error: true }); }
+    if (!r) return Promise.resolve();
+    return navigator.storage.getDirectory().then(function (dir) { return dir.getFileHandle(fileName(k)); })
+      .then(function (fh) { return fh.getFile(); })
+      .then(function (file) {
+        var url = URL.createObjectURL(file);
+        var base = V.entry(k) || { k: r.k, n: r.n, t: r.t, i: r.i, sk: r.sk, s: r.s, e: r.e, et: r.et, d: r.dur || r.d };
+        V.play(Object.assign({}, base, { offlineUrl: url, d: r.dur || base.d }));
+      }).catch(function () { V.toast('That download is missing. Download it again.', { error: true }); });
   }
 
   // Remove downloads you've finished watching (if the profile wants that).

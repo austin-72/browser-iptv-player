@@ -169,7 +169,7 @@ V.leaveProfile = function (lock) {
   if (V.watch && V.watch.it) V.closePlayer();
   V.rt.close();
   V.api('/api/profiles/leave', { body: { lock: !!lock } }).catch(function () {}).then(function () {
-    S.profile = null; S.data = null; S.items = []; S.recs = null; S.socialCache = null; S.extra = new Map();
+    S.profile = null; S.data = null; S.items = []; S.recs = null; S.recsAt = 0; V._recsLoading = null; V._details = null; S.socialCache = null; S.extra = new Map();
     V.epg.clear();
     return V.api('/api/boot');
   }).then(function (b) { S.boot = b; V.applyTheme(V.ls.get('theme', 'midnight')); V.showProfiles(); });

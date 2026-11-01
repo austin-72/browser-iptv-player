@@ -1,5 +1,6 @@
 {
   "js": [
+    "compat.js",
     "core.js",
     "avatars.js",
     "themes.js",

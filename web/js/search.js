@@ -7,12 +7,13 @@ V.search = (function () {
     var items = S.items || [];
     // Plus episodes of on-demand (Xtream) series that have been fetched so far.
     if (S.extra && S.extra.size) { items = items.slice(); S.extra.forEach(function (e) { items.push(e); }); }
-    var names = new Array(items.length);
+    var names = new Array(items.length), groups = new Array(items.length), gcache = new Map();
     var words = new Map();
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       var n = V.norm(it.n);
       names[i] = n;
+      if (it.g) { var gn = gcache.get(it.g); if (gn === undefined) gcache.set(it.g, gn = V.norm(it.g)); groups[i] = gn; }
       if (it.t === 'episode') continue;
       var ws = n.split(' ');
       for (var j = 0; j < ws.length; j++) {
@@ -23,7 +24,7 @@ V.search = (function () {
         if (l[l.length - 1] !== i) l.push(i);
       }
     }
-    idx = { names: names, words: words, items: items };
+    idx = { names: names, groups: groups, words: words, items: items };
   }
 
   /** Damerau–Levenshtein distance, giving up early past `max`. */
@@ -61,8 +62,8 @@ V.search = (function () {
     var toks = nq.split(' ').filter(Boolean);
     var types = opts.types ? new Set(opts.types) : null;
     var scores = new Map();
-    var names = idx.names, items = idx.items;
-    var num = /^\d{1,5}$/.test(nq) ? +nq : 0;
+    var names = idx.names, groups = idx.groups, items = idx.items;
+    var num = /^\d{1,5}$/.test(nq) ? +nq : 0, spq = ' ' + nq;
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       if (types && !types.has(it.t)) continue;
@@ -72,7 +73,7 @@ V.search = (function () {
       if (num && it.no === num) s = 200;
       else if (n === nq) s = 120;
       else if (n.indexOf(nq) === 0) s = 90;
-      else if (n.indexOf(' ' + nq) >= 0) s = 75;
+      else if (n.indexOf(spq) >= 0) s = 75;
       else if (n.indexOf(nq) > 0) s = 50;
       else {
         var all = true, part = 0;
@@ -84,7 +85,7 @@ V.search = (function () {
         }
         if (all) s = 30 + part * 4;
       }
-      if (!s && it.g && opts.groups !== false) { var g = V.norm(it.g); if (g === nq || g.indexOf(nq) === 0) s = 18; }
+      if (!s && groups[i] && opts.groups !== false) { var g = groups[i]; if (g === nq || g.indexOf(nq) === 0) s = 18; }
       if (s) scores.set(i, s + (TYPE_W[it.t] || 0) - Math.min(8, n.length / 12));
     }
     // Few hits: allow typos (one per 4 letters, at most two).
@@ -107,15 +108,28 @@ V.search = (function () {
     }
     // Things you've watched rank a little higher.
     var prog = S.data ? S.data.progress : {};
+    var hidden = S.data && S.data.hidden.length ? new Set(S.data.hidden) : null;
     var out = [];
     scores.forEach(function (s, i) {
       var it = items[i];
-      if (S.data && S.data.hidden.indexOf(it.k) >= 0) s -= 30;
+      if (hidden && hidden.has(it.k)) s -= 30;
       if (prog[it.k]) s += 3;
-      out.push([s, it]);
+      out.push({ s: s, n: names[i], it: it });
     });
-    out.sort(function (a, b) { return b[0] - a[0] || a[1].n.localeCompare(b[1].n); });
-    return out.slice(0, opts.limit || 200).map(function (x) { return x[1]; });
+    // Lots of matches: only the best few hundred need sorting properly.
+    var lim = opts.limit || 200;
+    if (out.length > lim * 3 && typeof Float64Array !== 'undefined') {
+      var sc = new Float64Array(out.length);
+      for (var q2 = 0; q2 < out.length; q2++) sc[q2] = -out[q2].s;
+      sc.sort();
+      var cut = -sc[lim - 1];
+      out = out.filter(function (x) { return x.s >= cut; });
+    }
+    // Ties go alphabetically (by the plain-letters name, which is much quicker to compare than localeCompare).
+    out.sort(function (a, b) { return b.s - a.s || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0); });
+    var res = new Array(Math.min(lim, out.length));
+    for (var r = 0; r < res.length; r++) res[r] = out[r].it;
+    return res;
   }
 
   V.on('episodes-warm', function () { idx = null; });

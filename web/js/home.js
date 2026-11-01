@@ -55,7 +55,8 @@ V.route('home', function (view) {
   var recs = S.recs || { top: [], rows: [], household: [] };
   var hid = new Set(S.data.home.hidden || []);
   var order = (S.data.home.order && S.data.home.order.length ? S.data.home.order : []).concat(V.HOME_ROWS.map(function (r) { return r.id; })).filter(function (x, i, a) { return a.indexOf(x) === i; });
-  var notHidden = function (it) { return it && S.data.hidden.indexOf(it.k) < 0; };
+  var hiddenSet = new Set(S.data.hidden);
+  var notHidden = function (it) { return it && !hiddenSet.has(it.k); };
   var keysToItems = function (keys) { return (keys || []).map(V.entry).filter(notHidden); };
   var hasVod = S.movies.length + S.shows.length > 0;
 
@@ -74,12 +75,12 @@ V.route('home', function (view) {
   }
   if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button></div>';
-  view.innerHTML = html;
+  view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
   if (heroIt) {
     V.$('[data-hero=play]', view) && (V.$('[data-hero=play]', view).onclick = function () { V.play(heroIt); });
     var lb = V.$('[data-hero=list]', view);
     if (lb) lb.onclick = function () { V.toggle('list', heroIt.k).then(function (on) { lb.innerHTML = V.icon(on ? 'check' : 'plus'); V.toast(on ? 'Added to My List' : 'Removed from My List'); }); };
-    V.api('/api/item/' + encodeURIComponent(heroIt.k)).then(function (d) {
+    V.details(heroIt.k).then(function (d) {
       var p = V.$('.hero-plot', view);
       if (p && d.plot) { p.textContent = d.plot; p.hidden = false; }
       if (d.bd && !heroIt.bd) { heroIt.bd = d.bd; var img = V.$('.hero-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
@@ -131,7 +132,7 @@ V.route('home', function (view) {
     recentch: function () { add({ id: 'recentch', title: 'Recently watched channels', items: V.recentChannels().slice(0, 30), play: true }); },
     household: function () { add({ id: 'household', title: 'Popular in your household', items: keysToItems(recs.household), numbered: true }); },
     new: function () {
-      var items = S.movies.concat(S.shows).filter(function (x) { return x.ad && notHidden(x); }).sort(function (a, b) { return b.ad - a.ad; }).slice(0, 40);
+      var items = V.topN([S.movies, S.shows], 40, function (x) { return x.ad && notHidden(x) ? x.ad : 0; });
       add({ id: 'new', title: 'New additions', items: items, more: '#/movies?sort=new' });
     },
     pinned: function () {
@@ -150,18 +151,33 @@ V.route('home', function (view) {
   };
   order.forEach(function (id) { if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } });
   if (!rows.children.length) {
-    rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists">Add a list</a>' : '');
+    rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists?add=1">Add a list</a>' : '');
   }
   if (!S.recs || Date.now() - (S.recsAt || 0) > 5 * 60e3) V.loadRecs();
 });
 
 V.loadRecs = function () {
+  if (V._recsLoading) return V._recsLoading; // (one request at a time: start-up asks from several places)
   S.recsAt = Date.now();
-  return V.api('/api/recs').then(function (r) {
+  var who = S.profile && S.profile.id;
+  var mine = V._recsLoading = V.api('/api/recs').then(function (r) {
+    if (!S.profile || S.profile.id !== who) return; // (someone else picked their profile meanwhile)
     var changed = JSON.stringify(r.top) !== JSON.stringify((S.recs || {}).top);
     S.recs = r;
     if (changed && document.body.dataset.page === 'home') V.router.refresh();
-  }).catch(function () {});
+  }).catch(function () {}).then(function () { if (V._recsLoading === mine) V._recsLoading = null; });
+  return mine;
+};
+
+/** A title's full details, kept for a couple of minutes (the home page is re-drawn several times as things load). */
+V.details = function (k) {
+  var c = V._details || (V._details = {});
+  var hit = c[k];
+  if (hit && Date.now() - hit.at < 120e3) return hit.p;
+  var p = V.api('/api/item/' + encodeURIComponent(k));
+  c[k] = { at: Date.now(), p: p };
+  p.catch(function () { if (c[k] && c[k].p === p) delete c[k]; });
+  return p;
 };
 
 V.route('mood', function (view, r) {
@@ -242,7 +258,7 @@ V.surprise = function () {
   var it = pick();
   var draw = function (d) {
     V.$('.surprise', d).innerHTML = '<div class="sp-art">' + V.art(it.i, it.n, 'art') + '</div><div class="sp-b"><div class="dim">' + V.esc(it.t === 'show' ? 'Series' : 'Movie') + '</div><h3>' + V.esc(it.n) + '</h3><div class="dim">' + [it.y, it.r ? '★ ' + it.r : '', it.d ? V.fmtLen(it.d) : '', (it.gn || []).slice(0, 3).join(' · ')].filter(Boolean).map(V.esc).join(' · ') + '</div><p class="sp-plot dim clamp3"></p></div>';
-    V.api('/api/item/' + encodeURIComponent(it.k)).then(function (x) { var p = V.$('.sp-plot', d); if (p && x.plot) p.textContent = x.plot; }).catch(function () {});
+    V.details(it.k).then(function (x) { var p = V.$('.sp-plot', d); if (p && x.plot) p.textContent = x.plot; }).catch(function () {});
   };
   V.dialog({
     title: 'How about this?', cls: 'surprise-dlg',
@@ -261,21 +277,36 @@ V.route('together', function (view, r) {
   var chosen = (r.q.get('with') || '').split(',').filter(Boolean);
   var people = ((S.boot && S.boot.profiles) || []).filter(function (p) { return p.id !== S.profile.id; });
   view.innerHTML = V.pageHead('Pick for several of us') + '<p class="dim">Choose who’s watching with you. You get things everyone should like — and nobody has seen.</p>' +
-    '<div class="together-who">' + people.map(function (p) { var on = chosen.indexOf(p.id) >= 0; return '<button class="who' + (on ? ' on' : '') + '" data-p="' + p.id + '" aria-pressed="' + on + '">' + V.avatar(p.avatar, 'md') + '<span>' + V.esc(p.name) + '</span></button>'; }).join('') + '</div><div class="grid-host"></div>';
-  V.$$('[data-p]', view).forEach(function (b) {
-    b.onclick = function () { var i = chosen.indexOf(b.dataset.p); if (i >= 0) chosen.splice(i, 1); else chosen.push(b.dataset.p); V.router.go('#/together' + (chosen.length ? '?with=' + chosen.join(',') : ''), true); };
-  });
+    '<div class="together-who">' + people.map(function (p) { var on = chosen.indexOf(p.id) >= 0; return '<button class="who' + (on ? ' on' : '') + '" data-p="' + p.id + '" aria-pressed="' + on + '"><span class="who-av">' + V.avatar(p.avatar, 'lg') + '<span class="who-ok">' + V.icon('check') + '</span></span><span>' + V.esc(p.name) + '</span></button>'; }).join('') + '</div><div class="grid-host"></div>';
   var host = V.$('.grid-host', view);
-  if (!chosen.length) { host.innerHTML = V.empty('Who’s with you?', 'Tap the people watching with you.'); return; }
-  host.innerHTML = '<div class="spinner"></div>';
-  V.api('/api/recs/group?ids=' + chosen.join(',')).then(function (res) {
-    var items = res.keys.map(V.entry).filter(Boolean);
-    host.innerHTML = '';
-    if (!res.common) host.insertAdjacentHTML('beforeend', '<p class="dim">You don’t have much in common yet, so here’s a mix of each person’s top picks.</p>');
-    var g = document.createElement('div');
-    host.appendChild(g);
-    V.grid(g, items, { empty: 'Nothing yet — watch a few things first.' });
-  }).catch(function (e) { host.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  var seq = 0;
+  var draw = function () {
+    var mine = ++seq;
+    if (!people.length) { host.innerHTML = V.empty('Nobody else here yet', 'This needs more than one profile. The admin can add them in Admin → Profiles.'); return; }
+    if (!chosen.length) { host.innerHTML = V.empty('Who’s with you?', 'Tap the people watching with you.'); return; }
+    host.innerHTML = '<div class="spinner"></div>';
+    V.api('/api/recs/group?ids=' + chosen.join(',')).then(function (res) {
+      if (mine !== seq) return; // (someone else was picked meanwhile)
+      var items = res.keys.map(V.entry).filter(Boolean);
+      host.innerHTML = '';
+      if (!res.common) host.insertAdjacentHTML('beforeend', '<p class="dim">You don’t have much in common yet, so here’s a mix of each person’s top picks.</p>');
+      var g = document.createElement('div');
+      host.appendChild(g);
+      V.grid(g, items, { empty: 'Nothing yet — watch a few things first.' });
+    }).catch(function (e) { if (mine === seq) host.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  // Picking someone updates the picks in place (focus and scroll stay where they are — easier with a remote).
+  V.$$('[data-p]', view).forEach(function (b) {
+    b.onclick = function () {
+      var i = chosen.indexOf(b.dataset.p);
+      if (i >= 0) chosen.splice(i, 1); else chosen.push(b.dataset.p);
+      var on = chosen.indexOf(b.dataset.p) >= 0;
+      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+      try { history.replaceState(null, '', '#/together' + (chosen.length ? '?with=' + chosen.join(',') : '')); } catch (e) {}
+      draw();
+    };
+  });
+  draw();
 });
 
 // ---------------------------------------------------------------- a new profile: what do you like?

@@ -20,6 +20,7 @@ const { Stats } = require('./lib/stats');
 const { fetchAny, setProxyResolver, testProxy } = require('./lib/net');
 const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
+const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
 const { Hub, Social } = require('./lib/social');
@@ -132,8 +133,21 @@ function applyMeta(it, m) {
   if (!it.logo && m.poster) it.logo = m.poster;
   if (m.poster) it.poster = m.poster;
 }
-function rebuildCatalog() {
-  catalog.build();
+let rebuilding = null, rebuildAgain = false, catalogReady = null;
+/** Rebuild the catalogue: at start-up in one go, afterwards in slices so nobody's stream stalls while it runs. */
+function rebuildCatalog(now) {
+  if (now === true) { catalog.build(); return afterRebuild(); }
+  if (rebuilding) { rebuildAgain = true; return rebuilding; }
+  // (A failure is logged and the next change tries again: one bad build mustn't stop all later ones.)
+  const done = catalog.buildAsync().then(afterRebuild).catch((e) => log('Catalogue rebuild failed:', e && e.stack || e));
+  rebuilding = done;
+  done.then(() => {
+    rebuilding = null;
+    if (rebuildAgain) { rebuildAgain = false; rebuildCatalog(); }
+  });
+  return done; // (resolves when this build is in place, not after any queued after it)
+}
+function afterRebuild() {
   // Titles renamed by the tidy-up or merged: move history, lists, favourites… and TMDB matches to the new keys.
   if (catalog.renamed && catalog.renamed.size) {
     let moved = 0;
@@ -146,6 +160,8 @@ function rebuildCatalog() {
   catalog.cache.clear();
   hub.toAll('catalog', { version: catalog.version });
   setTimeout(() => checkNewEpisodes().catch((e) => log('New episodes:', e.message)), 20e3);
+  // Ready before anyone searches for an actor (made in the background, in slices).
+  setTimeout(() => peopleIndex().catch(() => {}), 30e3);
   // New titles: look them up on TMDB in the background (a minute later, so start-up stays quick).
   clearTimeout(rebuildCatalog.enrichTimer);
   rebuildCatalog.enrichTimer = setTimeout(() => { try { startEnrich(true); } catch (e) { log('TMDB:', e.message); } }, 60e3);
@@ -288,6 +304,7 @@ function sendGz(req, res, raw, gz, type, etag) {
   const h = { 'Content-Type': type, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' };
   if (etag) h.ETag = etag;
   if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) { res.writeHead(200, { ...h, 'Content-Encoding': 'gzip', 'Content-Length': gz.length }); return res.end(gz); }
+  if (typeof raw === 'function') raw = raw(); // (unpacked only for the rare client that can't take gzip)
   res.writeHead(200, { ...h, 'Content-Length': raw.length });
   res.end(raw);
 }
@@ -431,10 +448,18 @@ route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
 });
 
 // ---- catalogue & details
-route('GET', '/api/catalog', (req, res, p, q, ctx) => {
+route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const out = catalog.payload(prof);
-  sendGz(req, res, out.raw, out.gz, 'application/json; charset=utf-8', out.etag);
+  // (Made in slices: a big catalogue takes a second or so to put together, and nobody else should wait for it.)
+  const out = await catalog.payloadAsync(prof);
+  // A device that has an older copy asks for just the changes.
+  const since = q.get('since');
+  if (since && req.headers['if-none-match'] !== out.etag) {
+    const d = await catalog.deltaAsync(prof, since);
+    if (d && d.same) { res.writeHead(304, { ETag: d.etag }); return res.end(); }
+    if (d) return sendGz(req, res, d.raw, d.gz, 'application/json; charset=utf-8', d.etag);
+  }
+  sendGz(req, res, () => out.raw, out.gz, 'application/json; charset=utf-8', out.etag);
 });
 route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -447,7 +472,7 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const mt = tmdb.map.data.m[it.k];
   const out = { ...Catalog.compact(it), plot: it.plot || '', cast: it.cast || '', dir: it.dir || '', tr: it.tr || '', poster: it.poster || '', markers: it.t === 'episode' || it.t === 'movie' ? markers.get(it.k) : null, col: it.col || 0, fixed: !!(mt && mt.manual) };
   if (it.t === 'show') {
-    const eps = await catalog.episodes(it.k).catch(() => []);
+    const eps = await catalog.episodes(it.k).catch((e) => { out.epsError = 'The provider didn’t send the episodes just now.'; log(`Episodes of “${it.n}”: ${e.message}`); return []; });
     out.episodes = eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) }));
   }
   if (it.sk) { const show = catalog.get(it.sk); if (show) out.show = { k: show.k, n: show.n, i: show.logo || '' }; }
@@ -457,7 +482,11 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
 });
 route('GET', '/api/show/:k/episodes', async (req, res, p, q, ctx) => {
   const it = item(ctx, p.k);
-  const eps = await catalog.episodes(it.k);
+  let eps;
+  try { eps = await catalog.episodes(it.k); } catch (e) {
+    // The provider didn't answer: say so plainly (the page offers to try again).
+    throw new HttpError(502, `The provider didn’t send this series’ episodes (${String(e.message || e).replace(/^Couldn’t download it: /, '')}). Try again in a moment.`);
+  }
   return eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) }));
 });
 route('GET', '/api/recs', async (req, res, p, q, ctx) => {
@@ -467,42 +496,64 @@ route('GET', '/api/recs', async (req, res, p, q, ctx) => {
 });
 
 // ---- people: search by actor or director
-let peopleIdx = null; // { version, people: Map(norm name → { name, cast: Set, dir: Set }) }
+let peopleIdx = null; // { version, people: Map(norm name → { name, words, cast: Set, dir: Set }), byPre: Map(3 letters → [entries]) }
+let peopleBuilding = null;
+/** Cast and directors → their titles, built in slices (a big catalogue has a few hundred thousand names). */
 function peopleIndex() {
-  if (peopleIdx && peopleIdx.version === catalog.version) return peopleIdx.people;
-  const people = new Map();
-  const add = (name, k, role) => {
-    const n = String(name || '').trim();
-    if (n.length < 3) return;
-    const key = n.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-    let e = people.get(key);
-    if (!e) people.set(key, (e = { name: n, cast: new Set(), dir: new Set() }));
-    e[role].add(k);
-  };
-  for (const it of catalog.items) {
-    if (it.t !== 'movie' && it.t !== 'show') continue;
-    for (const c of String(it.cast || '').split(',').slice(0, 8)) add(c, it.k, 'cast');
-    for (const d of String(it.dir || '').split(',').slice(0, 3)) add(d, it.k, 'dir');
+  if (peopleIdx && peopleIdx.version === catalog.version) return Promise.resolve(peopleIdx);
+  if (!peopleBuilding || peopleBuilding.version !== catalog.version) {
+    const version = catalog.version;
+    const steps = function* () {
+      const people = new Map();
+      const byPre = new Map();
+      const add = (name, k, role) => {
+        const n = String(name || '').trim();
+        if (n.length < 3) return;
+        const key = n.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+        let e = people.get(key);
+        if (!e) {
+          people.set(key, (e = { key, name: n, words: key.split(/[\s.-]+/).filter(Boolean), cast: new Set(), dir: new Set() }));
+          for (const w of new Set(e.words.map((x) => x.slice(0, 3)))) { const l = byPre.get(w); if (l) l.push(e); else byPre.set(w, [e]); }
+        }
+        e[role].add(k);
+      };
+      const items = catalog.items;
+      for (let i = 0; i < items.length; i++) {
+        if ((i & 8191) === 0) yield;
+        const it = items[i];
+        if (it.t !== 'movie' && it.t !== 'show') continue;
+        if (it.cast) for (const c of String(it.cast).split(',').slice(0, 8)) add(c, it.k, 'cast');
+        if (it.dir) for (const d of String(it.dir).split(',').slice(0, 3)) add(d, it.k, 'dir');
+      }
+      return { version, people, byPre };
+    };
+    const job = { version };
+    job.promise = Catalog.runSliced(steps()).then((idx) => { peopleIdx = idx; return idx; }).finally(() => { if (peopleBuilding === job) peopleBuilding = null; });
+    peopleBuilding = job;
   }
-  peopleIdx = { version: catalog.version, people };
-  return people;
+  // While a new one is made (the catalogue changes every few minutes while TMDB fills in details), the last one does.
+  return peopleIdx ? Promise.resolve(peopleIdx) : peopleBuilding.promise;
 }
-route('GET', '/api/search/people', (req, res, p, q, ctx) => {
+route('GET', '/api/search/people', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const raw = String(q.get('q') || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-  const toks = raw.split(/\s+/).filter(Boolean);
+  const toks = raw.split(/[\s.-]+/).filter(Boolean);
   if (!toks.length || raw.length < 3) return [];
+  const idx = await peopleIndex();
   const f = catalog.filterFor(prof);
   const hits = [];
-  for (const [key, e] of peopleIndex()) {
-    const words = key.split(/[\s.-]+/);
+  // Only names with a word starting like the longest word typed need checking.
+  const longest = toks.slice().sort((a, b) => b.length - a.length)[0];
+  const cands = longest.length >= 3 ? idx.byPre.get(longest.slice(0, 3)) || [] : idx.people.values();
+  for (const e of cands) {
+    const words = e.words;
     // Every word typed starts a word of the name ("tom han", "nolan", "j lawrence").
     if (!toks.every((t) => words.some((w) => w.startsWith(t)))) continue;
     if (toks.length === 1 && toks[0].length < 4 && !words.includes(toks[0])) continue;
     const keys = (role) => [...e[role]].map((k) => catalog.get(k)).filter((it) => it && f.test(it)).sort((a, b) => (b.y || 0) - (a.y || 0)).map((it) => it.k);
     const cast = keys('cast'), dir = keys('dir');
     if (!cast.length && !dir.length) continue;
-    const exact = key === raw ? 50 : 0;
+    const exact = e.key === raw ? 50 : 0;
     hits.push({ name: e.name, role: dir.length > cast.length ? 'dir' : 'cast', cast: cast.slice(0, 60), dir: dir.slice(0, 60), score: exact + cast.length + dir.length * 1.5 });
   }
   hits.sort((a, b) => b.score - a.score);
@@ -1118,15 +1169,20 @@ function siteOrigin(req) {
   const host = (cfg.trustProxy && req.headers['x-forwarded-host']) || req.headers.host || `localhost:${cfg.port}`;
   return `${secureReq(req) ? 'https' : 'http'}://${host}`;
 }
-route('POST', '/api/pair/start', (req, res) => {
+route('POST', '/api/pair/start', async (req, res) => {
   sweepPairs();
   const ip = clientIp(req);
-  if ([...pairs.values()].filter((x) => x.ip === ip).length >= 5 || pairs.size > 200) throw new HttpError(429, 'Too many sign-in codes. Wait a few minutes.');
+  const ua = String(req.headers['user-agent'] || '').slice(0, 300);
+  // The same sign-in page asking again (reloaded, or its code ran out): its old code is replaced rather than counted.
+  const body = await readJSON(req).catch(() => ({}));
+  const prev = body && typeof body.prev === 'string' ? pairs.get(body.prev) : null;
+  if (prev && prev.ip === ip && !prev.approved) pairs.delete(body.prev);
+  if ([...pairs.values()].filter((x) => x.ip === ip).length >= 8 || pairs.size > 200) throw new HttpError(429, 'Too many sign-in codes. Wait a few minutes.');
   const id = crypto.randomBytes(12).toString('base64url');
   let code;
   do code = pairCode(); while ([...pairs.values()].some((x) => x.code === code));
   const secret = crypto.randomBytes(18).toString('base64url');
-  pairs.set(id, { code, secret, created: Date.now(), ip, ua: String(req.headers['user-agent'] || '').slice(0, 300), approved: null });
+  pairs.set(id, { code, secret, created: Date.now(), ip, ua, approved: null });
   const link = `${siteOrigin(req)}/#/pair?c=${code}`;
   return { id, secret, code: code.slice(0, 3) + '-' + code.slice(3), link, qr: qrSvg(link, { size: 240 }), expires: Date.now() + PAIR_TTL };
 }, 'public');
@@ -1233,12 +1289,13 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
     lists: lists.all().map((l) => ({ ...lists.view(l), inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
     profiles: accounts.profiles.map((x) => ({ ...accounts.view(x), online: hub.online().includes(x.id) })),
     devices: accounts.sessionsList(),
+    me: ctx.sess ? ctx.sess.id : null,
     status: {
       version: cfg.version, ffmpeg: media.available, ffmpegVersion: media.version, hw: media.hw, encoders: [...media.encoders].filter((e) => /h264_/.test(e)),
       sessions: [...media.sessions.values()].map((x) => ({ id: x.id, label: x.label, owner: x.owner, transcode: x.transcode, hw: x.hw, height: x.height, startedAt: x.startedAt })),
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
-      dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()),
+      dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()), mem: process.memoryUsage().rss, items: catalog.items.length,
       defaultPassword: accounts.d.site.isDefault, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(),
     },
     watching: [...hub.conns].filter((c) => c.playing).map((c) => ({ pid: c.pid, device: c.deviceName, k: c.playing.k, n: c.playing.n, at: c.playing.at })),
@@ -1363,6 +1420,12 @@ route('DELETE', '/api/admin/profiles/:id', (req, res, p, q, ctx) => {
   return { ok: true };
 });
 route('POST', '/api/admin/profiles/:id/make-admin', (req, res, p, q, ctx) => { const a = requireAdmin(ctx); accounts.transferAdmin(a.id, p.id); hub.toAll('profiles', {}); return { ok: true }; });
+route('POST', '/api/admin/devices/prune', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const body = await readJSON(req).catch(() => ({}));
+  const days = Math.max(1, Math.min(365, +body.days || 30));
+  return { ok: true, removed: accounts.endIdleSessions(days, ctx.sess && ctx.sess.id) };
+});
 route('DELETE', '/api/admin/devices/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); accounts.endSession(p.id); return { ok: true }; });
 route('GET', '/api/admin/groups', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -1690,7 +1753,7 @@ let bundle = null;
 function buildBundle() {
   const order = JSON.parse(fs.readFileSync(path.join(WEB, 'order.json'), 'utf8'));
   const js = order.js.map((f) => `/* ${f} */\n` + fs.readFileSync(path.join(WEB, 'js', f), 'utf8')).join('\n;\n');
-  const css = order.css.map((f) => fs.readFileSync(path.join(WEB, 'css', f), 'utf8')).join('\n');
+  const css = cssFallbacks(order.css.map((f) => fs.readFileSync(path.join(WEB, 'css', f), 'utf8')).join('\n'));
   const html = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const v = crypto.createHash('sha1').update(js + css + html).digest('hex').slice(0, 10);
   const mk = (s) => { const raw = Buffer.from(s); return { raw, gz: zlib.gzipSync(raw, { level: 9 }), etag: `"${crypto.createHash('sha1').update(raw).digest('hex').slice(0, 16)}"` }; };
@@ -1731,6 +1794,8 @@ async function handle(req, res) {
     }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
+    // Just started: the page loads straight away; what needs the catalogue waits for it to be ready.
+    if (catalogReady && /^\/(api|c|k|h)\//.test(pathname) && !/^\/api\/(login|boot|pair\/|events)/.test(pathname)) await catalogReady;
 
     // Cast links: /c/<token>/api/session/... etc. — no cookie needed, CORS open, valid for a few hours.
     const cm = pathname.match(/^\/c\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(\/api\/(?:session|proxy|local)\/?.*)$/);
@@ -1862,7 +1927,8 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
   lists.loadSaved();
   for (const g of lists.guides()) if (!g.enabled) epg.removeSource(g.id);
   epg.setOrder(lists.guides().filter((g) => g.enabled).map((g) => g.id));
-  rebuildCatalog();
+  // Built in slices while the server already answers (a big catalogue takes a while).
+  catalogReady = Promise.resolve(rebuildCatalog()).then(() => { catalogReady = null; });
   buildBundle();
   server.listen(cfg.port, cfg.host, () => {
     const shown = ['0.0.0.0', '::'].includes(cfg.host) ? 'localhost' : cfg.host;

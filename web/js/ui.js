@@ -38,19 +38,26 @@ V.router = {
     var fresh = view.cloneNode(false);
     view.parentNode.replaceChild(fresh, view);
     view = fresh;
-    view.className = 'view view-' + r.name;
+    view.className = 'view view-' + r.name + (keepScroll ? '' : ' enter');
     try { fn(view, r); } catch (e) { console.error(e); view.innerHTML = '<div class="empty"><h2>Something went wrong</h2><p>' + V.esc(e.message) + '</p></div>'; }
     var y = keepScroll ? window.scrollY : V.router.scroll[r.hash] || 0;
     window.scrollTo(0, y);
+    // A row of tabs wider than the screen (Admin on a phone): bring the current one into view.
+    var tab = V.$('.tabs .tab.on', view);
+    if (tab && tab.parentNode.scrollWidth > tab.parentNode.clientWidth) tab.parentNode.scrollLeft = Math.max(0, tab.offsetLeft - tab.parentNode.offsetLeft - (tab.parentNode.clientWidth - tab.offsetWidth) / 2);
     if (!keepScroll) {
       var h1 = V.$('h1', view);
       V.announce((h1 ? h1.textContent : r.name) + ' page');
       if (!V.tvMode) view.focus({ preventScroll: true });
-      else setTimeout(function () { var f = V.$('#view .hero-acts .btn, #view .tp-acts .btn, #view .card, #view button, #view a'); if (f) f.focus({ preventScroll: true }); }, 60);
+      // (Unless the page has already put focus somewhere itself, like the guide on what's on now.)
+      else setTimeout(function () { var a = document.activeElement, vw = V.$('#view'); if (a && a !== document.body && vw && vw.contains(a)) return; var f = V.$('#view .hero-acts .btn, #view .tp-acts .btn, #view .card, #view button, #view a'); if (f) f.focus({ preventScroll: true }); }, 60);
     }
   },
 };
-window.addEventListener('hashchange', function () { V.router.render(); });
+window.addEventListener('hashchange', function () {
+  Array.prototype.forEach.call(document.querySelectorAll('dialog.dlg'), function (d) { if (d._routeClose) d._routeClose(); });
+  V.router.render();
+});
 
 // ---------------------------------------------------------------- shell
 V.renderShell = function () {
@@ -199,7 +206,7 @@ V.row = function (o) {
   sec.dataset.row = o.id || '';
   sec.setAttribute('aria-label', o.title);
   sec.innerHTML = '<div class="row-h"><h2>' + (o.more ? '<a href="' + o.more + '">' + V.esc(o.title) + ' ' + V.icon('next') + '</a>' : V.esc(o.title)) + '</h2>' + (o.extra || '') + '</div>' +
-    '<div class="row-wrap"><button class="row-btn prev" aria-label="Scroll left" tabindex="-1">' + V.icon('back') + '</button><div class="row-scroll" data-list role="list"></div><button class="row-btn next" aria-label="Scroll right" tabindex="-1">' + V.icon('next') + '</button></div>';
+    '<div class="row-wrap"><button class="row-btn prev" aria-label="Scroll left" tabindex="-1">' + V.icon('back') + '</button><div class="row-scroll" data-list></div><button class="row-btn next" aria-label="Scroll right" tabindex="-1">' + V.icon('next') + '</button></div>';
   var sc = V.$('.row-scroll', sec);
   sc._items = o.items;
   var n = 0;
@@ -212,7 +219,7 @@ V.row = function (o) {
       var co = Object.assign({}, o.cardOpts || {}, x.opts || {});
       if (o.numbered) co.rank = n + 1;
       if (x.next) co.next = true;
-      html += V.card(it, co).replace('<a ', '<a role="listitem" ' + (o.play || x.play ? 'data-play="1" ' : ''));
+      html += V.card(it, co).replace('<a ', '<a ' + (o.play || x.play ? 'data-play="1" ' : ''));
     }
     sc.insertAdjacentHTML('beforeend', html);
   };
@@ -236,7 +243,6 @@ V.grid = function (host, items, o) {
   host.innerHTML = '';
   var g = document.createElement('div');
   g.className = 'grid ' + (o.shape || 'poster');
-  g.setAttribute('role', 'list');
   g.dataset.list = '';
   g._items = items;
   host.appendChild(g);
@@ -244,7 +250,7 @@ V.grid = function (host, items, o) {
   var more = function () {
     var html = '';
     var end = Math.min(items.length, n + (o.batch || 60));
-    for (; n < end; n++) html += V.card(items[n], o.cardOpts).replace('<a ', '<a role="listitem" ');
+    for (; n < end; n++) html += V.card(items[n], o.cardOpts);
     g.insertAdjacentHTML('beforeend', html);
     if (n >= items.length && sentinel) { io.disconnect(); sentinel.remove(); sentinel = null; }
   };

@@ -239,6 +239,17 @@ Notes:
 - **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new program files are picked up automatically — the web app reloads and the server restarts itself when nobody is watching through it. You can also upload the app's .zip in Admin; settings and data are never touched.
 - **Your week** (My stuff): time watched per day and what you watched most.
 
+**Speed and reliability**
+- **Smaller catalogue updates:** when the lists change, devices download only what changed (a few KB instead of the whole catalogue).
+- **The server keeps answering while it works:** big catalogues are rebuilt in short slices in the background, so nobody's stream stalls and pages stay quick during a list refresh. After a restart the page loads at once and the catalogue follows when ready.
+- **Less memory:** the providers' raw lists aren't kept in memory between refreshes (they're read again from disk when needed).
+- **Older TVs and browsers:** the web app is plain ES5 with small built-in fallbacks (layout spacing, sizes, colours and focus rings for browsers without flexbox `gap`, `aspect-ratio`, `clamp()` or CSS variables; key names for remotes on 2015–17 TVs; dialogs where `<dialog>` is missing), so it runs and looks right on older smart-TV browsers too.
+- **Connection note:** if the device goes offline or the server can't be reached, a small note says so (downloads keep playing) and everything catches up when it's back.
+- **Restarts are smooth:** a page opened while the server restarts waits and says *Connecting to the server…* instead of dropping to offline mode, and goes back in by itself.
+- **Big lists are saved without pausing anything,** and a half-written copy can never replace a good one.
+- **TV remotes:** every chip, switch and checkbox can be reached with the arrow keys and ticked with OK; Back closes menus and dialogs; the Menu/Info key opens a poster's options; the guide opens on what's on now (and Up/Left from its edge go back to the buttons); Up/Down move a line at a time and stay at the end of a row instead of jumping elsewhere; on long pages with nothing to select (statistics tables) Up/Down scroll; the sign-in code screen is larger on TVs and gets a new code by itself if it couldn't get one; press **?** anywhere for the keyboard shortcuts. `python3 test/ui/tvreach.py http://localhost:8080` checks that everything on each page can be reached with the arrow keys.
+- **Small things:** searching for an actor or director answers instantly on big catalogues; a channel that's down offers *Next channel*; a series whose episodes the provider didn't send says so with *Try again*; the resume offer isn't repeated for what you just watched on the same device.
+
 ### Player keys
 
 | Key | Action |
@@ -257,6 +268,8 @@ Notes:
 | I | Stats (live TV: what's on) |
 | X / G | Previous channel / guide (live TV) |
 | / | Search (outside the player) |
+| ? | Show these keys |
+| Menu / Info (remote) | Options for the highlighted poster or channel (My List, hide, download…) |
 | Esc / Back | Close |
 
 ---

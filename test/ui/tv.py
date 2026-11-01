@@ -21,6 +21,11 @@ with sync_playwright() as p:
     for k in ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowRight', 'ArrowDown']:
         pg.keyboard.press(k); pg.wait_for_timeout(250); print(k, '->', f())
     pg.screenshot(path=f'{OUT}/t1-tv-home.png')
+    # Enter on a "continue watching" card starts it straight away.
+    # (No "continue watching" row when nothing is part-watched: start something from its title page instead.)
+    if not pg.evaluate("!!document.querySelector('.card.wide')"):
+        pg.evaluate("location.hash = '#/title/' + S.movies[0].k"); pg.wait_for_timeout(1500)
+    pg.evaluate("(document.querySelector('.card.wide') || document.querySelector('.tp-acts .btn.primary')).focus()")
     pg.keyboard.press('Enter'); pg.wait_for_timeout(2500)
     print('after enter: hash', pg.evaluate("location.hash"), 'player open:', pg.evaluate("!document.getElementById('player-layer').hidden"))
     pg.keyboard.press('Escape'); pg.wait_for_timeout(800)

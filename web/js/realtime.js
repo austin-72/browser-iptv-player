@@ -3,13 +3,16 @@
 V.rt = (function () {
   var es = null;
   var retry = 0;
+  var timer = 0;
+  // Network back: reconnect now rather than at the end of the back-off.
+  window.addEventListener('online', function () { if (S.profile && (!es || es.readyState !== 1)) { retry = 0; clearTimeout(timer); connect(); } });
 
   function connect() {
     close();
     if (!window.EventSource || !S.profile) return;
     es = new EventSource('/api/events?device=' + encodeURIComponent(V.device.id) + '&name=' + encodeURIComponent(V.device.name));
     es.onopen = function () { V._epsOk = {}; }; // (re)connected: the server may have restarted
-    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
+    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; V.net.up(); V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
     var on = function (name, fn) { es.addEventListener(name, function (e) { var d; try { d = JSON.parse(e.data); } catch (x) { return; } fn(d); }); };
     on('message', function (m) { V.emit('message', m); });
     on('read', function (d) { V.emit('read', d); });
@@ -35,7 +38,12 @@ V.rt = (function () {
     on('app-updated', function () { V.appUpdated(); });
     on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {
-      if (es && es.readyState === 2) { close(); retry++; setTimeout(connect, Math.min(30000, 1000 * Math.pow(2, retry))); }
+      V.net.down();
+      if (es && es.readyState === 2) {
+        close(); retry++; clearTimeout(timer); timer = setTimeout(connect, Math.min(30000, 1000 * Math.pow(2, retry)));
+        // The server refused (rather than couldn't be reached): if this device was signed out, any request says so.
+        V.api('/api/me').catch(function () {});
+      }
     };
   }
   function close() { if (es) { try { es.close(); } catch (e) {} es = null; } S.conn = null; }
@@ -44,6 +52,7 @@ V.rt = (function () {
   return {
     connect: connect,
     close: close,
+    open: function () { return !!(es && es.readyState === 1 && S.conn); },
     /** Tell the household what this device is playing (only if the profile allows it). */
     presence: function (playing) {
       S.nowPlaying = playing;
@@ -95,3 +104,51 @@ V.appUpdated = function () {
   if (!(V.watch && V.watch.it) && !document.querySelector('dialog[open]')) { setTimeout(function () { location.reload(); }, 1500); return; }
   V.toast('A new version is ready.', { action: { label: 'Reload', fn: function () { location.reload(); } }, ms: 30000 });
 };
+
+// ---------------------------------------------------------------- connection status
+// A small note while this device is offline or can't reach the server (things keep working where they can).
+V.net = (function () {
+  var bar = null, shownAt = 0, downSince = 0, wait = 0;
+  function show(text, offline) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'netbar';
+      bar.setAttribute('role', 'status');
+      document.body.appendChild(bar);
+    }
+    bar.className = offline ? 'off' : '';
+    bar.innerHTML = '<span class="nb-dot"></span><span>' + V.esc(text) + '</span>' + (offline && location.hash.indexOf('#/downloads') !== 0 ? ' <a href="#/downloads">Downloads</a>' : '');
+    if (!shownAt) shownAt = Date.now();
+    document.body.classList.add('has-netbar');
+  }
+  function hide() {
+    clearTimeout(wait); downSince = 0;
+    if (!bar || !shownAt) return;
+    var was = shownAt; shownAt = 0;
+    document.body.classList.remove('has-netbar');
+    bar.remove(); bar = null;
+    if (Date.now() - was > 2500) V.toast('Back online.', { ms: 2500 });
+  }
+  function check() {
+    if (navigator.onLine === false) return show('You’re offline. Downloads still play.', true);
+    // A blip (the server restarting, Wi-Fi switching) shouldn't flash a warning: only after a few seconds.
+    if (downSince) return; // already waiting (the browser retries every few seconds)
+    downSince = Date.now();
+    wait = setTimeout(function () { if (downSince) show('Can’t reach the server — trying again…', false); }, 6000);
+  }
+  window.addEventListener('offline', check);
+  window.addEventListener('online', function () {
+    if (!shownAt) return;
+    // (The live connection may have stayed up through a short drop.)
+    if (V.rt.open()) hide(); else show('Reconnecting…', false);
+  });
+  return {
+    down: check,
+    up: function () {
+      var wasDown = !!shownAt;
+      hide();
+      // Missed catalogue changes while away: fetch them (only what changed).
+      if (wasDown && V.loadCatalog) V.loadCatalog().catch(function () {});
+    },
+  };
+})();

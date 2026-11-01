@@ -101,10 +101,7 @@ V.changePin = function () {
   });
 };
 
-V.shortcutsHelp = function () {
-  var rows = [['Space / K', 'Play / pause'], ['← / →', 'Back 10 s / forward 10 s (Shift: 60 s)'], ['J / L', 'Back / forward 10 s'], ['↑ / ↓', 'Volume — or channel up/down on live TV'], ['0–9', 'Type a channel number'], ['X', 'Previous channel'], ['F', 'Full screen'], ['M', 'Mute'], ['C', 'Subtitles on/off'], ['A', 'Next audio track'], ['S', 'Skip intro / credits'], ['N', 'Next episode'], ['B', 'Bookmark this moment'], ['< / >', 'Slower / faster'], [', / .', 'Frame back / forward (paused)'], ['I', 'Channel info / stream info'], ['P', 'Picture in picture'], ['G', 'TV guide'], ['Esc / Back', 'Shrink the player (keep watching while browsing)'], ['/', 'Search (anywhere)']];
-  V.dialog({ title: 'Keyboard and remote shortcuts', body: '<dl class="keys">' + rows.map(function (r) { return '<dt><kbd>' + r[0] + '</kbd></dt><dd>' + r[1] + '</dd>'; }).join('') + '</dl><p class="dim small">On a TV remote, the arrow keys move around, OK selects and Back goes back. Channel up/down and the number keys work while watching live TV.</p>' });
-};
+V.shortcutsHelp = function () { V.keyHelp('all'); };
 
 V.applyLook = function () {
   var pf = (S.data && S.data.prefs) || {};

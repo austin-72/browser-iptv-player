@@ -149,6 +149,8 @@ body.in-party [data-a=party] { color: var(--accent); }
 .mini-bar .icon-btn { background: rgba(0,0,0,.6); color: #fff; }
 .mini-bar .icon-btn:hover { background: rgba(0,0,0,.85); }
 @media (max-width: 760px) { #player-layer.mini { width: min(20rem, calc(100vw - 24px)); right: 12px; bottom: calc(12px + var(--tab)); } }
+/* Phones: a smaller corner player, so the page underneath stays usable. */
+@media (max-width: 480px) { #player-layer.mini { width: 62vw; } }
 
 @media (max-width: 600px) {
   .vp-row [data-a=bookmark], .vp-row [data-a=pip], .vp-row [data-a=gear]:not(:focus) + * { }

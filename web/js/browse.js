@@ -51,7 +51,7 @@ function vodPage(view, r, type, title) {
   if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
   var pin = V.$('[data-pin-g]', view);
   if (pin) pin.onclick = function () { var id = type + '|' + g; if (S.data.home.pinned.indexOf(id) < 0) { S.data.home.pinned.push(id); V.saveHome(); } V.toast('Pinned to your home page'); };
-  if (!all.length) { V.$('.grid-host', view).innerHTML = V.empty('No ' + title.toLowerCase() + ' yet', 'None of the lists have any, or your language settings hide them.'); return; }
+  if (!all.length) { V.$('.grid-host', view).innerHTML = V.empty('No ' + title.toLowerCase() + ' yet', 'None of the lists have any, or your language settings hide them.', '<div class="btn-row empty-acts"><a class="btn" href="#/settings">Language settings</a></div>'); return; }
   V.grid(V.$('.grid-host', view), items, { empty: 'Nothing matches.' });
 }
 V.route('movies', function (view, r) { vodPage(view, r, 'movie', 'Movies'); });
@@ -73,7 +73,7 @@ function channelsPage(view, r, type) {
     '<div class="live-layout"><nav class="groups" aria-label="Channel groups">' +
     [{ v: '', l: 'All channels', n: all.length }, { v: '__fav', l: 'Favourites', n: favs.length }, { v: '__recent', l: 'Recently watched', n: recent.length }].concat(groups.map(function (x) { return { v: x.name, l: x.name, n: x.items.length }; }))
       .map(function (x) { return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +
-    '</nav><div class="ch-col">' + (emptyN ? '<label class="check small ev-toggle"><input type="checkbox" data-empty-ev' + (showEmpty ? ' checked' : '') + '><span>Show ' + V.plural(emptyN, 'event channel') + ' with nothing on</span></label>' : '') + '<div class="ch-list" role="list" data-list></div></div></div>';
+    '</nav><div class="ch-col">' + (emptyN ? '<label class="check small ev-toggle"><input type="checkbox" data-empty-ev' + (showEmpty ? ' checked' : '') + '><span>Show ' + V.plural(emptyN, 'event channel') + ' with nothing on</span></label>' : '') + '<div class="ch-list" data-list></div></div></div>';
   var box = V.$('.ch-list', view);
   var et = V.$('[data-empty-ev]', view);
   if (et) et.onchange = function () { V.ls.set('showEmptyEvents', et.checked); V.router.refresh(); };
@@ -115,7 +115,7 @@ V.channelRow = function (c) {
   var pct = nn.now ? V.clamp((Date.now() - nn.now.s) / (nn.now.e - nn.now.s), 0, 1) : 0;
   var playing = V.watch && V.watch.it && (V.watch.it.k === c.k || V.watch.it.catchupOf === c.k);
   var fav = V.inList('favs', c.k);
-  return '<a class="chr' + (playing ? ' on' : '') + '" href="#/channel/' + encodeURIComponent(c.k) + '" data-k="' + V.esc(c.k) + '" role="listitem" aria-label="' + V.esc((c.no ? 'Channel ' + c.no + ', ' : '') + c.n + (nn.now ? ', now: ' + nn.now.t : '')) + '">' +
+  return '<a class="chr' + (playing ? ' on' : '') + '" href="#/channel/' + encodeURIComponent(c.k) + '" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc((c.no ? 'Channel ' + c.no + ', ' : '') + c.n + (nn.now ? ', now: ' + nn.now.t : '')) + '">' +
     '<span class="chr-no num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art chr-logo') +
     '<span class="chr-main"><span class="chr-name truncate">' + V.esc(c.n) + (c.cu ? ' ' + V.icon('archive', 'tiny') : '') + '</span>' +
     (nn.now ? '<span class="chr-now truncate">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event on now' : c.g) + '</span>') + '</span>' +
@@ -133,7 +133,7 @@ V.route('radio', function (view, r) { channelsPage(view, r, 'radio'); });
 // ---------------------------------------------------------------- one channel
 V.route('channel', function (view, r) {
   var c = V.entry(r.args[0]);
-  if (!c) { view.innerHTML = V.empty('Channel not found', 'It may have been removed from the lists.'); return; }
+  if (!c) { view.innerHTML = V.empty('Channel not found', 'It may have been removed from the lists.', '<div class="btn-row empty-acts"><a class="btn" href="#/live">All channels</a></div>'); return; }
   var fav = V.inList('favs', c.k);
   var nn = V.epg.nowNext(c);
   var canCU = V.catchup.available(c);

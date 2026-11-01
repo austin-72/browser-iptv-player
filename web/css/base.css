@@ -1,6 +1,6 @@
 /* Tokens, reset and building blocks. Colours come from the active theme (see themes.js). */
 :root {
-  --bg: #0b0d12; --bg2: #141720; --card: #1b1f2a; --card2: #262b38; --text: #eef0f5; --dim: #a3abbd; --faint: #6c7488; --line: #2a2f3d;
+  --bg: #0b0d12; --bg2: #141720; --card: #1b1f2a; --card2: #262b38; --text: #eef0f5; --dim: #a3abbd; --faint: #8b92a2; --line: #2a2f3d;
   --accent: #e50914; --on: #fff; --ok: #3ccf7a; --warn: #f5a524; --danger: #ff5a5f; --live: #ff3b30;
   --r: 10px; --r-lg: 16px; --gutter: clamp(16px, 4vw, 56px); --top: 64px; --tab: 0px;
   --shadow: 0 10px 40px rgba(0,0,0,.35);
@@ -47,6 +47,8 @@ kbd { background: var(--card2); border: 1px solid var(--line); border-bottom-wid
 
 /* Buttons */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5em; min-height: 2.5rem; padding: .5rem 1rem; border-radius: 8px; border: 1px solid var(--line); background: var(--card2); color: var(--text); font-weight: 600; text-decoration: none; white-space: nowrap; transition: background .15s, transform .1s, border-color .15s; user-select: none; }
+/* A long label on a phone wraps instead of pushing the page sideways. */
+@media (max-width: 600px) { .btn { white-space: normal; max-width: 100%; text-align: center; } }
 .btn:hover { background: color-mix(in srgb, var(--card2) 80%, var(--text)); }
 @supports not (background: color-mix(in srgb, red, blue)) { .btn:hover { filter: brightness(1.15); } }
 .btn:active { transform: scale(.98); }
@@ -72,6 +74,7 @@ kbd { background: var(--card2); border: 1px solid var(--line); border-bottom-wid
 .icon-btn[disabled] { opacity: .35; }
 .btn-row { display: flex; flex-wrap: wrap; gap: .6rem; margin: .8rem 0; }
 .inline { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.inline > input, .inline > select { max-width: 100%; min-width: 0; }
 .inline .input { flex: 1 1 12rem; }
 
 /* Inputs */
@@ -105,7 +108,7 @@ input[type=color] { width: 3rem; height: 2.4rem; border: 1px solid var(--line); 
 .chip.on, .chip[aria-pressed=true] { background: var(--text); color: var(--bg); border-color: var(--text); }
 .chip.sm { padding: .12rem .55rem; font-size: .78rem; }
 .chip.ok { color: var(--ok); }
-.chip small { opacity: .7; }
+.chip small { opacity: .8; }
 .chip .x { border: 0; background: none; padding: 0; display: inline-flex; color: inherit; }
 .chip .x .i { width: .9rem; height: .9rem; }
 .chip-check { display: inline-flex; cursor: pointer; }
@@ -127,13 +130,16 @@ input[type=color] { width: 3rem; height: 2.4rem; border: 1px solid var(--line); 
 .bar i, .bar b { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 .bar i.indet { width: 30% !important; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
-.loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 50; }
+.loading { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 1rem; align-items: center; justify-content: center; background: var(--bg); z-index: 50; }
+.load-msg { color: var(--dim); margin: 0; }
 
 /* Dialogs */
 dialog.dlg { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg2); color: var(--text); padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px); box-shadow: var(--shadow); display: flex; flex-direction: column; }
 dialog.dlg:not([open]) { display: none; }
 dialog.dlg.wide { width: min(860px, calc(100vw - 24px)); }
 dialog.dlg::backdrop { background: rgba(0,0,0,.6); }
+.dlg-fallback { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; z-index: 1001; }
+.dlg-veil { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.6); z-index: 1000; }
 .dlg-h { display: flex; align-items: center; gap: .5rem; padding: 1rem 1rem .4rem 1.3rem; }
 .dlg-h h2 { margin: 0; flex: 1; font-size: 1.15rem; }
 .dlg-b { padding: .5rem 1.3rem 1rem; overflow: auto; }
@@ -152,12 +158,19 @@ dialog.dlg::backdrop { background: rgba(0,0,0,.6); }
 .pm-sep { height: 1px; background: var(--line); margin: 4px 0; }
 
 /* Toasts */
+#netbar { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: calc(16px + var(--tab) + env(safe-area-inset-bottom)); z-index: 401; display: flex; align-items: center; gap: .55rem; max-width: calc(100vw - 32px); padding: .5rem .9rem; border-radius: 999px; background: var(--card2); border: 1px solid var(--line); color: var(--text); font-size: .9rem; font-weight: 600; box-shadow: var(--shadow); animation: toastIn .2s ease-out; }
+#netbar a { color: var(--accent); font-weight: 700; }
+#netbar .nb-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #e0a800; flex: none; animation: nbPulse 1.4s ease-in-out infinite; }
+#netbar.off .nb-dot { background: var(--danger); animation: none; }
+@keyframes nbPulse { 50% { opacity: .35; } }
+body.has-netbar #toasts { bottom: calc(68px + var(--tab) + env(safe-area-inset-bottom)); }
+body.mini-playing #netbar { bottom: auto; top: calc(var(--top) + 12px); }
 #toasts { position: fixed; left: 50%; bottom: calc(20px + var(--tab) + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 400; display: flex; flex-direction: column; gap: .5rem; align-items: center; width: min(560px, calc(100vw - 24px)); pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: .6rem; background: var(--text); color: var(--bg); padding: .65rem .65rem .65rem 1rem; border-radius: 10px; box-shadow: var(--shadow); font-weight: 500; animation: toastIn .2s ease-out; max-width: 100%; }
 .toast span { flex: 1; }
 .toast.error { background: var(--danger); color: #fff; }
 .toast.out { opacity: 0; transform: translateY(8px); transition: .25s; }
-.toast-act { border: 0; background: none; color: var(--accent); font-weight: 800; text-transform: uppercase; font-size: .85rem; padding: .3rem .5rem; }
+.toast-act { border: 0; background: none; color: var(--bg); text-decoration: underline; text-underline-offset: 3px; font-weight: 800; text-transform: uppercase; font-size: .85rem; padding: .3rem .5rem; }
 .toast.error .toast-act { color: #fff; text-decoration: underline; }
 .toast-x { border: 0; background: none; color: inherit; opacity: .6; display: flex; padding: 4px; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } }
@@ -169,6 +182,7 @@ dialog.dlg::backdrop { background: rgba(0,0,0,.6); }
 .empty { text-align: center; padding: 3rem 1rem; color: var(--dim); max-width: 34rem; margin: 0 auto; }
 .empty h2 { color: var(--text); }
 .empty .empty-i { width: 3rem; height: 3rem; opacity: .5; margin-bottom: 1rem; }
+.empty-acts { justify-content: center; margin-top: 1.2rem; }
 
 /* Avatars */
 .avatar { display: inline-block; width: 2rem; height: 2rem; border-radius: 22%; overflow: hidden; flex: none; vertical-align: middle; background: var(--card2); }

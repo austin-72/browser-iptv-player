@@ -5,6 +5,7 @@ V.watch = { it: null, list: null, mini: false };
 
 /** Plays an item. opts: { startAt, list (for channel up/down), resume: true|false (ask), party, quiet } */
 V.play = function (it, opts) {
+  if (it && it.k) V.ls.session('playedHere', it.k);
   opts = opts || {};
   if (!it) return;
   // "Play on the TV" mode (Remote): send it there instead.
@@ -244,6 +245,8 @@ V.initWatch = function () {
     var it = V.watch.it;
     var live = it && (it.t === 'live' || it.t === 'radio' || it.t === 'catchup');
     var k = e.key;
+    // On a TV, Up/Down on the seek bar move to the buttons above/below it (not the volume).
+    if (V.tvMode && (k === 'ArrowUp' || k === 'ArrowDown') && e.target.closest('.vp-seek')) return;
     var inMenu = e.target.closest('.vp-menu, .vp-side, .vp-msg, .vp-upnext, .vp-ctrl button, .vp-top button, .vp-live button, .vp-skip');
     var handled = true;
     if (k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461) {
@@ -284,6 +287,7 @@ V.initWatch = function () {
     else if (k === 'Tab') { handled = false; p._wake(); }
     else if (k === 'x' && live) V.previousChannel();
     else if (k === 'g' && live) V.router.go('#/guide');
+    else if (k === '?') V.keyHelp(true, live);
     else handled = false;
     if (handled) { e.preventDefault(); p._wake(); }
   });
@@ -518,3 +522,39 @@ V.remotePush = V.throttle(function () {
 setInterval(function () { if (Object.keys(V.remote.watchers).length) V.remotePush(); }, 2000);
 V.on('playing', function () { V.remotePush(); });
 V.on('stopped', function () { V.remotePush(); });
+
+/** "?": the keyboard shortcuts (the player's while watching). */
+V.keyHelp = function (inPlayer, live) { // inPlayer: true, false or 'all'
+  if (V.$('dialog.keys-dlg')) return;
+  var row = function (keys, what) { return '<tr><td>' + keys.map(function (x) { return '<kbd>' + V.esc(x) + '</kbd>'; }).join(' ') + '</td><td>' + V.esc(what) + '</td></tr>'; };
+  var player = [
+    row(['Space', 'K'], 'Play / pause'),
+    row(['←', '→'], 'Back / forward 10 s (with Shift: 60 s)'),
+    row(['J', 'L'], 'Back / forward 10 s'),
+    row(['↑', '↓'], live ? 'Change channel' : 'Volume'),
+    row(['F'], 'Full screen'), row(['M'], 'Mute'), row(['P'], 'Picture-in-picture'),
+    row(['C'], 'Subtitles on / off'), row(['A'], 'Next audio track'),
+  ];
+  var liveRows = [row(['0–9'], 'Go to channel number'), row(['X'], 'Previous channel'), row(['G'], 'TV guide'), row(['I'], 'What’s on')];
+  var vodRows = [row(['S'], 'Skip intro or credits'), row(['N'], 'Next episode'), row(['B'], 'Bookmark this moment'), row([',', '.'], 'Frame by frame (paused)'), row(['<', '>'], 'Slower / faster'), row(['I'], live === undefined ? 'Playback details (live TV: what’s on)' : 'Playback details')];
+  var all = inPlayer === 'all';
+  if (all) { player[3] = row(['↑', '↓'], 'Volume (live TV: change channel)'); player = player.concat(vodRows, liveRows.slice(0, 3)); }
+  else player = player.concat(live ? liveRows : vodRows);
+  player.push(row(['Esc'], 'Small player / close'));
+  var app = [row(['/'], 'Search'), row(['←', '↑', '→', '↓'], 'Move around (remote or keyboard)'), row(['Enter'], 'Open / play'), row(['Menu'], 'Options for the highlighted poster or channel'), row(['Esc', 'Back'], 'Go back / close'), row(['?'], 'This list')];
+  V.dialog({
+    title: 'Keyboard shortcuts', cls: 'keys-dlg',
+    body: (inPlayer ? '<h3>While watching</h3><table class="kb-table">' + player.join('') + '</table><h3>Everywhere</h3>' : '') + '<table class="kb-table">' + app.join('') + '</table>' +
+      (inPlayer ? '' : '<p class="dim">Press ? while something is playing to see the player’s keys.</p>') +
+      (V.tvMode || all ? '<p class="dim small">On a TV remote, the arrow keys move around, OK selects and Back goes back. Channel up/down and the number keys work while watching live TV.</p>' : ''),
+    actions: [{ label: 'Close', primary: true }],
+  });
+};
+document.addEventListener('keydown', function (e) {
+  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey || !S.profile) return;
+  if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable], dialog')) return;
+  var layer = V.$('#player-layer');
+  if (layer && !layer.hidden && !(V.watch && V.watch.mini)) return; // (the player's own handler shows its keys)
+  e.preventDefault();
+  V.keyHelp(false);
+});

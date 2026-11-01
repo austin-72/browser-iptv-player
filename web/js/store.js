@@ -14,12 +14,20 @@ V.loadCatalog = function (force) {
     cached = c;
     var h = {};
     if (c && c.etag) h['If-None-Match'] = c.etag;
-    return fetch('/api/catalog', { headers: h, credentials: 'same-origin' });
+    // With a copy here already, the server can send just what changed since.
+    return fetch('/api/catalog' + (c && c.etag && c.data && c.data.items ? '?since=' + encodeURIComponent(c.etag) : ''), { headers: h, credentials: 'same-origin' });
   }).then(function (r) {
     if (r.status === 304 && cached) return cached.data;
     if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'Couldn’t load the catalogue'); });
     var etag = r.headers.get('ETag');
-    return r.json().then(function (data) { V.idb.set(cacheKey, { etag: etag, data: data }); return data; });
+    return r.json().then(function (data) {
+      if (data.delta) {
+        if (!cached || !cached.data) return V.loadCatalog(true);
+        data = V.applyCatalogDelta(cached.data, data);
+      }
+      V.idb.set(cacheKey, { etag: etag, data: data });
+      return data;
+    });
   }, function (e) {
     if (cached) { S.offlineCatalog = true; return cached.data; }
     throw e;
@@ -29,6 +37,16 @@ V.loadCatalog = function (force) {
     V.emit('catalog');
     return data;
   });
+};
+
+/** Applies the changes the server sent ({set, del}) to the copy kept on this device. */
+V.applyCatalogDelta = function (old, d) {
+  var pos = new Map();
+  var items = old.items.slice();
+  items.forEach(function (it, i) { pos.set(it.k, i); });
+  d.set.forEach(function (it) { var i = pos.get(it.k); if (i === undefined) { pos.set(it.k, items.length); items.push(it); } else items[i] = it; });
+  if (d.del.length) { var gone = new Set(d.del); items = items.filter(function (it) { return !gone.has(it.k); }); }
+  return { version: d.version, base: d.base, items: items };
 };
 
 V.index = function (items) {

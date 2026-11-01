@@ -107,7 +107,7 @@ __ACCENT__
   <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
 </svg>
 <div id="loading" class="loading"><div class="spinner lg" role="progressbar" aria-label="Loading"></div></div>
-<div id="profiles" class="screen" hidden></div>
+<div id="profiles" class="screen" role="main" hidden></div>
 <div id="shell" hidden>
   <header id="topbar">
     <a id="brand" class="brand" href="#/home"></a>
@@ -121,23 +121,23 @@ __ACCENT__
       <a data-nav="mine" href="#/mine">My List</a>
     </nav>
     <span class="sp"></span>
-    <a class="icon-btn" data-nav="search" href="#/search" aria-label="Search" title="Search (/)"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg></a>
-    <a class="icon-btn msg-btn" data-nav="messages" href="#/messages" aria-label="Messages" title="Messages"><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg><span class="unread-badge" hidden></span></a>
-    <a class="icon-btn" data-nav="admin" href="#/admin" aria-label="Admin" title="Admin" data-admin-only hidden><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg></a>
+    <a class="icon-btn" data-nav="search" href="#/search" aria-label="Search" title="Search (/)"><svg class="i" aria-hidden="true"><use href="#i-search" xlink:href="#i-search"/></svg></a>
+    <a class="icon-btn msg-btn" data-nav="messages" href="#/messages" aria-label="Messages" title="Messages"><svg class="i" aria-hidden="true"><use href="#i-chat" xlink:href="#i-chat"/></svg><span class="unread-badge" hidden></span></a>
+    <a class="icon-btn" data-nav="admin" href="#/admin" aria-label="Admin" title="Admin" data-admin-only hidden><svg class="i" aria-hidden="true"><use href="#i-shield" xlink:href="#i-shield"/></svg></a>
     <button id="me-btn" class="me-btn" aria-haspopup="menu"></button>
   </header>
   <main id="view" class="view" tabindex="-1"></main>
   <nav id="tabbar" aria-label="Main">
-    <a data-nav="home" href="#/home"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span></a>
-    <a data-nav="live" href="#/live" data-need="live,radio"><svg class="i" aria-hidden="true"><use href="#i-tv"/></svg><span>Live</span></a>
-    <a data-nav="search" href="#/search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span></a>
-    <a data-nav="messages" href="#/messages"><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg><span>Messages</span><span class="unread-badge" hidden></span></a>
-    <a data-nav="mine" href="#/mine"><svg class="i" aria-hidden="true"><use href="#i-bookmark"/></svg><span>My List</span></a>
+    <a data-nav="home" href="#/home"><svg class="i" aria-hidden="true"><use href="#i-home" xlink:href="#i-home"/></svg><span>Home</span></a>
+    <a data-nav="live" href="#/live" data-need="live,radio"><svg class="i" aria-hidden="true"><use href="#i-tv" xlink:href="#i-tv"/></svg><span>Live</span></a>
+    <a data-nav="search" href="#/search"><svg class="i" aria-hidden="true"><use href="#i-search" xlink:href="#i-search"/></svg><span>Search</span></a>
+    <a data-nav="messages" href="#/messages"><svg class="i" aria-hidden="true"><use href="#i-chat" xlink:href="#i-chat"/></svg><span>Messages</span><span class="unread-badge" hidden></span></a>
+    <a data-nav="mine" href="#/mine"><svg class="i" aria-hidden="true"><use href="#i-bookmark" xlink:href="#i-bookmark"/></svg><span>My List</span></a>
   </nav>
 </div>
 <div id="player-layer" hidden>
   <div id="player-host"></div>
-  <div class="mini-bar"><button class="icon-btn sm" data-mini="toggle" aria-label="Play or pause"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg></button><button class="icon-btn sm" data-mini="open" aria-label="Back to full screen"><svg class="i" aria-hidden="true"><use href="#i-fs"/></svg></button><button class="icon-btn sm" data-mini="close" aria-label="Stop"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="mini-bar"><button class="icon-btn sm" data-mini="toggle" aria-label="Play or pause"><svg class="i" aria-hidden="true"><use href="#i-play" xlink:href="#i-play"/></svg></button><button class="icon-btn sm" data-mini="open" aria-label="Back to full screen"><svg class="i" aria-hidden="true"><use href="#i-fs" xlink:href="#i-fs"/></svg></button><button class="icon-btn sm" data-mini="close" aria-label="Stop"><svg class="i" aria-hidden="true"><use href="#i-x" xlink:href="#i-x"/></svg></button></div>
 </div>
 <div id="toasts" aria-live="polite"></div>
 <div id="sr-live" class="sr-only" aria-live="polite"></div>

@@ -8,6 +8,7 @@ with sync_playwright() as p:
     pg.on('pageerror', lambda e: errors.append(str(e)))
     cdp = pg.context.new_cdp_session(pg); cdp.send('Emulation.setCPUThrottlingRate', {'rate': SLOW})
     pg.goto(B); pg.wait_for_timeout(500)
+    if pg.is_visible('#usepw'): pg.click('#usepw')
     if pg.is_visible('#pw'): pg.fill('#pw', 'changeme'); pg.keyboard.press('Enter'); pg.wait_for_timeout(1500)
     if pg.is_visible('.pf[data-id]'):
         pg.click('.pf[data-id]'); pg.wait_for_timeout(400)

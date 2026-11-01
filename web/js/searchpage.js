@@ -3,7 +3,7 @@
 V.route('search', function (view, r) {
   var q0 = r.q.get('q') || '';
   var voice = window.SpeechRecognition || window.webkitSpeechRecognition;
-  view.innerHTML = '<div class="search-page"><form class="search-box" role="search"><span class="sb-i">' + V.icon('search') + '</span>' +
+  view.innerHTML = '<h1 class="sr-only">Search</h1><div class="search-page"><form class="search-box" role="search"><span class="sb-i">' + V.icon('search') + '</span>' +
     '<input type="search" class="input" data-q placeholder="Movies, series, channels, people…" aria-label="Search" autocomplete="off" enterkeyhint="search" value="' + V.esc(q0) + '">' +
     (voice ? '<button type="button" class="icon-btn" data-voice aria-label="Search by voice">' + V.icon('mic') + '</button>' : '') + '</form><div class="search-out"></div></div>';
   var input = V.$('[data-q]', view), out = V.$('.search-out', view);

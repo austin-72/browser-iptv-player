@@ -21,7 +21,7 @@ V.similar = function (it, n) {
 
 V.route('title', function (view, r) {
   var it = V.entry(r.args[0]);
-  if (!it) { view.innerHTML = V.empty('Not found', 'It may have been removed from the lists.'); return; }
+  if (!it) { view.innerHTML = V.empty('Not found', 'It may have been removed from the lists.', '<div class="btn-row empty-acts"><a class="btn" href="#/search">Search</a><a class="btn" href="#/home">Home</a></div>'); return; }
   if (it.t === 'episode') it = V.showOf(it) || it;
   var isShow = it.t === 'show';
   var p = V.progressOf(it.k);
@@ -33,6 +33,9 @@ V.route('title', function (view, r) {
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
     (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select></div><div class="eps"><div class="spinner"></div></div></section>' : '') +
     '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
+  // A poster that doesn't load isn't replaced with initials here — the title is right next to it anyway.
+  var pimg = V.$('.tp-poster img', view);
+  if (pimg) pimg.addEventListener('error', function () { var pp = V.$('.tp-poster', view); if (pp) pp.hidden = true; });
 
   var meta = function (d) {
     var bits = [d.y, d.c ? '<span class="cert">' + V.esc(d.c) + '</span>' : '', d.r ? '★ ' + d.r : '', !isShow && d.d ? V.fmtLen(d.d) : '', isShow && d.ne ? V.plural(d.ne, 'episode') : '', (d.lg || []).map(V.langName).join(', '), d.nt || it.nt ? '<span class="note">' + V.esc(d.nt || it.nt) + '</span>' : ''].filter(Boolean);
@@ -95,10 +98,17 @@ V.route('title', function (view, r) {
     if (isShow) {
       var eps = (d.episodes || []).map(function (e) { var ex = V.entry(e.k); if (!ex) { S.extra.set(e.k, e); ex = e; } if (e.plot && !ex.plot) ex.plot = e.plot; return ex; });
       it._eps = eps;
-      drawEpisodes(eps);
+      if (!eps.length && d.epsError) {
+        V.$('.eps', view).innerHTML = '<p class="dim">' + V.esc(d.epsError) + '</p><button class="btn" data-eps-retry>' + V.icon('refresh') + ' Try again</button>';
+        V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };
+      } else drawEpisodes(eps);
       drawActs(eps);
     }
-  }).catch(function (e) { if (isShow) V.$('.eps', view).innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  }).catch(function (e) {
+    if (!isShow) return;
+    V.$('.eps', view).innerHTML = '<p class="err">' + V.esc(e.message) + '</p><button class="btn" data-eps-retry>' + V.icon('refresh') + ' Try again</button>';
+    V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };
+  });
 
   function drawEpisodes(eps) {
     var box = V.$('.eps', view);
@@ -188,7 +198,7 @@ V.fixDetails = function (it, d) {
     V.api('/api/item/' + encodeURIComponent(it.k) + '/matches' + (q ? '?q=' + encodeURIComponent(q) : '')).then(function (r) {
       if (!r.options.length) { list.innerHTML = '<p class="dim">Nothing found. Try another title below.</p>'; return; }
       list.innerHTML = r.options.map(function (o, i) {
-        return '<button class="fix-opt' + (o.current ? ' cur' : '') + '" data-i="' + i + '"><span class="fo-art">' + (o.poster ? '<img src="' + V.esc(o.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '</span><span class="fo-b"><b>' + V.esc(o.title) + '</b> <span class="dim">' + (o.year || '') + ' · ' + (o.type === 'tv' ? 'Series' : 'Movie') + (o.current ? ' · shown now' : '') + '</span>' +
+        return '<button class="fix-opt' + (o.current ? ' cur' : '') + '" data-i="' + i + '"><span class="fo-art">' + (o.poster ? '<img src="' + V.esc(o.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + '</span><span class="fo-b"><b>' + V.esc(o.title) + '</b> <span class="dim">' + (o.year || '') + ' · ' + (o.type === 'tv' ? 'Series' : 'Movie') + (o.current ? ' · shown now' : '') + '</span>' +
           (o.original && o.original !== o.title ? '<span class="dim small">' + V.esc(o.original) + '</span>' : '') + '<span class="small clamp3">' + V.esc(o.plot || 'No description.') + '</span></span></button>';
       }).join('');
       list.onclick = function (e) {
@@ -211,7 +221,7 @@ V.fixDetails = function (it, d) {
     title: 'Which one is “' + it.n + '”?', wide: true,
     body: '<p class="dim">Pick the right one and everyone in the household gets the correct poster, description, cast and recommendations.</p><div class="fix-list"></div>' +
       '<form class="inline fix-q"><input class="input" placeholder="Search for another title" value="' + V.esc(it.n) + '"><button class="btn">Search</button></form>',
-    actions: [{ label: 'None of these', fn: function (dlg) { save({ none: true }, dlg); } }, { label: 'Cancel', primary: true }],
+    actions: [{ label: 'None of these', fn: function (dlg) { save({ none: true }, dlg); } }, { label: 'Cancel' }],
     onOpen: function (dlg) {
       load(dlg);
       V.$('.fix-q', dlg).onsubmit = function (e) { e.preventDefault(); load(dlg, V.$('.fix-q input', dlg).value.trim()); };

@@ -6,9 +6,26 @@ var S = (V.S = {});
 V.$ = function (s, r) { return (r || document).querySelector(s); };
 V.$$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 V.esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-V.icon = function (n, cls) { return '<svg class="i ' + (cls || '') + '" aria-hidden="true" focusable="false"><use href="#i-' + n + '"/></svg>'; };
+V.icon = function (n, cls) { return '<svg class="i ' + (cls || '') + '" aria-hidden="true" focusable="false"><use href="#i-' + n + '" xlink:href="#i-' + n + '"/></svg>'; }; // (xlink:href for browsers before Chrome 50)
 V.uid = function () { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); };
 V.sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+/** The n entries of `lists` (one array or several) with the highest score(x) > 0, best first — without sorting everything. */
+V.topN = function (lists, n, score) {
+  var top = [], sc = [];
+  if (!Array.isArray(lists[0])) lists = [lists];
+  for (var l = 0; l < lists.length; l++) {
+    var list = lists[l];
+    for (var i = 0; i < list.length; i++) {
+      var s = score(list[i]);
+      if (!(s > 0) || (top.length >= n && s <= sc[top.length - 1])) continue;
+      var lo = 0, hi = top.length;
+      while (lo < hi) { var mid = (lo + hi) >> 1; if (sc[mid] >= s) lo = mid + 1; else hi = mid; }
+      top.splice(lo, 0, list[i]); sc.splice(lo, 0, s);
+      if (top.length > n) { top.pop(); sc.pop(); }
+    }
+  }
+  return top;
+};
 V.debounce = function (fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; };
 V.throttle = function (fn, ms) { var last = 0, t; return function () { var a = arguments, now = Date.now(); clearTimeout(t); if (now - last >= ms) { last = now; fn.apply(null, a); } else t = setTimeout(function () { last = Date.now(); fn.apply(null, a); }, ms - (now - last)); }; };
 V.clamp = function (x, a, b) { return Math.min(b, Math.max(a, x)); };
@@ -68,7 +85,9 @@ V.ls = {
   del: function (k) { try { localStorage.removeItem('ip.' + k); } catch (e) {} },
   /** This tab only, until it's closed: session(k) reads, session(k, v) writes. */
   session: function (k, v) {
-    try { if (arguments.length > 1) { sessionStorage.setItem('ip.' + k, JSON.stringify(v)); return v; } var x = sessionStorage.getItem('ip.' + k); return x == null ? null : JSON.parse(x); } catch (e) { return arguments.length > 1 ? v : (V._sess || {})[k]; }
+    var set = arguments.length > 1;
+    if (set) (V._sess || (V._sess = {}))[k] = v; // (also kept in memory, for when the browser blocks sessionStorage)
+    try { if (set) { sessionStorage.setItem('ip.' + k, JSON.stringify(v)); return v; } var x = sessionStorage.getItem('ip.' + k); return x == null ? null : JSON.parse(x); } catch (e) { return set ? v : (V._sess || {})[k]; }
   },
 };
 V.idb = (function () {
@@ -167,7 +186,8 @@ V.dialog = function (o) {
     var b = d.querySelector('.dlg-b');
     if (typeof o.body === 'string') b.innerHTML = o.body; else if (o.body) b.appendChild(o.body);
     var done = false;
-    var finish = function (v) { if (done) return; done = true; try { d.close(); } catch (e) {} d.remove(); if (o.onClose) o.onClose(v); resolve(v); };
+    var veil = null, escKey = null;
+    var finish = function (v) { if (done) return; done = true; try { d.close(); } catch (e) {} d.remove(); if (veil) veil.remove(); if (escKey) document.removeEventListener('keydown', escKey, true); if (o.onClose) o.onClose(v); resolve(v); };
     (o.actions || []).forEach(function (a) {
       var btn = document.createElement('button');
       btn.className = 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : '');
@@ -184,8 +204,28 @@ V.dialog = function (o) {
     d.addEventListener('click', function (e) { if (e.target.closest('[data-x]')) finish(null); if (e.target === d && o.dismiss !== false) finish(null); });
     d.addEventListener('cancel', function (e) { e.preventDefault(); if (o.dismiss !== false) finish(null); });
     d._finish = finish;
+    // Going to another page (Back on a remote or phone) closes it: it belongs to the page it was opened on.
+    var opened = Date.now();
+    d._routeClose = function () { if (o.dismiss !== false && Date.now() - opened > 400) finish(null); };
+    d._dismiss = function () { if (o.dismiss !== false) finish(null); }; // (the Back button on a TV remote)
     document.body.appendChild(d);
-    if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+    if (d.showModal) d.showModal();
+    else {
+      // Browsers without <dialog> (Safari before 15.4, some TVs): centre it over a dimmed page ourselves.
+      d.setAttribute('open', '');
+      d.className += ' dlg-fallback';
+      veil = document.createElement('div');
+      veil.className = 'dlg-veil';
+      veil.onclick = function () { if (o.dismiss !== false) finish(null); };
+      document.body.insertBefore(veil, d);
+      // Escape closes only the top dialog (each one listens, so the others must not hear it too).
+      escKey = function (e) {
+        if (!(e.key === 'Escape' || e.keyCode === 27) || V.$$('dialog[open]').pop() !== d) return;
+        e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (o.dismiss !== false) finish(null);
+      };
+      document.addEventListener('keydown', escKey, true);
+    }
     if (o.onOpen) o.onOpen(d, finish);
     var f = d.querySelector('[autofocus]') || d.querySelector('.dlg-b input, .dlg-b select, .dlg-b textarea, .dlg-b button, .dlg-f .primary');
     if (f) setTimeout(function () { f.focus(); }, 30);
@@ -234,6 +274,16 @@ V.menu = function (anchor, items, o) {
     V.closeMenus();
     if (it && it.fn) it.fn();
   });
+  // Arrow keys (a TV remote) stay inside the menu.
+  m.addEventListener('keydown', function (e) {
+    var step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+    if (step) {
+      e.preventDefault(); e.stopPropagation();
+      var list = V.$$('.pm-i', m), i = list.indexOf(document.activeElement);
+      var n = list[(i + step + list.length) % list.length];
+      if (n) n.focus();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); }
+  });
   m._anchor = anchor;
   setTimeout(function () { var f = m.querySelector('.pm-i'); if (f) f.focus(); }, 20);
   return m;
@@ -274,7 +324,9 @@ V.art = function (src, name, cls) {
 // A picture that doesn't load: try the other source (TMDB ↔ provider), then a tinted tile with the title.
 document.addEventListener('error', function (e) {
   var img = e.target;
-  if (!img || img.tagName !== 'IMG' || img.dataset.fallback === undefined) return;
+  if (!img || img.tagName !== 'IMG') return;
+  // Any other picture that doesn't load (backdrops, episode stills): hide it rather than show a broken-image icon.
+  if (img.dataset.fallback === undefined) { img.style.visibility = 'hidden'; img.setAttribute('data-hid', ''); return; }
   if (img.dataset.alt) { var a = img.dataset.alt; img.removeAttribute('data-alt'); img.src = a; return; }
   var s = document.createElement('span');
   s.className = 'ini';
@@ -282,7 +334,14 @@ document.addEventListener('error', function (e) {
   var title = img.dataset.title;
   var parent = img.parentNode;
   img.replaceWith(s);
-  if (title && parent && !parent.querySelector('.card-tt')) { var t = document.createElement('span'); t.className = 'card-tt'; t.textContent = title; parent.appendChild(t); }
+  // A poster that's missing becomes a plain title card: the name, large, instead of initials.
+  if (title && parent && !parent.querySelector('.card-tt')) { s.hidden = true; var t = document.createElement('span'); t.className = 'card-tt big'; t.textContent = title; parent.insertBefore(t, s.nextSibling); }
+}, true);
+
+// …and shown again when that same picture is later given something that does load (a backdrop, the next seek preview).
+document.addEventListener('load', function (e) {
+  var img = e.target;
+  if (img && img.tagName === 'IMG' && img.hasAttribute('data-hid')) { img.removeAttribute('data-hid'); img.style.visibility = ''; }
 }, true);
 
 /** A colour that stays stable for a string (used behind text-only cards). */

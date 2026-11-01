@@ -7,10 +7,10 @@ V.route('mine', function (view, r) {
   var body = V.$('.tab-body', view);
   if (tab === 'list') {
     var items = S.data.list.map(V.entry).filter(Boolean);
-    V.grid(body, items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p>' });
+    V.grid(body, items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p><div class="btn-row empty-acts"><a class="btn" href="#/movies">Browse movies</a><a class="btn" href="#/series">Browse series</a></div>' });
   } else if (tab === 'favs') {
     var favs = S.data.favs.map(V.entry).filter(Boolean);
-    if (!favs.length) body.innerHTML = V.empty('No favourite channels', 'Use the heart on a channel to add it.');
+    if (!favs.length) body.innerHTML = V.empty('No favourite channels', 'Use the heart on a channel to add it.', '<div class="btn-row empty-acts"><a class="btn" href="#/live">Go to Live TV</a></div>');
     else { body.innerHTML = '<div class="ch-list" data-list></div>'; var box = V.$('.ch-list', body); box._items = favs; box.innerHTML = favs.map(V.channelRow).join(''); box.onclick = function (e) { var f = e.target.closest('[data-fav]'); if (f) { e.preventDefault(); V.toggle('favs', f.dataset.fav).then(function () { V.router.refresh(); }); return; } var row = e.target.closest('[data-k]'); if (row) { e.preventDefault(); V.play(V.entry(row.dataset.k), { list: favs }); } }; }
   } else if (tab === 'week') {
     body.innerHTML = '<div class="spinner"></div>';
