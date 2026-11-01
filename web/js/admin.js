@@ -55,7 +55,7 @@ V.adminAccountLine = function (l) {
 
 V.adminTabs.lists = function (body, A) {
   var draw = function () {
-    body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
+    body.innerHTML = '<p class="dim small">Priority viewers come first when too many people are watching: if a provider has no free connection, a priority viewer’s player takes one from someone on a standard profile, and standard viewers can’t take one from them.</p><div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
       (A.lists.length ? '<ul class="adm-list">' + A.lists.map(function (l, i) {
         var s = l.status || {};
         var px = l.proxy === 'none' ? 'no proxy' : l.proxy ? ((A.settings.proxies || []).filter(function (x) { return x.id === l.proxy; })[0] || {}).name : '';
@@ -288,15 +288,29 @@ V.adminTabs.profiles = function (body, A) {
   body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><label class="check"><input type="checkbox" data-aop' + (A.settings.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles</span></label></div>' +
     '<ul class="adm-profiles">' + A.profiles.map(function (p) {
       var r = p.restrictions || {};
-      return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +
+      return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri" data-prichip>Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +
         '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? p.langs.map(V.langName).join(', ') || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div></div>' +
         (p.admin ? '' : '<div class="ap-limits grid2"><label class="field"><span>Age limit</span><select class="input" data-r="maxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(r.maxCert) === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label>' +
           '<div class="field"><span>Can watch</span><div class="chips">' + [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']].map(function (t) { var on = !r.types || !r.types.length || r.types.indexOf(t[0]) >= 0; return '<label class="chip-check"><input type="checkbox" data-type="' + t[0] + '"' + (on ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') + '</div></div>' +
           '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile (only kids’ titles and channels)</span></label><label class="check"><input type="checkbox" data-r="adult"' + (r.adult ? ' checked' : '') + '><span>Allow adult (18+) groups</span></label>' +
           '<label class="field wide"><span>Blocked categories (one per line)</span><textarea class="input" rows="2" data-r="blockedGroups">' + V.esc((r.blockedGroups || []).join('\n')) + '</textarea></label></div>') +
+        '<label class="check ap-pri"><input type="checkbox" data-pri' + (p.priority ? ' checked' : '') + '><span>Priority viewer <small class="dim">— when every connection to a provider is in use, this profile takes one from someone on a standard profile</small></span></label>' +
         '<div class="btn-row">' + (p.admin ? '' : '<button class="btn sm primary" data-save>Save limits</button>') + '<button class="btn sm" data-pin>' + (p.hasPin ? 'Reset PIN' : 'Set a PIN') + '</button>' + (p.admin ? '' : '<button class="btn sm" data-make>Make admin</button><button class="btn sm danger" data-del>Delete</button>') + '</div></li>';
     }).join('') + '</ul>';
-  body.onchange = function (e) { if (e.target.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: e.target.checked }); };
+  body.onchange = function (e) {
+    if (e.target.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: e.target.checked });
+    else if (e.target.hasAttribute('data-pri')) {
+      // Saved straight away (it isn't one of the limits).
+      var li = e.target.closest('[data-id]'), on = e.target.checked, p = A.profiles.filter(function (x) { return x.id === li.dataset.id; })[0];
+      V.put('/api/admin/profiles/' + li.dataset.id, { priority: on }).then(function () {
+        if (p) p.priority = on;
+        var chip = V.$('[data-prichip]', li);
+        if (on && !chip) V.$('.ap-h b', li).insertAdjacentHTML('afterend', ' <span class="chip sm pri" data-prichip>Priority</span>');
+        else if (!on && chip) chip.remove();
+        V.toast(on ? (p ? p.name : 'They') + ' now has priority' : (p ? p.name : 'They') + ' is a standard viewer again');
+      }).catch(function (err) { e.target.checked = !on; V.fail(err); });
+    }
+  };
   body.onclick = function (e) {
     if (e.target.closest('[data-add]')) { S.boot.firstRun = false; return V.addProfileDialog(); }
     var li = e.target.closest('[data-id]');

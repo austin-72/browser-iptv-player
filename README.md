@@ -244,6 +244,7 @@ Notes:
 
 **Playback**
 - **Busy providers:** when a title is on several providers, the one with a free connection (and that the page can play directly) is used. When everyone's copy is busy, it says who's watching what, with *Take over*.
+- **Priority viewers:** in Admin → Profiles, any profile can be made a *Priority viewer*. When a provider has no free connection, a priority viewer's player takes one automatically from someone on a standard profile (your own other devices first, then whoever started watching most recently); that person's player stops and says who needed it. Standard profiles can't take over, or squeeze in beside, a priority viewer. When the server is full of conversions, a priority viewer's conversion also stops a standard profile's one rather than being turned away.
 - **Direct playback from an https address:** set a plain-http *direct address* in Admin → Network & proxies, and devices on your https address switch to it for http-only providers so streams come straight from the provider instead of through the server.
 - **MKV films** play directly in Chrome and Edge when their codecs allow (no server conversion); if a file has no sound in the browser it switches to conversion by itself.
 - **Subtitles:** off, always, or only when what you hear isn't one of your languages. Conversions pick your preferred audio language.

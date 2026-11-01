@@ -1,5 +1,20 @@
 #!/usr/bin/env node
 'use strict';
+// Enough memory. Node stops a program at about 4 GB unless told otherwise; a few hundred thousand catalogue entries
+// plus large TV guides, while a provider's list is being refreshed, can need more. So the server starts itself again
+// with a higher limit (60% of the machine's memory, between 4 and 12 GB; MAX_MEMORY_MB sets it), passing on stop
+// signals and its exit code. NO_RESPAWN=1 turns this off.
+{
+  const v8 = require('v8');
+  const want = Number(process.env.MAX_MEMORY_MB) || Math.max(4096, Math.min(12288, Math.floor(require('os').totalmem() / 1048576 * 0.6)));
+  const have = v8.getHeapStatistics().heap_size_limit / 1048576;
+  if (!process.env.IPTV_CHILD && !process.env.NO_RESPAWN && have < want * 0.9) {
+    const child = require('child_process').spawn(process.execPath, [...process.execArgv, `--max-old-space-size=${want}`, __filename, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, IPTV_CHILD: '1' } });
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { try { child.kill(sig); } catch {} });
+    child.on('exit', (code, sig) => process.exit(code === null ? (sig ? 1 : 0) : code));
+    return; // (the rest of this file runs in the child)
+  }
+}
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -922,22 +937,42 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   const cxs = caps && vodItem && copies.length > 1
     ? await Promise.race([Promise.all(copies.map((alt) => copyCodecs(it, alt).catch(() => null))), new Promise((r) => setTimeout(() => r(copies.map(() => null)), 2500))])
     : copies.map(() => null);
+  // Priority profiles: when a provider has no free connection, a priority viewer takes one from someone on a standard
+  // profile (their player stops and says who needed it). Standard viewers can't take one from a priority viewer.
+  const mePri = !!prof.priority;
+  const isPri = (c) => !!(accounts.profile(c.pid) || {}).priority;
   for (const alt of copies) {
     const lid = srcList(it, alt);
     const l = lid && lists.all().find((x) => x.id === lid);
     const url = alt >= 0 ? it.alts[alt].u : it.u;
     const limit = connLimit(it, alt);
     const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn));
-    const busy = limit > 0 && users.length >= limit;
+    let busy = limit > 0 && users.length >= limit;
+    const who = (c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, mine: c.pid === prof.id, priority: isPri(c) });
+    let bump = [], locked = false;
+    if (busy) {
+      const need = users.length - limit + 1;
+      // Your own other devices first, then whoever started watching most recently.
+      const standard = users.filter((c) => !isPri(c) && c.pid !== prof.id);
+      const own = users.filter((c) => c.pid === prof.id);
+      if (mePri && own.length + standard.length >= need) {
+        bump = [...own, ...standard.slice().sort((p1, p2) => (p2.playing.at || 0) - (p1.playing.at || 0))].slice(0, need).map(who);
+        busy = false;
+      } else if (!mePri) {
+        // Taking over is only possible from standard viewers (or yourself).
+        locked = users.filter((c) => !isPri(c) || c.pid === prof.id).length < need;
+      }
+    }
     const mixed = https && /^http:/i.test(url || '') && !b.mixedOk;
     out.push({
       alt, list: lid || '', name: (l && l.name) || '', limit, busy, mixed, proxy: videoViaProxy(lid),
       fmt: caps && vodItem ? playScore(url, cxs[copies.indexOf(alt)], caps) : 0,
-      by: busy ? users.map((c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, mine: c.pid === prof.id })) : [],
+      by: busy || bump.length ? users.map(who) : [],
+      bump, locked,
     });
   }
-  // Free first; then ones this page can play directly; then the list order.
-  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
+  // Free first (a copy that needs someone bumped after a truly free one); then ones this page can play directly; then the list order.
+  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
   return { sources: order, allBusy: out.every((x) => x.busy), directAddress: settings().directAddress || '' };
 });
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).
@@ -1007,7 +1042,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     const hit = pr.audio.find((a) => String(a.lang || '').toLowerCase().startsWith(want) || (L.code && L.code(a.lang) === want));
     if (hit) audioTrack = hit.i;
   }
-  const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id });
+  const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
   return {
     url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration: finite ? pr.duration : 0, mode: transcode ? 'transcode' : 'remux',
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
@@ -1209,7 +1244,13 @@ route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
   const c = hub.conn(p.conn);
   const b = await readJSON(req);
   // Taking over a provider connection someone else in the household is using: any profile may ask them to stop.
-  if (b.cmd === 'takeover' && c) { hub.send(c, 'command', { cmd: 'takeover', from: ctx.profile.name, device: ctx.sess.name }); return { ok: true }; }
+  // A priority viewer's connection can only be taken by another priority viewer (or by themselves on another device).
+  if (b.cmd === 'takeover' && c) {
+    const them = accounts.profile(c.pid) || {};
+    if (them.priority && !ctx.profile.priority && c.pid !== ctx.profile.id) throw new HttpError(403, `${them.name || 'That viewer'} has priority, so their connection can’t be taken over.`);
+    hub.send(c, 'command', { cmd: 'takeover', from: ctx.profile.name, device: ctx.sess.name, priority: !!ctx.profile.priority && !them.priority });
+    return { ok: true };
+  }
   if (!canControl(ctx, c)) throw new HttpError(404, 'That device isn’t connected any more.');
   if (!COMMANDS.includes(b.cmd)) throw new HttpError(400, 'Unknown command');
   const out = { cmd: b.cmd, from: ctx.sess.name, conn: ctx.conn || '' };
@@ -2005,7 +2046,7 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
     .catch((e) => log('Start-up:', e && e.stack || e))
     .then(() => { catalogReady = null; lists.startScheduler(); });
   server.listen(cfg.port, cfg.host, () => {
-    log(`Answering ${process.uptime().toFixed(1)} s after starting`);
+    log(`Answering ${process.uptime().toFixed(1)} s after starting (memory limit ${(require('v8').getHeapStatistics().heap_size_limit / 1073741824).toFixed(1)} GB)`);
     const shown = ['0.0.0.0', '::'].includes(cfg.host) ? 'localhost' : cfg.host;
     const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
     console.log('');

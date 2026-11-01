@@ -323,7 +323,7 @@ V.initWatch = function () {
     else if (d.cmd === 'takeover') {
       if (!V.watch.it) return;
       V.closePlayer();
-      V.toast((d.from || 'Someone') + ' needed the connection to watch on ' + (d.device || 'another device') + '.', { ms: 10000 });
+      V.toast((d.from || 'Someone') + (d.priority ? ' has priority and' : '') + ' needed the connection to watch on ' + (d.device || 'another device') + '.', { ms: 10000 });
     }
     V.remotePush();
   });

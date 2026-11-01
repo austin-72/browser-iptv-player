@@ -216,28 +216,56 @@ PP._useSources = function (r, it, token, opts) {
     var by = [];
     srcs.forEach(function (x) { x.by.forEach(function (b) { if (!by.some(function (y) { return y.conn === b.conn; })) by.push(b); }); });
     if (by.length) {
-      var who = by[0];
+      // Viewers on a priority profile keep their connection: a standard profile can't take it or squeeze in beside them.
+      var locked = srcs.every(function (x) { return x.locked; });
+      var free = by.filter(function (b) { return b.mine || !b.priority; });
+      var who = locked ? by[0] : free[0] || by[0];
       var lim = srcs[0].limit;
+      var where = (srcs[0].name || 'The provider') + ' allows ' + (lim === 1 ? 'one stream' : lim + ' streams') + ' at a time' + (srcs.length > 1 ? ', and every copy of this is on a busy provider.' : '.');
+      if (locked) {
+        var pri = by.filter(function (b) { return b.priority && !b.mine; }).map(function (b) { return b.name; }).filter(function (n, i, a) { return n && a.indexOf(n) === i; });
+        this._msg({
+          title: (pri.length ? pri.join(' and ') : who.name) + (pri.length > 1 ? ' have' : ' has') + ' priority',
+          sub: (pri.length > 1 ? 'They’re' : (pri[0] || who.name || 'They') + ' is') + ' using the connections this needs, and a priority viewer’s stream can’t be taken over. ' + where + ' Try again when they’ve finished.',
+          actions: [{ label: 'OK', primary: true, fn: function () { V.closePlayer(); } }],
+        });
+        return false;
+      }
       this._msg({
         title: who.mine ? 'You’re already watching on ' + who.device : who.name + ' is using the connection',
-        sub: (who.mine ? '“' + who.n + '” is playing there. ' : who.name + ' is watching “' + who.n + '” on ' + who.device + '. ') + (srcs[0].name || 'The provider') + ' allows ' + (lim === 1 ? 'one stream' : lim + ' streams') + ' at a time' + (srcs.length > 1 ? ', and every copy of this is on a busy provider.' : '.'),
+        sub: (who.mine ? '“' + who.n + '” is playing there. ' : who.name + ' is watching “' + who.n + '” on ' + who.device + '. ') + where,
         actions: [
           { label: who.mine ? 'Move it here' : 'Take over', primary: true, fn: function () {
-            by.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover' } }).catch(function () {}); });
+            free.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover' } }).catch(function () {}); });
             self._msg({ spin: true, title: 'Waiting for the connection…' });
             setTimeout(function () { if (token === self.token) self.load(it, Object.assign({}, opts, { busyOk: true })); }, 3500);
           } },
-          { label: 'Try anyway', fn: function () { self.load(it, Object.assign({}, opts, { busyOk: true })); } },
+          // (Squeezing in anyway could cut off a priority viewer, so it's only offered when nobody watching has priority.)
+          by.some(function (b) { return b.priority && !b.mine; }) ? null : { label: 'Try anyway', fn: function () { self.load(it, Object.assign({}, opts, { busyOk: true })); } },
           { label: 'Cancel', fn: function () { V.closePlayer(); } },
-        ],
+        ].filter(Boolean),
       });
       return false;
     }
   }
+  // A priority viewer and no free connection: the server picked who to take it from (standard profiles, your own
+  // other devices first). Their player stops and says who needed it; this one starts a moment later.
+  if (srcs[0].bump && srcs[0].bump.length && !opts.busyOk) {
+    var bump = srcs[0].bump;
+    var names = bump.map(function (b) { return b.mine ? 'your ' + b.device : b.name; }).filter(function (n, i, a) { return a.indexOf(n) === i; });
+    bump.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover' } }).catch(function () {}); });
+    this._msg({ spin: true, title: 'Taking the connection from ' + names.join(' and ') + '…', sub: 'You have priority.' });
+    return new Promise(function (res) { setTimeout(res, 3500); }).then(function () {
+      if (token !== self.token) return false;
+      self._msg(null);
+      srcs[0].bump = [];
+      return self._useSources(r, it, token, Object.assign({}, opts, { busyOk: true }));
+    });
+  }
   var first = srcs[0];
   this.alt = first.alt;
   this._connLimit = first.limit || 0;
-  this._busyAlts = srcs.filter(function (x) { return x.busy; }).map(function (x) { return x.alt; });
+  this._busyAlts = srcs.filter(function (x, i) { return x.busy || (i && x.bump && x.bump.length); }).map(function (x) { return x.alt; });
   this._altsLeft = srcs.slice(1).map(function (x) { return x.alt; });
   // An http-only provider on an https page: browsers block it, so the stream would have to go through the server.
   // With a direct (http) address set up, this device can switch to it and play straight from the provider.
