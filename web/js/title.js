@@ -29,12 +29,13 @@ V.route('title', function (view, r) {
     '<div class="tp-hero" style="--tint:' + V.tint(it.n) + '"><div class="tp-bg">' + (it.bd || it.i ? '<img src="' + V.esc(it.bd || it.i) + '" alt="" referrerpolicy="no-referrer"' + (it.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
     '<div class="tp-main">' + (it.i ? '<div class="tp-poster">' + V.art(it.i, it.n, 'art') + '</div>' : '') + '<div class="tp-info">' +
     '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
+    (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
     (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select></div><div class="eps"><div class="spinner"></div></div></section>' : '') +
-    '<section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
+    '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
 
   var meta = function (d) {
-    var bits = [d.y, d.c ? '<span class="cert">' + V.esc(d.c) + '</span>' : '', d.r ? '★ ' + d.r : '', !isShow && d.d ? V.fmtLen(d.d) : '', isShow && d.ne ? V.plural(d.ne, 'episode') : '', (d.lg || []).map(V.langName).join(', ')].filter(Boolean);
+    var bits = [d.y, d.c ? '<span class="cert">' + V.esc(d.c) + '</span>' : '', d.r ? '★ ' + d.r : '', !isShow && d.d ? V.fmtLen(d.d) : '', isShow && d.ne ? V.plural(d.ne, 'episode') : '', (d.lg || []).map(V.langName).join(', '), d.nt || it.nt ? '<span class="note">' + V.esc(d.nt || it.nt) + '</span>' : ''].filter(Boolean);
     V.$('.tp-meta', view).innerHTML = bits.join('<span class="dot-sep"></span>') + (d.gn && d.gn.length ? '<div class="tp-genres">' + d.gn.map(function (g) { return '<a class="chip sm" href="#/' + (isShow ? 'series' : 'movies') + '?genre=' + encodeURIComponent(g) + '">' + V.esc(g) + '</a>'; }).join('') + '</div>' : '');
   };
   meta(it);
@@ -80,8 +81,13 @@ V.route('title', function (view, r) {
     meta(d);
     if (d.bd) { var img = V.$('.tp-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } else V.$('.tp-bg', view).innerHTML = '<img src="' + V.esc(d.bd) + '" alt="" referrerpolicy="no-referrer">'; }
     V.$('.tp-plot', view).textContent = d.plot || '';
-    V.$('.tp-credits', view).innerHTML = (d.cast ? '<div><b>Cast:</b> ' + V.esc(d.cast) + '</div>' : '') + (d.dir ? '<div><b>' + (isShow ? 'Created by' : 'Director') + ':</b> ' + V.esc(d.dir) + '</div>' : '') +
-      (d.tr ? '<div><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.tr) + '" target="_blank" rel="noopener">' + V.icon('film') + ' Watch the trailer</a></div>' : '');
+    var people = function (s) { return String(s).split(',').map(function (x) { x = x.trim(); return x ? '<a href="#/search?q=' + encodeURIComponent(x) + '">' + V.esc(x) + '</a>' : ''; }).filter(Boolean).join(', '); };
+    V.$('.tp-credits', view).innerHTML = (d.cast ? '<div><b>Cast:</b> ' + people(d.cast) + '</div>' : '') + (d.dir ? '<div><b>' + (isShow ? 'Created by' : 'Director') + ':</b> ' + people(d.dir) + '</div>' : '') +
+      (d.tr ? '<div><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.tr) + '" target="_blank" rel="noopener">' + V.icon('film') + ' Watch the trailer</a></div>' : '') +
+      (S.settings.tmdb && !S.profile.kids ? '<div class="tp-fix"><button class="linkish" data-fix>' + (d.fixed ? 'Details corrected by your household · change' : 'Wrong poster or details?') + '</button></div>' : '');
+    var fx = V.$('[data-fix]', view);
+    if (fx) fx.onclick = function () { V.fixDetails(it, d); };
+    if (d.col) V.drawCollection(V.$('.tp-col', view), it);
     if (d.watchedBy && d.watchedBy.length && S.socialCache) {
       var names = d.watchedBy.map(function (id) { var pr = S.socialCache.profiles.filter(function (x) { return x.id === id; })[0]; return pr ? V.avatar(pr.avatar, 'xs') + V.esc(pr.name) : ''; }).filter(Boolean);
       if (names.length) V.$('.tp-social', view).innerHTML = '<span class="dim">Also watched by</span> ' + names.join(' ');
@@ -108,8 +114,9 @@ V.route('title', function (view, r) {
       box.innerHTML = eps.filter(function (e) { return e.s === s; }).map(function (e) {
         var pct = V.pctOf(e.k);
         var img = e.i || it.i;
+        var isNew = V.isNewEpisode(it.k, e.k);
         return '<div class="ep' + (rp.ep && rp.ep.k === e.k ? ' cur' : '') + '" data-k="' + V.esc(e.k) + '"><button class="ep-play" data-ep="play" aria-label="Play ' + V.esc(V.epLabel(e) + ' ' + (e.et || '')) + '"><span class="ep-n num">' + e.e + '</span><span class="ep-art" style="--tint:' + V.tint(e.n) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '<span class="ep-pl">' + V.icon('play') + '</span>' + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span></button>' +
-          '<div class="ep-body"><div class="ep-t"><b>' + V.esc(e.et || V.epLabel(e)) + '</b>' + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + (e.d ? V.fmtLen(e.d) : '') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
+          '<div class="ep-body"><div class="ep-t"><b>' + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + (e.d ? V.fmtLen(e.d) : '') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
           '<button class="icon-btn" data-ep="menu" aria-label="More for this episode">' + V.icon('dots') + '</button></div>';
       }).join('');
     };
@@ -145,3 +152,69 @@ V.route('title', function (view, r) {
   var more = V.row({ id: 'similar', title: 'More like this', items: V.similar(it) });
   if (more) V.$('.tp-more', view).appendChild(more);
 });
+
+// ---------------------------------------------------------------- new episodes
+V.newEpsOf = function (sk) { var n = S.data && S.data.newEps && S.data.newEps[sk]; return n && n.n ? n : null; };
+V.newEpsLabel = function (sk) { var n = V.newEpsOf(sk); return !n ? '' : n.n > 1 ? n.n + ' new episodes' : 'New episode'; };
+V.isNewEpisode = function (sk, k) { var n = V.newEpsOf(sk); return !!(n && n.eps && n.eps.indexOf(k) >= 0); };
+
+// ---------------------------------------------------------------- film series ("Part of the X Collection")
+V.drawCollection = function (box, it) {
+  V.api('/api/collection/' + encodeURIComponent(it.k)).then(function (c) {
+    if (!c || !c.parts || c.parts.length < 2) return;
+    box.hidden = false;
+    var next = null;
+    c.parts.forEach(function (p) { var x = p.k && V.entry(p.k); if (!next && x && V.pctOf(x.k) < 1) next = x; });
+    box.innerHTML = '<div class="col-h"><h2>' + V.esc(c.name) + '</h2><span class="dim">' + c.have + ' of ' + c.parts.length + ' here</span><span class="sp"></span>' +
+      (next ? '<button class="btn" data-col-next>' + V.icon('play') + ' ' + (V.progressOf(next.k) ? 'Continue the series' : 'Watch in order') + '</button>' : '') + '</div>' +
+      '<ol class="col-parts">' + c.parts.map(function (p, i) {
+        var x = p.k && V.entry(p.k);
+        var cur = x && x.k === it.k;
+        var pct = x ? V.pctOf(x.k) : 0;
+        var body = '<span class="cp-art" style="--tint:' + V.tint(p.title) + '">' + (p.poster || (x && x.i) ? '<img src="' + V.esc((x && x.i) || p.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + (pct >= 1 ? '<span class="cp-done">' + V.icon('check') + '</span>' : '') + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span>' +
+          '<span class="cp-n num">' + (i + 1) + '</span><span class="cp-t">' + V.esc(p.title) + '</span><span class="dim small">' + (p.year || (p.released ? '' : 'Coming soon')) + (x ? '' : (p.released ? ' · not in your lists' : '')) + '</span>';
+        return '<li class="' + (x ? 'have' : 'missing') + (cur ? ' cur' : '') + '">' + (x ? '<a href="' + V.hrefOf(x) + '">' + body + '</a>' : '<div>' + body + '</div>') + '</li>';
+      }).join('') + '</ol>';
+    var nb = V.$('[data-col-next]', box);
+    if (nb) nb.onclick = function () { V.play(next); };
+  }).catch(function () {});
+};
+
+// ---------------------------------------------------------------- "Wrong poster or details?"
+V.fixDetails = function (it, d) {
+  var load = function (dlg, q) {
+    var list = V.$('.fix-list', dlg);
+    list.innerHTML = '<div class="spinner"></div>';
+    V.api('/api/item/' + encodeURIComponent(it.k) + '/matches' + (q ? '?q=' + encodeURIComponent(q) : '')).then(function (r) {
+      if (!r.options.length) { list.innerHTML = '<p class="dim">Nothing found. Try another title below.</p>'; return; }
+      list.innerHTML = r.options.map(function (o, i) {
+        return '<button class="fix-opt' + (o.current ? ' cur' : '') + '" data-i="' + i + '"><span class="fo-art">' + (o.poster ? '<img src="' + V.esc(o.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '</span><span class="fo-b"><b>' + V.esc(o.title) + '</b> <span class="dim">' + (o.year || '') + ' · ' + (o.type === 'tv' ? 'Series' : 'Movie') + (o.current ? ' · shown now' : '') + '</span>' +
+          (o.original && o.original !== o.title ? '<span class="dim small">' + V.esc(o.original) + '</span>' : '') + '<span class="small clamp3">' + V.esc(o.plot || 'No description.') + '</span></span></button>';
+      }).join('');
+      list.onclick = function (e) {
+        var b = e.target.closest('[data-i]');
+        if (!b) return;
+        var o = r.options[+b.dataset.i];
+        save({ id: o.id, type: o.type }, dlg, o.title);
+      };
+    }).catch(function (e) { list.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  var save = function (body, dlg, label) {
+    V.api('/api/item/' + encodeURIComponent(it.k) + '/match', { body: body }).then(function (r) {
+      Object.assign(it, r.item);
+      V.toast(body.none ? 'Details removed for everyone' : 'Fixed for everyone — now showing “' + label + '”');
+      if (dlg && dlg._finish) dlg._finish();
+      V.router.refresh();
+    }).catch(V.fail);
+  };
+  V.dialog({
+    title: 'Which one is “' + it.n + '”?', wide: true,
+    body: '<p class="dim">Pick the right one and everyone in the household gets the correct poster, description, cast and recommendations.</p><div class="fix-list"></div>' +
+      '<form class="inline fix-q"><input class="input" placeholder="Search for another title" value="' + V.esc(it.n) + '"><button class="btn">Search</button></form>',
+    actions: [{ label: 'None of these', fn: function (dlg) { save({ none: true }, dlg); } }, { label: 'Cancel', primary: true }],
+    onOpen: function (dlg) {
+      load(dlg);
+      V.$('.fix-q', dlg).onsubmit = function (e) { e.preventDefault(); load(dlg, V.$('.fix-q input', dlg).value.trim()); };
+    },
+  });
+};

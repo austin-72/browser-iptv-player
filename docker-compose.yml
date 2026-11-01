@@ -20,6 +20,9 @@ services:
       # - HWACCEL=vaapi
     volumes:
       - ./data:/data
+      # The app's own files, so updates (copied into this folder, or uploaded in Admin → Backups, updates & apps)
+      # take effect without rebuilding: the server notices and restarts itself when nobody is watching.
+      - ./:/app
       # Folders of your own videos, read-only. Add them in Admin → Lists → "Folder on the server" as /media/…
       # - /path/to/your/movies:/media/movies:ro
       # - /path/to/your/shows:/media/shows:ro

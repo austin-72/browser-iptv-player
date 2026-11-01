@@ -6,3 +6,4 @@ defaults.json
 test/shots/
 test/tmp/
 .DS_Store
+push-update-to-github.bat

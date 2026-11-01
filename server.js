@@ -15,11 +15,11 @@ const { Epg } = require('./lib/epg');
 const { Media } = require('./lib/media');
 const { Proxy } = require('./lib/proxy');
 const { Reach } = require('./lib/reach');
-const { zipFolder } = require('./lib/zip');
+const { zipFolder, unzip } = require('./lib/zip');
 const { Stats } = require('./lib/stats');
-const { fetchAny } = require('./lib/net');
+const { fetchAny, setProxyResolver, testProxy } = require('./lib/net');
 const { Lists } = require('./lib/lists');
-const { Catalog, genresOf } = require('./lib/catalog');
+const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
 const { Hub, Social } = require('./lib/social');
@@ -50,6 +50,14 @@ const DEFAULT_SETTINGS = {
   adminOnlyProfiles: false, allowDownloads: true, allowParties: true,
   exportKey: crypto.randomBytes(12).toString('hex'),
   allowedHosts: [],
+  // Outgoing proxies (Admin → Network): [{ id, name, url, video }]; `proxy` is the default for everything.
+  proxies: [], proxy: '',
+  // A plain-http address of this server (e.g. http://192.168.1.20:8080) that https pages switch to so streams from
+  // http-only providers can play straight from the provider instead of through the server.
+  directAddress: '', directSwitch: 'ask', // 'ask' | 'auto' | 'off'
+  // Category clean-up: tidy names, plus the admin's rules [{ match, to, hide, types }].
+  tidyGroups: true, groupRules: [],
+  backupDays: 7, // nightly backups kept
 };
 const settingsStore = new JsonFile(path.join(D, 'settings.json'), DEFAULT_SETTINGS);
 const settings = () => settingsStore.data;
@@ -87,31 +95,109 @@ const lists = new Lists({
   },
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
+
+// ---- outgoing proxies: a list's own choice, else the default (Admin → Network)
+function proxyById(id) { return (settings().proxies || []).find((x) => x.id === id) || null; }
+/** The proxy for a list ('' = none). */
+function listProxy(listId) {
+  const l = listId && lists.all().find((x) => x.id === listId);
+  const choice = l ? l.proxy || '' : '';
+  if (choice === 'none') return null;
+  return proxyById(choice) || proxyById(settings().proxy) || null;
+}
+setProxyResolver((url) => {
+  if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])[:/]/i.test(url)) return '';
+  const owner = lists.ownerOf(url);
+  const p = owner ? listProxy(owner) : proxyById(settings().proxy);
+  return p ? p.url : '';
+});
+/** Does video from this list have to go through the server (its proxy is set to carry video)? */
+const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
 const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase });
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 
 function applyMeta(it, m) {
   if (!m) return;
+  // Someone in the household picked this match by hand: its details win over the provider's.
+  const force = !!m.manual;
   // TMDB's genres are the consistent ones (the provider's vary from category to category).
   if (m.gn && m.gn.length) it.gn = genresOf(m.gn);
-  for (const k of ['plot', 'cast', 'dir', 'bd', 'c', 'tmdb']) if (!it[k] && m[k] && (!Array.isArray(m[k]) || m[k].length)) it[k] = m[k];
-  if (!it.y && m.y) it.y = m.y;
-  if (!it.r && m.r) it.r = m.r;
-  if (!it.d && m.d) it.d = m.d;
+  for (const k of ['plot', 'cast', 'dir', 'bd', 'c', 'tmdb']) if ((force || !it[k]) && m[k] && (!Array.isArray(m[k]) || m[k].length)) it[k] = m[k];
+  if ((force || !it.y) && m.y) it.y = m.y;
+  if ((force || !it.r) && m.r) it.r = m.r;
+  if ((force || !it.d) && m.d) it.d = m.d;
+  if (m.col) it.col = m.col.id; else if (force) delete it.col;
+  // An all-capitals or oddly written name that TMDB knows by the same words: use TMDB's spelling.
+  if (m.title && (force || (/[A-Z]{3}/.test(it.n) && !/[a-z]/.test(it.n) && catalogNorm(m.title) === catalogNorm(it.n)))) it.n = m.title;
   if (!it.logo && m.poster) it.logo = m.poster;
   if (m.poster) it.poster = m.poster;
 }
 function rebuildCatalog() {
   catalog.build();
+  // Titles renamed by the tidy-up or merged: move history, lists, favourites… and TMDB matches to the new keys.
+  if (catalog.renamed && catalog.renamed.size) {
+    let moved = 0;
+    for (const pr of accounts.profiles) { const n = userdata.migrateKeys(pr.id, catalog.renamed); if (n) { moved += n; recs.touch(pr.id, 5000); } }
+    moved += tmdb.migrateKeys(catalog.renamed);
+    if (moved) log(`Moved ${moved} saved things to renamed titles`);
+  }
   const meta = tmdb.meta.data.m;
   for (const it of catalog.items) applyMeta(it, meta[it.k]);
   catalog.cache.clear();
   hub.toAll('catalog', { version: catalog.version });
+  setTimeout(() => checkNewEpisodes().catch((e) => log('New episodes:', e.message)), 20e3);
   // New titles: look them up on TMDB in the background (a minute later, so start-up stays quick).
   clearTimeout(rebuildCatalog.enrichTimer);
   rebuildCatalog.enrichTimer = setTimeout(() => { try { startEnrich(true); } catch (e) { log('TMDB:', e.message); } }, 60e3);
 }
 epg.onChange = () => { if (catalog && catalog.epgChanged()) hub.toAll('catalog', { version: catalog.version }); };
+
+// ---- new episodes of shows people follow (in My List, or watched in the last 4 months)
+const showsSeen = new JsonFile(path.join(D, 'shows-seen.json'), { m: {} }); // show key → { ad, eps: [keys], at }
+let checkingEps = false;
+async function checkNewEpisodes() {
+  if (checkingEps) return;
+  checkingEps = true;
+  try {
+    const followers = new Map(); // show key → [profile ids]
+    const since = Date.now() - 120 * 86400e3;
+    for (const pr of accounts.profiles) {
+      if (userdata.prefs(pr.id).newEpisodeAlerts === false) continue;
+      const d = userdata.of(pr.id).data;
+      const add = (k) => { if (!k) return; const it = catalog.get(k); if (!it || it.t !== 'show') return; const l = followers.get(k) || []; if (!l.includes(pr.id)) l.push(pr.id); followers.set(k, l); };
+      for (const k of d.list) add(k);
+      for (const h of d.history) if (h.at > since && h.sk) add(h.sk);
+      for (const p of Object.values(d.progress)) if (p.at > since && p.sk) add(p.sk);
+    }
+    const seen = showsSeen.data.m;
+    for (const [sk, pids] of followers) {
+      const show = catalog.get(sk);
+      if (!show) continue;
+      const prev = seen[sk];
+      let eps;
+      if (show.xt && show.xt.kind === 'series') {
+        // Xtream: the series list says when a series last changed; only then ask for its episodes (fresh).
+        if (prev && prev.ad && show.ad && show.ad <= prev.ad) continue;
+        try { eps = await catalog.episodes(sk, prev ? 0 : 12 * 3600e3); } catch { continue; }
+        await new Promise((ok) => setTimeout(ok, 800));
+      } else eps = (catalog.shows.get(sk) || []).map((k) => catalog.get(k)).filter(Boolean);
+      const keys = eps.map((e) => e.k);
+      if (!prev) { seen[sk] = { ad: show.ad || 0, eps: keys, at: Date.now() }; continue; }
+      const known = new Set(prev.eps || []);
+      const fresh = eps.filter((e) => !known.has(e.k));
+      seen[sk] = { ad: show.ad || 0, eps: keys, at: Date.now() };
+      if (!fresh.length || fresh.length > 40) continue; // a whole show re-listed isn't "new episodes"
+      for (const pid of pids) {
+        if (!userdata.addNewEpisodes(pid, sk, fresh.map((e) => e.k))) continue;
+        hub.toProfile(pid, 'data', { field: 'newEps' });
+        const e = fresh[fresh.length - 1];
+        hub.toProfile(pid, 'notify', { kind: 'episode', title: fresh.length > 1 ? `${fresh.length} new episodes of ${show.n}` : `New episode of ${show.n}`, body: e.et || `Season ${e.s}, episode ${e.e}`, k: sk, i: show.logo || '' });
+      }
+    }
+    for (const k of Object.keys(seen)) if (!followers.has(k) && Date.now() - (seen[k].at || 0) > 200 * 86400e3) delete seen[k];
+    showsSeen.save();
+  } finally { checkingEps = false; }
+}
 
 /** What ffmpeg should open for an item: a local file or the stream address with its headers. */
 function inputOf(it, alt = -1, overrideUrl = '') {
@@ -128,8 +214,14 @@ function inputOf(it, alt = -1, overrideUrl = '') {
     if (!file || !LOCAL_MEDIA.test(file) || !fs.existsSync(file)) return null;
     return { input: file, headers: {}, local: { path: file } };
   }
+  // Behind a proxy: ffmpeg reads it through the server's own relay, which goes through the proxy.
+  if (isUrl(u) && listProxy(lists.ownerOf(u) || (alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src))) {
+    return { input: loopback(proxy.sign(u, { h: a.h || {} })), headers: {}, viaProxy: true };
+  }
   return { input: u, headers: a.h || {} };
 }
+/** An address for the server's own relay that ffmpeg (on this machine) can open without signing in. */
+function loopback(pathq) { return `${tls ? 'https' : 'http'}://127.0.0.1:${cfg.port}${castSign(pathq, 48)}`; }
 /**
  * How many connections the provider account behind an item allows at once (0 = unknown / no limit).
  * Accounts that allow only one must never get a second connection from this server while someone watches —
@@ -231,6 +323,7 @@ function publicSettings() {
     brand: s.brand, routing: s.routing, allowDownloads: s.allowDownloads !== false, allowParties: s.allowParties !== false,
     ffmpeg: media.available, tmdb: !!s.tmdbKey, version: cfg.version, defaultLangs: s.defaultLangs, showUnknownLang: s.showUnknownLang !== false,
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
+    directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
   };
 }
 
@@ -288,7 +381,7 @@ route('POST', '/api/profiles/leave', async (req, res, p, q, ctx) => {
 // ---- me
 route('GET', '/api/me', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  sendJsonGz(req, res, { profile: accounts.view(prof), data: userdata.snapshot(prof.id), settings: publicSettings(), unread: social.unread(prof.id), catalogVersion: catalog.version });
+  sendJsonGz(req, res, { profile: accounts.view(prof), data: userdata.snapshot(prof.id), settings: publicSettings(), unread: social.unread(prof.id), catalogVersion: catalog.version, alerts: prof.admin ? accountAlerts() : [] });
 });
 route('PUT', '/api/me', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -347,10 +440,12 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   let it = item(ctx, p.k);
   it = await catalog.details(it.k) || it;
-  if (tmdb.enabled() && (it.t === 'movie' || it.t === 'show') && !(tmdb.meta.data.m[it.k] && tmdb.meta.data.m[it.k].at)) {
+  const have = tmdb.meta.data.m[it.k];
+  if (tmdb.enabled() && (it.t === 'movie' || it.t === 'show') && !(have && have.at && have.v === 2)) {
     try { const m = await tmdb.details(it); applyMeta(it, m); } catch {}
   }
-  const out = { ...Catalog.compact(it), plot: it.plot || '', cast: it.cast || '', dir: it.dir || '', tr: it.tr || '', poster: it.poster || '', markers: it.t === 'episode' || it.t === 'movie' ? markers.get(it.k) : null };
+  const mt = tmdb.map.data.m[it.k];
+  const out = { ...Catalog.compact(it), plot: it.plot || '', cast: it.cast || '', dir: it.dir || '', tr: it.tr || '', poster: it.poster || '', markers: it.t === 'episode' || it.t === 'movie' ? markers.get(it.k) : null, col: it.col || 0, fixed: !!(mt && mt.manual) };
   if (it.t === 'show') {
     const eps = await catalog.episodes(it.k).catch(() => []);
     out.episodes = eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) }));
@@ -370,6 +465,181 @@ route('GET', '/api/recs', async (req, res, p, q, ctx) => {
   const r = await recs.fresh(prof.id, q.get('force') ? 0 : 6 * 3600e3);
   return r || { top: [], rows: [], household: [] };
 });
+
+// ---- people: search by actor or director
+let peopleIdx = null; // { version, people: Map(norm name → { name, cast: Set, dir: Set }) }
+function peopleIndex() {
+  if (peopleIdx && peopleIdx.version === catalog.version) return peopleIdx.people;
+  const people = new Map();
+  const add = (name, k, role) => {
+    const n = String(name || '').trim();
+    if (n.length < 3) return;
+    const key = n.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+    let e = people.get(key);
+    if (!e) people.set(key, (e = { name: n, cast: new Set(), dir: new Set() }));
+    e[role].add(k);
+  };
+  for (const it of catalog.items) {
+    if (it.t !== 'movie' && it.t !== 'show') continue;
+    for (const c of String(it.cast || '').split(',').slice(0, 8)) add(c, it.k, 'cast');
+    for (const d of String(it.dir || '').split(',').slice(0, 3)) add(d, it.k, 'dir');
+  }
+  peopleIdx = { version: catalog.version, people };
+  return people;
+}
+route('GET', '/api/search/people', (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const raw = String(q.get('q') || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const toks = raw.split(/\s+/).filter(Boolean);
+  if (!toks.length || raw.length < 3) return [];
+  const f = catalog.filterFor(prof);
+  const hits = [];
+  for (const [key, e] of peopleIndex()) {
+    const words = key.split(/[\s.-]+/);
+    // Every word typed starts a word of the name ("tom han", "nolan", "j lawrence").
+    if (!toks.every((t) => words.some((w) => w.startsWith(t)))) continue;
+    if (toks.length === 1 && toks[0].length < 4 && !words.includes(toks[0])) continue;
+    const keys = (role) => [...e[role]].map((k) => catalog.get(k)).filter((it) => it && f.test(it)).sort((a, b) => (b.y || 0) - (a.y || 0)).map((it) => it.k);
+    const cast = keys('cast'), dir = keys('dir');
+    if (!cast.length && !dir.length) continue;
+    const exact = key === raw ? 50 : 0;
+    hits.push({ name: e.name, role: dir.length > cast.length ? 'dir' : 'cast', cast: cast.slice(0, 60), dir: dir.slice(0, 60), score: exact + cast.length + dir.length * 1.5 });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  return hits.slice(0, 4);
+});
+
+// ---- film series (TMDB collections)
+route('GET', '/api/collection/:k', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const it = item(ctx, p.k);
+  if (!tmdb.enabled() || !it.col) return null;
+  const col = await tmdb.collection(it.col).catch(() => null);
+  if (!col) return null;
+  const f = catalog.filterFor(prof);
+  const byTmdb = new Map();
+  for (const x of catalog.items) if (x.t === 'movie' && x.tmdb && f.test(x)) { const l = byTmdb.get(String(x.tmdb)) || []; l.push(x); byTmdb.set(String(x.tmdb), l); }
+  const allowed = new Set(f.langs || []);
+  const best = (l) => l.slice().sort((a, b) => (((b.lg || []).some((x) => allowed.has(x)) ? 1 : 0) - ((a.lg || []).some((x) => allowed.has(x)) ? 1 : 0)))[0];
+  for (const part of col.parts) {
+    let match = byTmdb.get(String(part.id));
+    if (!match) match = catalog.findTitle(part.title, part.year).map((k) => catalog.get(k)).filter((x) => x && x.t === 'movie' && f.test(x) && (!x.y || !part.year || Math.abs(x.y - part.year) <= 1));
+    if (match && match.length) part.k = best(match).k;
+  }
+  return { ...col, have: col.parts.filter((x) => x.k).length };
+});
+
+// ---- "wrong details?": pick the right TMDB entry for a title (for everyone)
+route('GET', '/api/item/:k/matches', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  if (prof.kids) throw new HttpError(403, 'Ask a grown-up to fix this one.');
+  const it = item(ctx, p.k);
+  if (!tmdb.enabled()) throw new HttpError(400, 'The admin hasn’t added a TMDB key, so details can’t be looked up.');
+  return { current: tmdb.map.data.m[it.k] || null, options: await tmdb.candidates(it, String(q.get('q') || '').slice(0, 100)) };
+});
+route('POST', '/api/item/:k/match', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  if (prof.kids) throw new HttpError(403, 'Ask a grown-up to fix this one.');
+  const it = item(ctx, p.k);
+  const b = await readJSON(req);
+  if (!b.none && !(Number(b.id) > 0)) throw new HttpError(400, 'Pick one of the suggestions.');
+  const m = await tmdb.setMatch(it, b.none ? { none: true } : { id: b.id, type: b.type });
+  if (m) applyMeta(it, m);
+  else { for (const k of ['plot', 'cast', 'dir', 'bd', 'tmdb', 'poster', 'col']) delete it[k]; }
+  log(`${prof.name} corrected the details of “${it.n}”${m ? ` → ${m.title} (${m.y})` : ' (no match)'}`);
+  catalog.metaChanged();
+  hub.toAll('catalog', { version: catalog.version });
+  for (const pr of accounts.profiles) recs.touch(pr.id, 10000);
+  return { ok: true, item: Catalog.compact(it) };
+});
+
+// ---- something for several of you
+route('GET', '/api/recs/group', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const ids = [...new Set([prof.id, ...String(q.get('ids') || '').split(',')])].filter((id) => accounts.profile(id)).slice(0, 8);
+  if (ids.length < 2) throw new HttpError(400, 'Pick at least one other person.');
+  const f = catalog.filterFor(prof);
+  const each = await Promise.all(ids.map((id) => recs.fresh(id, 6 * 3600e3).catch(() => null)));
+  const score = new Map(); // key → [score per profile]
+  each.forEach((r, i) => {
+    if (!r) return;
+    const ranked = [...(r.top || [])];
+    for (const row of r.rows || []) for (const k of row.keys || []) if (!ranked.includes(k)) ranked.push(k);
+    ranked.slice(0, 400).forEach((k, pos) => { const a = score.get(k) || new Array(ids.length).fill(0); a[i] = Math.max(a[i], 1 - pos / 400); score.set(k, a); });
+  });
+  const seen = new Set();
+  const disliked = new Set();
+  for (const id of ids) {
+    const d = userdata.of(id).data;
+    for (const h of d.history) { seen.add(h.k); if (h.sk) seen.add(h.sk); }
+    for (const [k, v] of Object.entries(d.ratings)) if (v < 0) disliked.add(k);
+    for (const k of d.hidden) disliked.add(k);
+  }
+  const out = [];
+  for (const [k, a] of score) {
+    if (seen.has(k) || disliked.has(k)) continue;
+    const it = catalog.get(k);
+    if (!it || !f.test(it) || (it.t !== 'movie' && it.t !== 'show')) continue;
+    // Everyone should like it: the least keen person counts most.
+    const min = Math.min(...a), mean = a.reduce((x, y) => x + y, 0) / a.length;
+    if (min <= 0) continue;
+    out.push([k, min * 0.7 + mean * 0.3]);
+  }
+  // Nothing in common yet: the best of each person's picks, taking turns.
+  if (out.length < 12) {
+    for (let pos = 0; pos < 30; pos++) for (const r of each) { const k = r && r.top && r.top[pos]; if (k && !seen.has(k) && !disliked.has(k) && !out.some((x) => x[0] === k)) { const it = catalog.get(k); if (it && f.test(it)) out.push([k, -pos]); } }
+  }
+  out.sort((x, y) => y[1] - x[1]);
+  return { ids, keys: out.slice(0, 40).map((x) => x[0]), common: out.filter((x) => x[1] > 0).length };
+});
+
+// ---- a new profile says what it likes (so recommendations are good from the start)
+route('GET', '/api/onboard', (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const f = catalog.filterFor(prof);
+  const pop = new Map();
+  for (const pr of accounts.profiles) for (const h of userdata.of(pr.id).data.history.slice(0, 300)) { const k = h.sk || h.k; pop.set(k, (pop.get(k) || 0) + 1); }
+  const year = new Date().getFullYear();
+  const cands = [];
+  for (const it of catalog.items) {
+    if ((it.t !== 'movie' && it.t !== 'show') || !f.test(it) || !(it.poster || it.logo) || !it.gn || !it.gn.length) continue;
+    const r = it.r || 0;
+    if (r < 6.3 && !pop.has(it.k)) continue;
+    const recent = it.y ? Math.max(0, 1 - (year - it.y) / 30) : 0.3;
+    cands.push([it, r / 10 + recent * 0.6 + Math.min(1, (pop.get(it.k) || 0) / 3) + (it.tmdb ? 0.2 : 0)]);
+  }
+  cands.sort((a, b) => b[1] - a[1]);
+  // A spread across genres, films and series.
+  const per = new Map();
+  const out = [];
+  for (const [it] of cands) {
+    const g = it.gn[0] + it.t;
+    if ((per.get(g) || 0) >= 4) continue;
+    per.set(g, (per.get(g) || 0) + 1);
+    out.push(it.k);
+    if (out.length >= 48) break;
+  }
+  return { keys: out };
+});
+route('POST', '/api/onboard', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const b = await readJSON(req);
+  for (const k of (Array.isArray(b.keys) ? b.keys : []).slice(0, 30)) if (catalog.get(String(k))) userdata.rate(prof.id, String(k), 1);
+  userdata.setPrefs(prof.id, { onboarded: true });
+  recs.touch(prof.id, 500);
+  changed(ctx, prof, 'ratings');
+  return { ok: true };
+});
+route('GET', '/api/me/week', (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const days = userdata.week(prof.id, 14);
+  const d = userdata.of(prof.id).data;
+  const since = Date.now() - 7 * 86400e3;
+  const top = new Map();
+  for (const h of d.history) { if (h.at < since) break; const k = h.sk || h.k; top.set(k, (top.get(k) || 0) + (h.s || 0)); }
+  return { days, top: [...top.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, s]) => ({ k, s, n: (catalog.get(k) || {}).n || '' })) };
+});
+route('DELETE', '/api/new-episodes/:sk', (req, res, p, q, ctx) => { const prof = requireProfile(ctx); if (userdata.clearNewEpisodes(prof.id, p.sk)) changed(ctx, prof, 'newEps'); return { ok: true }; });
 
 // ---- guide
 const nowCache = new Map();
@@ -502,7 +772,62 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
   const origin = typeof b.origin === 'string' && /^https?:\/\/[^/]+$/.test(b.origin) ? b.origin : `${req.secure ? 'https' : 'http'}://${req.headers.host}`;
   if (b.forget) { reach.forget(src.input, origin); return { ok: true }; }
   const alt = Number.isInteger(b.alt) ? b.alt : -1;
-  return reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt) });
+  if (videoViaProxy(srcList(it, alt))) return { kind: '', url: src.input, blocked: 'proxy' };
+  const out = await reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt) });
+  // Films in MKV/AVI: Chrome and Edge play many MKV files themselves when the codecs suit — the provider says which.
+  if (out.kind === 'ffmpeg' && it.t === 'movie' && it.xt && /\.mkv(\?|$)/i.test(src.input)) {
+    try {
+      const info = await lists.xtVod(it.xt.l, it.xt.id);
+      const v = info && (info.video || {}), a = info && (info.audio || {});
+      if (v && v.codec_name) out.codecs = { v: String(v.codec_name).toLowerCase(), a: String(a.codec_name || '').toLowerCase(), pix: String(v.pix_fmt || '') };
+    } catch {}
+  }
+  return out;
+});
+/** Which list a copy of an item comes from. */
+function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
+/** Streams the household is watching right now from each list (direct or through the server). */
+function listUsage() {
+  const use = new Map();
+  for (const c of hub.conns) {
+    if (!c.playing || !c.playing.k) continue;
+    const it = catalog.get(c.playing.k);
+    if (!it) continue;
+    const l = srcList(it, Number.isInteger(c.playing.alt) ? c.playing.alt : -1);
+    if (!l) continue;
+    (use.get(l) || use.set(l, []).get(l)).push(c);
+  }
+  return use;
+}
+/**
+ * Which copy of a title to play first: copies whose provider has a free connection, and that this page can play
+ * straight from the provider (an https page can't play http streams directly). When every copy's provider is busy
+ * with someone in the household, say who — so the viewer can take over or wait.
+ */
+route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const b = await readJSON(req);
+  const it = item(ctx, String(b.k || ''));
+  const https = /^https:/i.test(String(b.origin || ''));
+  const use = listUsage();
+  const out = [];
+  const copies = [-1, ...(it.alts || []).map((x, i) => i)];
+  for (const alt of copies) {
+    const lid = srcList(it, alt);
+    const l = lid && lists.all().find((x) => x.id === lid);
+    const url = alt >= 0 ? it.alts[alt].u : it.u;
+    const limit = connLimit(it, alt);
+    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn));
+    const busy = limit > 0 && users.length >= limit;
+    const mixed = https && /^http:/i.test(url || '');
+    out.push({
+      alt, list: lid || '', name: (l && l.name) || '', limit, busy, mixed, proxy: videoViaProxy(lid),
+      by: busy ? users.map((c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, mine: c.pid === prof.id })) : [],
+    });
+  }
+  // Free first; then ones this page can play directly; then the list order.
+  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
+  return { sources: order, allBusy: out.every((x) => x.busy), directAddress: settings().directAddress || '' };
 });
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).
 route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
@@ -564,10 +889,16 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs) || !!(height && pr && pr.height && pr.height > height);
   const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio';
   const seek = finite ? Math.max(0, Number(b.seek) || 0) : 0;
-  const audioTrack = clampInt(b.audio, 0, 64, 0);
+  // The viewer's preferred audio language picks the track, unless they chose one.
+  let audioTrack = clampInt(b.audio, 0, 64, 0);
+  if (b.audio === undefined && b.audioLang && pr && pr.audio && pr.audio.length > 1) {
+    const want = String(b.audioLang).slice(0, 2).toLowerCase();
+    const hit = pr.audio.find((a) => String(a.lang || '').toLowerCase().startsWith(want) || (L.code && L.code(a.lang) === want));
+    if (hit) audioTrack = hit.i;
+  }
   const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id });
   return {
-    url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, duration: finite ? pr.duration : 0, mode: transcode ? 'transcode' : 'remux',
+    url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration: finite ? pr.duration : 0, mode: transcode ? 'transcode' : 'remux',
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
@@ -709,7 +1040,7 @@ route('GET', '/api/social', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const presence = [];
   for (const c of hub.conns) {
-    if (c.pid === prof.id || !c.playing) continue;
+    if (c.pid === prof.id || !c.playing || c.playing.hidden) continue;
     const pr = userdata.prefs(c.pid);
     if (pr.presence === false) continue;
     const it = catalog.visible(prof, c.playing.k);
@@ -751,17 +1082,127 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
   const c = hub.conn(String(b.conn || ''));
-  if (c && c.pid === prof.id) c.playing = b.playing && b.playing.k ? { k: String(b.playing.k), pos: Number(b.playing.pos) || 0, at: Date.now(), n: String(b.playing.n || '').slice(0, 200) } : null;
+  if (c && c.pid === prof.id) {
+    const was = c.playing;
+    c.playing = b.playing && b.playing.k ? { k: String(b.playing.k), pos: Number(b.playing.pos) || 0, at: was && was.k === String(b.playing.k) ? was.at : Date.now(), n: String(b.playing.n || '').slice(0, 200), alt: Number.isInteger(b.playing.alt) ? b.playing.alt : -1, hidden: !!b.playing.hidden } : null;
+  }
   return { ok: true };
 });
-route('GET', '/api/devices', (req, res, p, q, ctx) => hub.devices(requireProfile(ctx).id));
+route('GET', '/api/devices', (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  return [...hub.conns].filter((c) => canControl(ctx, c)).map((c) => ({ conn: c.id, name: c.deviceName, deviceId: c.deviceId, playing: c.playing, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || '') }));
+});
+const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover'];
 route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
-  const prof = requireProfile(ctx);
+  requireProfile(ctx);
   const c = hub.conn(p.conn);
-  if (!c || c.pid !== prof.id) throw new HttpError(404, 'That device isn’t connected any more.');
   const b = await readJSON(req);
-  if (!['play', 'pause', 'resume', 'stop', 'seek'].includes(b.cmd)) throw new HttpError(400, 'Unknown command');
-  hub.send(c, 'command', { cmd: b.cmd, k: b.k, pos: Number(b.pos) || 0, from: ctx.sess.name });
+  // Taking over a provider connection someone else in the household is using: any profile may ask them to stop.
+  if (b.cmd === 'takeover' && c) { hub.send(c, 'command', { cmd: 'takeover', from: ctx.profile.name, device: ctx.sess.name }); return { ok: true }; }
+  if (!canControl(ctx, c)) throw new HttpError(404, 'That device isn’t connected any more.');
+  if (!COMMANDS.includes(b.cmd)) throw new HttpError(400, 'Unknown command');
+  const out = { cmd: b.cmd, from: ctx.sess.name, conn: ctx.conn || '' };
+  if (b.k) out.k = String(b.k);
+  for (const k of ['pos', 'd', 'v', 'i', 'n', 'dir', 'min']) if (b[k] !== undefined) out[k] = Number(b[k]) || 0;
+  if (typeof b.on === 'boolean') out.on = b.on;
+  hub.send(c, 'command', out);
+  return { ok: true };
+});
+
+// ---- signing in a TV with a phone: the TV shows a code (and QR code), a signed-in phone approves it
+const pairs = new Map(); // id → { code, secret, created, ip, ua, approved }
+const PAIR_TTL = 10 * 60e3;
+const pairCode = () => { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = ''; for (const b of crypto.randomBytes(6)) c += A[b % A.length]; return c; };
+const sweepPairs = () => { for (const [id, x] of pairs) if (Date.now() - x.created > PAIR_TTL) pairs.delete(id); };
+function siteOrigin(req) {
+  const host = (cfg.trustProxy && req.headers['x-forwarded-host']) || req.headers.host || `localhost:${cfg.port}`;
+  return `${secureReq(req) ? 'https' : 'http'}://${host}`;
+}
+route('POST', '/api/pair/start', (req, res) => {
+  sweepPairs();
+  const ip = clientIp(req);
+  if ([...pairs.values()].filter((x) => x.ip === ip).length >= 5 || pairs.size > 200) throw new HttpError(429, 'Too many sign-in codes. Wait a few minutes.');
+  const id = crypto.randomBytes(12).toString('base64url');
+  let code;
+  do code = pairCode(); while ([...pairs.values()].some((x) => x.code === code));
+  const secret = crypto.randomBytes(18).toString('base64url');
+  pairs.set(id, { code, secret, created: Date.now(), ip, ua: String(req.headers['user-agent'] || '').slice(0, 300), approved: null });
+  const link = `${siteOrigin(req)}/#/pair?c=${code}`;
+  return { id, secret, code: code.slice(0, 3) + '-' + code.slice(3), link, qr: qrSvg(link, { size: 240 }), expires: Date.now() + PAIR_TTL };
+}, 'public');
+route('GET', '/api/pair/:id', (req, res, p, q) => {
+  const x = pairs.get(p.id);
+  if (!x || x.secret !== q.get('s')) throw new HttpError(404, 'That code has expired.');
+  if (Date.now() - x.created > PAIR_TTL) { pairs.delete(p.id); throw new HttpError(410, 'That code has expired.'); }
+  if (!x.approved) return { waiting: true };
+  pairs.delete(p.id);
+  const by = accounts.sessionById(x.approved.sess);
+  const extra = { pairedBy: x.approved.sess, name: deviceNameOf(x.ua) };
+  if (x.approved.profileId) {
+    extra.profileId = x.approved.profileId;
+    // Opened as the approver's own profile: they proved it on their phone, so no PIN needed on the TV.
+    const ok = by && by.pinOk && by.pinOk[x.approved.profileId];
+    extra.pinOk = { [x.approved.profileId]: { at: Date.now(), until: Date.now() + 180 * 86400e3, via: 'pair', ...(ok ? {} : {}) } };
+  }
+  const token = accounts.newSession(clientIp(req), x.ua, extra);
+  res.setHeader('Set-Cookie', accounts.cookie(token, secureReq(req)));
+  log(`Signed in ${extra.name} with a code approved on ${(by && by.name) || 'another device'}`);
+  return { ok: true };
+}, 'public');
+route('POST', '/api/pair/approve', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const b = await readJSON(req);
+  sweepPairs();
+  const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const x = [...pairs.values()].find((y) => y.code === code);
+  if (!x) throw new HttpError(404, 'That code isn’t right, or it has expired. Check the TV for the current code.');
+  x.approved = { sess: ctx.sess.id, profileId: b.as === 'me' ? prof.id : null, by: prof.id };
+  return { ok: true, device: deviceNameOf(x.ua) };
+});
+const { deviceName: deviceNameOf } = require('./lib/accounts');
+const { qrSvg } = require('./lib/qr');
+
+// ---- the plain-http "direct address": an https page hands this device over so http-only providers play directly
+const handoffs = new Map(); // token → { sess, to, exp }
+route('POST', '/api/handoff', async (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const base = String(settings().directAddress || '').replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) throw new HttpError(400, 'The admin hasn’t set a direct address.');
+  const b = await readJSON(req).catch(() => ({}));
+  const to = typeof b.to === 'string' && /^#\/[\w/?=&%.,:+-]*$/.test(b.to) ? b.to : '#/home';
+  for (const [k, v] of handoffs) if (v.exp < Date.now()) handoffs.delete(k);
+  const token = crypto.randomBytes(24).toString('base64url');
+  handoffs.set(token, { sess: ctx.sess.id, to, exp: Date.now() + 90e3 });
+  return { url: `${base}/h/${token}` };
+});
+function handoffLanding(req, res, token) {
+  const h = handoffs.get(token);
+  handoffs.delete(token);
+  const from = h && h.exp > Date.now() && accounts.sessionById(h.sess);
+  if (!from) { res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' }); return res.end(); }
+  const extra = { profileId: from.profileId, pinOk: from.pinOk || {}, pairedBy: from.id, name: from.name };
+  const tok = accounts.newSession(clientIp(req), req.headers['user-agent'], extra);
+  res.writeHead(302, { Location: '/' + h.to, 'Set-Cookie': accounts.cookie(tok, secureReq(req)), 'Cache-Control': 'no-store' });
+  res.end();
+}
+
+// ---- remote control: a phone (same profile, or the one that signed the TV in) drives a TV
+function canControl(ctx, c) {
+  if (!c || !ctx.profile) return false;
+  if (c.pid === ctx.profile.id) return true;
+  const s = accounts.sessionById(c.sess);
+  return !!(s && s.pairedBy && s.pairedBy === ctx.sess.id);
+}
+route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const b = await readJSON(req);
+  const me = hub.conn(String(b.conn || ''));
+  if (!me || me.sess !== ctx.sess.id) return { ok: false };
+  for (const id of (Array.isArray(b.to) ? b.to : []).slice(0, 10)) {
+    const c = hub.conn(String(id));
+    // The receiving phone must be allowed to control this device.
+    if (c && (c.pid === me.pid || (accounts.sessionById(me.sess) || {}).pairedBy === c.sess)) hub.send(c, 'devstate', { from: me.id, state: b.state || null });
+  }
   return { ok: true };
 });
 
@@ -786,9 +1227,10 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
   const s = settings();
   const counts = {};
   for (const it of catalog.items) counts[it.t] = (counts[it.t] || 0) + 1;
+  const use = listUsage();
   return {
-    settings: { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '' },
-    lists: lists.all().map((l) => lists.view(l)), guides: lists.guides(),
+    settings: adminSettingsView(),
+    lists: lists.all().map((l) => ({ ...lists.view(l), inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
     profiles: accounts.profiles.map((x) => ({ ...accounts.view(x), online: hub.online().includes(x.id) })),
     devices: accounts.sessionsList(),
     status: {
@@ -797,7 +1239,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
       dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()),
-      defaultPassword: accounts.d.site.isDefault, exportBase: `/k/${s.exportKey}`,
+      defaultPassword: accounts.d.site.isDefault, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(),
     },
     watching: [...hub.conns].filter((c) => c.playing).map((c) => ({ pid: c.pid, device: c.deviceName, k: c.playing.k, n: c.playing.n, at: c.playing.at })),
   };
@@ -827,11 +1269,63 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     };
   }
   if (b.newExportKey) s.exportKey = crypto.randomBytes(12).toString('hex');
+  if (Array.isArray(b.proxies)) {
+    s.proxies = b.proxies.slice(0, 20).map((x) => {
+      const old = (s.proxies || []).find((y) => y.id === x.id);
+      let url = String(x.url || '').trim();
+      // The form shows passwords masked: keep the saved one.
+      if (old && /:•+@/.test(url)) url = old.url;
+      if (url && !/^(https?|socks5h?|socks):\/\/[^\s]+$/i.test(url)) throw new HttpError(400, `“${url}” isn’t a proxy address (http://host:port or socks5://user:password@host:port).`);
+      return { id: String(x.id || crypto.randomBytes(4).toString('hex')).slice(0, 20), name: String(x.name || '').trim().slice(0, 40) || 'Proxy', url, video: !!x.video };
+    }).filter((x) => x.url);
+  }
+  if (typeof b.proxy === 'string') s.proxy = (s.proxies || []).some((x) => x.id === b.proxy) ? b.proxy : '';
+  if (typeof b.directAddress === 'string') {
+    const d = b.directAddress.trim().replace(/\/+$/, '');
+    if (d && !/^http:\/\/[^\s/]+$/i.test(d)) throw new HttpError(400, 'The direct address is a plain http address of this server, like http://192.168.1.20:8080');
+    s.directAddress = d;
+  }
+  if (['ask', 'auto', 'off'].includes(b.directSwitch)) s.directSwitch = b.directSwitch;
+  if ('tidyGroups' in b) s.tidyGroups = !!b.tidyGroups;
+  if (Array.isArray(b.groupRules)) s.groupRules = b.groupRules.slice(0, 300).map((r) => ({ match: String(r.match || '').trim().slice(0, 120), to: String(r.to || '').trim().slice(0, 60), hide: !!r.hide, types: Array.isArray(r.types) ? r.types.filter((t) => ['live', 'movie', 'show', 'radio'].includes(t)) : [] })).filter((r) => r.match);
+  num('backupDays', 0, 60);
   settingsStore.save();
-  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b) scheduleRebuild(100);
+  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b) scheduleRebuild(100);
   hub.toAll('settings', publicSettings());
-  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '' };
+  return adminSettingsView();
 });
+route('POST', '/api/admin/accounts/check', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const out = [];
+  for (const l of lists.all().filter((x) => x.type === 'xtream' && x.enabled)) out.push({ id: l.id, account: await lists.accountStatus(l.id, 0) });
+  return out;
+});
+/** Provider accounts that run out soon (shown to the admin). */
+function accountAlerts() {
+  const out = [];
+  for (const l of lists.all()) {
+    const a = l.account;
+    if (!l.enabled || !a) continue;
+    if (a.expires) { const days = Math.floor((a.expires - Date.now()) / 86400e3); if (days <= 14) out.push({ kind: 'expiry', list: l.name, id: l.id, days }); }
+    if (a.status && !/^active$/i.test(a.status)) out.push({ kind: 'status', list: l.name, id: l.id, status: a.status });
+  }
+  return out;
+}
+// Account details once a day (expiry, connections), without waiting for the next list refresh.
+setInterval(() => { for (const l of lists.all()) if (l.type === 'xtream' && l.enabled && (!l.account || Date.now() - (l.account.checkedAt || 0) > 20 * 3600e3)) lists.accountStatus(l.id, 0).catch(() => {}); }, 3600e3).unref();
+route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const b = await readJSON(req);
+  let url = String(b.url || '').trim();
+  const saved = (settings().proxies || []).find((x) => x.id === b.id);
+  if (saved && /:•+@/.test(url)) url = saved.url;
+  try { return await testProxy(url); } catch (e) { return { ok: false, error: (e.cause && e.cause.message) || e.message }; }
+});
+/** Settings as the admin page sees them (secrets masked). */
+function adminSettingsView() {
+  const s = settings();
+  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })) };
+}
 route('POST', '/api/admin/password', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const { next } = await readJSON(req);
@@ -889,38 +1383,84 @@ route('GET', '/api/admin/groups', (req, res, p, q, ctx) => {
 route('POST', '/api/admin/tmdb/test', async (req, res, p, q, ctx) => { requireAdmin(ctx); try { return { ok: await tmdb.test() }; } catch (e) { return { ok: false, error: e.message }; } });
 let enrichJob = null;
 /**
- * Fill in posters, plots, genres, cast and directors from TMDB for titles that don't have them yet — started by the
- * admin, and automatically in the background whenever the catalogue changes. Devices get the new details every
- * few minutes (and at the end).
+ * Fill in posters, plots, genres, cast and directors from TMDB — started by the admin, and automatically in the
+ * background whenever the catalogue changes. Devices get the new details every few minutes (and at the end).
+ *   mode 'visible'  titles the household can see that have no details yet (the automatic one)
+ *        'missing'  every title without details, whatever its language
+ *        'all'      every title again (refreshes details already fetched)
+ *        'groups'   titles in the chosen categories (`groups`: ["movie|Action", "show|Netflix Series"]), refetching
+ *   types: ['movie','show'] to limit it; also skips titles TMDB had no match for unless `retry`.
  */
-function startEnrich(auto = false) {
+function startEnrich(auto = false, opts = {}) {
   if (enrichJob || !tmdb.enabled()) return enrichJob ? enrichJob.status : null;
-  let todo = catalog.items.filter((it) => (it.t === 'movie' || it.t === 'show') && !tmdb.meta.data.m[it.k] && !(tmdb.map.data.m[it.k] && tmdb.map.data.m[it.k].none));
-  if (!todo.length) return { running: false, total: 0, done: 0 };
-  // What the household can actually see comes first (in their languages), and of that what they've watched or
-  // saved; titles in languages nobody uses come last.
-  const filters = accounts.profiles.map((p) => catalog.filterFor(p));
+  const mode = auto ? 'visible' : opts.mode || 'visible';
+  const types = new Set(Array.isArray(opts.types) && opts.types.length ? opts.types : ['movie', 'show']);
+  const groups = new Set((opts.groups || []).map(String));
+  const meta = tmdb.meta.data.m, map = tmdb.map.data.m;
+  const noMatch = (it) => map[it.k] && map[it.k].none && !(opts.retry && !map[it.k].manual);
+  const filters = accounts.profiles.map((pr) => catalog.filterFor(pr));
+  const visible = (it) => filters.some((f) => f.test(it));
+  let todo = catalog.items.filter((it) => {
+    if (!types.has(it.t)) return false;
+    if (mode === 'groups') return groups.has(`${it.t}|${it.g}`) && !(map[it.k] && map[it.k].none && map[it.k].manual);
+    if (mode === 'all') return !(map[it.k] && map[it.k].manual) && !noMatch(it);
+    if (meta[it.k] || noMatch(it)) return false;
+    return mode === 'missing' || visible(it);
+  });
+  if (!todo.length) return { running: false, total: 0, done: 0, mode, nothing: true };
+  // What the household watches comes first, then what it can see; titles in languages nobody uses last.
   const mine = new Set();
-  for (const p of accounts.profiles) { const d = userdata.of(p.id).data; for (const h of d.history) mine.add(h.sk || h.k); for (const k of d.list) mine.add(k); }
-  const rank = (it) => (mine.has(it.k) ? 0 : filters.some((f) => f.test(it)) ? 1 : 2);
+  for (const pr of accounts.profiles) { const d = userdata.of(pr.id).data; for (const h of d.history) mine.add(h.sk || h.k); for (const k of d.list) mine.add(k); }
+  const rank = (it) => (mine.has(it.k) ? 0 : visible(it) ? 1 : 2);
   todo = todo.map((it, i) => ({ it, r: rank(it), i })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.it);
-  if (auto) log(`TMDB: filling in details for ${todo.length} titles in the background`);
+  const refresh = mode === 'all' || mode === 'groups';
+  if (refresh) for (const it of todo) { if (map[it.k] && !map[it.k].manual) { if (map[it.k].none) delete map[it.k]; } if (meta[it.k]) meta[it.k].at = 0; }
+  if (opts.retry) for (const it of todo) if (map[it.k] && map[it.k].none && !map[it.k].manual) delete map[it.k];
+  log(`TMDB: ${auto ? 'filling in' : `fetching (${mode})`} details for ${todo.length} titles`);
   let lastPush = Date.now();
   const push = () => { catalog.metaChanged(); hub.toAll('catalog', { version: catalog.version }); lastPush = Date.now(); };
-  enrichJob = { status: { running: true, total: todo.length, done: 0, auto } };
+  const label = mode === 'groups' ? [...groups].map((g) => g.split('|').slice(1).join('|')).slice(0, 3).join(', ') + (groups.size > 3 ? ` +${groups.size - 3}` : '') : '';
+  enrichJob = { status: { running: true, total: todo.length, done: 0, found: 0, missed: 0, current: '', started: Date.now(), auto, mode, label } };
+  const job = enrichJob;
   tmdb.enrich(todo, {
-    onItem: (it, m) => { applyMeta(it, m); enrichJob.status.done++; if (Date.now() - lastPush > 5 * 60e3) push(); },
-    stop: () => !enrichJob,
-  }).finally(() => { push(); enrichJob = null; });
-  return enrichJob.status;
+    onStart: (it) => { job.status.current = it.n; },
+    onItem: (it, m) => { applyMeta(it, m); job.status.found++; if (Date.now() - lastPush > 5 * 60e3) push(); },
+    onDone: (it, m) => { job.status.done++; if (!m) job.status.missed++; },
+    stop: () => enrichJob !== job,
+    fresh: refresh,
+  }).catch((e) => { job.status.error = e.message; }).finally(() => {
+    push();
+    job.status.running = false; job.status.finished = Date.now(); job.status.current = '';
+    lastEnrich = job.status;
+    if (enrichJob === job) enrichJob = null;
+  });
+  return job.status;
 }
-route('POST', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => {
+let lastEnrich = null;
+route('POST', '/api/admin/tmdb/enrich', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   if (!tmdb.enabled()) throw new HttpError(400, 'Add a TMDB key first.');
-  return startEnrich() || { running: false };
+  const b = await readJSON(req).catch(() => ({}));
+  if (b.mode === 'groups' && !(b.groups || []).length) throw new HttpError(400, 'Choose at least one category.');
+  return startEnrich(false, { mode: ['visible', 'missing', 'all', 'groups'].includes(b.mode) ? b.mode : 'visible', groups: b.groups, types: b.types, retry: !!b.retry }) || { running: false };
 });
-route('GET', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => { requireAdmin(ctx); return enrichJob ? enrichJob.status : { running: false }; });
-route('DELETE', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => { requireAdmin(ctx); enrichJob = null; return { ok: true }; });
+// Progress, and what's left to fetch (overall and per category).
+route('GET', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const meta = tmdb.meta.data.m, map = tmdb.map.data.m;
+  const counts = { titles: 0, fetched: 0, noMatch: 0, missing: 0 };
+  const groups = new Map();
+  for (const it of catalog.items) {
+    if (it.t !== 'movie' && it.t !== 'show') continue;
+    counts.titles++;
+    const key = `${it.t}|${it.g}`;
+    const g = groups.get(key) || groups.set(key, { id: key, t: it.t, name: it.g, total: 0, fetched: 0 }).get(key);
+    g.total++;
+    if (meta[it.k]) { counts.fetched++; g.fetched++; } else if (map[it.k] && map[it.k].none) counts.noMatch++; else counts.missing++;
+  }
+  return { job: enrichJob ? enrichJob.status : null, last: lastEnrich, counts, groups: [...groups.values()].sort((a, b) => a.t.localeCompare(b.t) || a.name.localeCompare(b.name)) };
+});
+route('DELETE', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => { requireAdmin(ctx); if (enrichJob) { enrichJob.status.stopped = true; lastEnrich = enrichJob.status; } enrichJob = null; return { ok: true }; });
 route('DELETE', '/api/admin/sessions/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); media.stopSession(p.id); return { ok: true }; });
 route('GET', '/api/admin/fs', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -948,25 +1488,68 @@ route('GET', '/api/admin/fs', async (req, res, p, q, ctx) => {
   const parent = path.dirname(dir);
   return { path: dir, parent: parent === dir ? '' : parent, dirs, files };
 });
-route('GET', '/api/admin/backup', (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+/**
+ * Everything worth keeping in the data folder, as one gzipped file. Provider downloads (Xtream/M3U copies) are left
+ * out — they're fetched again after a restore — except uploaded playlist files, which can't be.
+ */
+function makeBackup() {
   JsonFile.flushAll();
   const files = {};
+  const redownload = new Set(lists.all().filter((l) => l.type === 'xtream' || l.type === 'url').map((l) => lists.rawFile(l)));
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt'].includes(e.name)) walk(path.join(dir, e.name), r); } else if (!/\.(bak|tmp)$/.test(e.name) && !/^corrupt/.test(e.name)) files[r] = fs.readFileSync(path.join(dir, e.name)).toString('base64');
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
     }
   };
   walk(D, '');
-  const body = zlib.gzipSync(Buffer.from(JSON.stringify({ app: 'browser-iptv-player', version: cfg.version, createdAt: new Date().toISOString(), files })));
+  return zlib.gzipSync(Buffer.from(JSON.stringify({ app: 'browser-iptv-player', version: cfg.version, createdAt: new Date().toISOString(), files })));
+}
+route('GET', '/api/admin/backup', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const body = makeBackup();
   res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Length': body.length, 'Content-Disposition': `attachment; filename="iptv-backup-${new Date().toISOString().slice(0, 10)}.json.gz"` });
   res.end(body);
 });
-route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
+// Nightly backups in data/backups (kept for `backupDays` days).
+const BACKUPS = path.join(D, 'backups');
+const backupName = (d = new Date()) => `backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json.gz`;
+function backupList() {
+  try { return fs.readdirSync(BACKUPS).filter((f) => /^backup-[\w-]+\.json\.gz$/.test(f)).sort().reverse().map((f) => ({ name: f, size: fs.statSync(path.join(BACKUPS, f)).size, at: fs.statSync(path.join(BACKUPS, f)).mtimeMs })); } catch { return []; }
+}
+function writeBackup(name = backupName()) {
+  fs.mkdirSync(BACKUPS, { recursive: true });
+  const tmp = path.join(BACKUPS, name + '.tmp');
+  fs.writeFileSync(tmp, makeBackup());
+  fs.renameSync(tmp, path.join(BACKUPS, name));
+  const keep = Math.max(1, settings().backupDays || 7);
+  for (const b of backupList().filter((x) => !/-manual/.test(x.name)).slice(keep)) { try { fs.unlinkSync(path.join(BACKUPS, b.name)); } catch {} }
+  return name;
+}
+setInterval(() => {
+  if (!settings().backupDays) return;
+  const now = new Date();
+  if (now.getHours() < 3 || fs.existsSync(path.join(BACKUPS, backupName(now)))) return;
+  try { log(`Nightly backup: ${writeBackup()}`); } catch (e) { log('Nightly backup failed:', e.message); }
+}, 15 * 60e3).unref();
+route('GET', '/api/admin/backups', (req, res, p, q, ctx) => { requireAdmin(ctx); return { list: backupList(), days: settings().backupDays }; });
+route('POST', '/api/admin/backups', (req, res, p, q, ctx) => { requireAdmin(ctx); const now = new Date(); return { name: writeBackup(backupName(now).replace('.json.gz', `-manual-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.json.gz`)) }; });
+route('GET', '/api/admin/backups/:name', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
-  let data;
-  try { let buf = await readBody(req, 2 * 1024 * 1024 * 1024); if (buf[0] === 0x1f) buf = zlib.gunzipSync(buf); data = JSON.parse(buf.toString('utf8')); } catch { throw new HttpError(400, 'That isn’t a backup file from this app.'); }
+  if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name');
+  serveFile(req, res, path.join(BACKUPS, p.name), { download: p.name.replace(/^backup/, 'iptv-backup') });
+});
+route('DELETE', '/api/admin/backups/:name', (req, res, p, q, ctx) => { requireAdmin(ctx); if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name'); try { fs.unlinkSync(path.join(BACKUPS, p.name)); } catch {} return { ok: true }; });
+route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name');
+  const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(BACKUPS, p.name))).toString('utf8'));
+  restoreFiles(data);
+  res.on('finish', () => { log(`Restored ${p.name} — restarting.`); setTimeout(() => process.exit(0), 500); });
+  return { ok: true, restart: true };
+});
+function restoreFiles(data) {
   if (!data || data.app !== 'browser-iptv-player' || !data.files) throw new HttpError(400, 'That isn’t a backup file from this app.');
   for (const [rel, b64] of Object.entries(data.files)) {
     if (rel.includes('..') || path.isAbsolute(rel)) continue;
@@ -974,6 +1557,102 @@ route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, Buffer.from(b64, 'base64'));
   }
+  // Don't let the in-memory copies overwrite what was just restored.
+  JsonFile.discardAll && JsonFile.discardAll();
+}
+
+// ---- updates: new code dropped into the app folder (or uploaded here as a .zip) takes effect without a rebuild
+const CODE_FILES = /^(server\.js|package\.json|Dockerfile|docker-entrypoint\.sh|README\.md|IMPROVEMENTS\.md|LICENSE|defaults\.example\.json|\.dockerignore|(lib|web|public|extension|test)\/.+)$/;
+const inDocker = fs.existsSync('/.dockerenv');
+function codeSignature() {
+  const h = crypto.createHash('sha1');
+  const walk = (dir) => {
+    let ents = [];
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) { if (!/^(node_modules|data|test|\.git|github)$/.test(e.name)) walk(f); } else if (/\.(js|css|html|json)$/.test(e.name)) { try { const st = fs.statSync(f); h.update(f + st.size + st.mtimeMs); } catch {} }
+    }
+  };
+  walk(path.join(cfg.root, 'lib'));
+  walk(path.join(cfg.root, 'web'));
+  for (const f of ['server.js', 'package.json']) { try { const st = fs.statSync(path.join(cfg.root, f)); h.update(f + st.size + st.mtimeMs); } catch {} }
+  return h.digest('hex');
+}
+const update = { started: Date.now(), sig: codeSignature(), webSig: '', pending: null, version: cfg.version };
+function webSignature() { try { return buildBundle().v; } catch { return ''; } }
+/** Restart when nobody is watching through the server (or after 30 minutes regardless). */
+function restartWhenIdle(reason) {
+  if (update.pending) return;
+  update.pending = { reason, since: Date.now() };
+  log(`Update: ${reason} — restarting when nobody is watching through the server.`);
+  const tick = setInterval(() => {
+    const busy = media.sessions.size > 0;
+    if (busy && Date.now() - update.pending.since < 30 * 60e3) return;
+    clearInterval(tick);
+    hub.toAll('restarting', {});
+    JsonFile.flushAll();
+    setTimeout(() => process.exit(0), 800);
+  }, 5000);
+}
+setInterval(() => {
+  const sig = codeSignature();
+  if (sig === update.sig) return;
+  // Wait until the files stop changing (a copy in progress).
+  setTimeout(() => {
+    if (codeSignature() !== sig) return;
+    update.sig = sig;
+    let pkg = cfg.version;
+    try { pkg = JSON.parse(fs.readFileSync(path.join(cfg.root, 'package.json'), 'utf8')).version; } catch {}
+    update.version = pkg;
+    // Only the web app changed: rebuild it and ask open pages to reload. Server code: a restart.
+    const old = bundle && bundle.v;
+    let serverChanged = true;
+    try { serverChanged = update.serverSig !== serverSignature(); } catch {}
+    if (!serverChanged) { const v = webSignature(); if (v && v !== old) { log('Update: the web app changed — devices will reload.'); hub.toAll('app-updated', { v }); } return; }
+    if (inDocker || process.env.SELF_RESTART === '1') restartWhenIdle('new server code');
+    else { update.needsRestart = true; log('Update: new server code — restart the server to use it.'); }
+  }, 10e3);
+}, 60e3).unref();
+function serverSignature() {
+  const h = crypto.createHash('sha1');
+  for (const f of ['server.js', 'package.json', ...fs.readdirSync(path.join(cfg.root, 'lib')).map((x) => 'lib/' + x)]) { try { const st = fs.statSync(path.join(cfg.root, f)); h.update(f + st.size + st.mtimeMs); } catch {} }
+  return h.digest('hex');
+}
+update.serverSig = serverSignature();
+route('GET', '/api/admin/update', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  return { version: cfg.version, onDisk: update.version, needsRestart: !!update.needsRestart, pending: update.pending, docker: inDocker, autoRestart: inDocker || process.env.SELF_RESTART === '1', started: update.started, writable: (() => { try { fs.accessSync(cfg.root, fs.constants.W_OK); return true; } catch { return false; } })() };
+});
+route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const buf = await readBody(req, 100 * 1024 * 1024);
+  let files;
+  try { files = unzip(buf); } catch (e) { throw new HttpError(400, e.message); }
+  // A zip of the folder ("browser-iptv-player/server.js") or of its contents ("server.js").
+  const prefix = files.some((f) => f.name === 'server.js') ? '' : ((files.find((f) => /(^|\/)server\.js$/.test(f.name)) || {}).name || '').replace(/server\.js$/, '');
+  const picked = files.map((f) => ({ ...f, rel: f.name.startsWith(prefix) ? f.name.slice(prefix.length) : '' })).filter((f) => f.rel && CODE_FILES.test(f.rel) && !f.rel.includes('..'));
+  if (!picked.some((f) => f.rel === 'server.js') || !picked.some((f) => f.rel === 'package.json')) throw new HttpError(400, 'That zip doesn’t contain this app (no server.js / package.json).');
+  let version = '';
+  try { version = JSON.parse(picked.find((f) => f.rel === 'package.json').data.toString('utf8')).version; } catch {}
+  for (const f of picked) {
+    const dest = path.join(cfg.root, f.rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest + '.new', f.data);
+    fs.renameSync(dest + '.new', dest);
+  }
+  log(`Update: ${picked.length} files from an uploaded zip (version ${version || '?'}) — your settings and data were left alone.`);
+  update.sig = codeSignature();
+  update.version = version || update.version;
+  const auto = inDocker || process.env.SELF_RESTART === '1';
+  if (auto) restartWhenIdle('update uploaded'); else update.needsRestart = true;
+  return { ok: true, files: picked.length, version, restart: auto };
+});
+route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  let data;
+  try { let buf = await readBody(req, 2 * 1024 * 1024 * 1024); if (buf[0] === 0x1f) buf = zlib.gunzipSync(buf); data = JSON.parse(buf.toString('utf8')); } catch { throw new HttpError(400, 'That isn’t a backup file from this app.'); }
+  restoreFiles(data);
   res.on('finish', () => { log('Backup restored — restarting.'); setTimeout(() => process.exit(0), 500); });
   return { ok: true, restart: true };
 });
@@ -1036,6 +1715,7 @@ function hostAllowed(hostHeader) {
   if (h === 'localhost' || h.endsWith('.localhost') || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) return true;
   if (h === HOSTNAME || h === `${HOSTNAME}.local` || h === HOSTNAME.split('.')[0] || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.home.arpa') || h.endsWith('.ts.net')) return true;
   if (cfg.allowedHosts.includes('*') || cfg.allowedHosts.includes(h) || (settings().allowedHosts || []).includes(h)) return true;
+  try { if (settings().directAddress && new URL(settings().directAddress).hostname.toLowerCase() === h) return true; } catch {}
   // Once the site password isn't the default one, any address is fine (a stranger's page can't sign in).
   return !accounts.d.site.isDefault;
 }
@@ -1087,6 +1767,9 @@ async function handle(req, res) {
       if (!li) throw new HttpError(404, 'Not found');
       return serveFile(req, res, li.path);
     }
+
+    const hm = pathname.match(/^\/h\/([A-Za-z0-9_-]{20,})$/);
+    if (hm && req.method === 'GET') return handoffLanding(req, res, hm[1]);
 
     ctx.sess = accounts.session(req);
     if (ctx.sess && ctx.sess.profileId) ctx.profile = accounts.profile(ctx.sess.profileId);

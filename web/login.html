@@ -25,6 +25,16 @@
   button[type=submit]:focus-visible { outline: 3px solid #8ab4ff; outline-offset: 2px; }
   button[disabled] { opacity: .6; cursor: progress; }
   .err { min-height: 20px; margin-top: 12px; color: #ff8a8a; font-size: 14px; }
+  .alt { margin-top: 6px; width: 100%; font: inherit; font-size: 14px; color: inherit; background: none; border: 1px solid #2c3242; border-radius: 10px; padding: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .alt:focus-visible { outline: 3px solid #8ab4ff; outline-offset: 2px; }
+  #pair { width: 100%; max-width: 420px; background: #151821; border: 1px solid #262b38; border-radius: 16px; padding: 28px 24px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  #pair .code { font: 700 44px/1.1 ui-monospace, "SF Mono", Consolas, monospace; letter-spacing: .08em; margin: 14px 0 6px; }
+  #pair .qr { display: inline-block; background: #fff; padding: 10px; border-radius: 12px; margin: 10px 0 4px; }
+  #pair .qr svg { display: block; width: 200px; height: 200px; }
+  #pair ol { text-align: left; color: #9aa3b5; font-size: 14px; padding-left: 20px; margin: 14px 0; }
+  #pair .link { color: #8ab4ff; word-break: break-all; }
+  #pair .wait { color: #9aa3b5; font-size: 13px; }
+  .hide { display: none !important; }
   @media (prefers-color-scheme: light) {
     :root { color-scheme: light; }
     html, body { background: #f2f3f7; color: #15171c; }
@@ -32,6 +42,8 @@
     input { background: #f7f8fb; border-color: #d4d8e2; }
     p, label, .eye { color: #5b6476; }
     button[type=submit] { background: #15171c; color: #fff; }
+    #pair { background: #fff; border-color: #dfe2ea; }
+    .alt { border-color: #d4d8e2; }
     .err { color: #c62828; }
   }
 </style>
@@ -49,7 +61,19 @@
   </div>
   <button type="submit" id="go">Sign in</button>
   <div class="err" id="err" role="alert" aria-live="assertive"></div>
+  <button type="button" class="alt" id="usephone"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg> Sign in with your phone instead</button>
 </form>
+<section id="pair" class="hide" aria-live="polite">
+  <h1>Sign in with your phone</h1>
+  <div class="code" id="code">···-···</div>
+  <div class="qr" id="qr" aria-hidden="true"></div>
+  <ol>
+    <li>On a phone that's already signed in, scan the code above — or open <span class="link" id="plink"></span></li>
+    <li>Or in the app on your phone: <b>Settings → Sign in a TV</b>, and type the code.</li>
+  </ol>
+  <div class="wait" id="pwait">Waiting for your phone…</div>
+  <button type="button" class="alt" id="usepw">Use the password instead</button>
+</section>
 <script>
 (function () {
   var f = document.getElementById('f'), pw = document.getElementById('pw'), go = document.getElementById('go'), err = document.getElementById('err'), eye = document.getElementById('eye');
@@ -58,9 +82,39 @@
     e.preventDefault();
     go.disabled = true; err.textContent = '';
     fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-App': '1' }, body: JSON.stringify({ password: pw.value }) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Sign-in failed'); location.replace('/'); }); })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Sign-in failed'); location.replace('/' + location.hash); }); })
       .catch(function (x) { err.textContent = x.message === 'Failed to fetch' ? 'Can’t reach the server.' : x.message; go.disabled = false; pw.select(); });
   };
+
+  // Sign in with a phone: show a code (and QR code); a signed-in phone approves it.
+  var pair = document.getElementById('pair'), timer = null, cur = null;
+  function start() {
+    fetch('/api/pair/start', { method: 'POST', headers: { 'X-App': '1' } }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn’t get a code'); return j; }); }).then(function (j) {
+      cur = j;
+      document.getElementById('code').textContent = j.code;
+      document.getElementById('qr').innerHTML = j.qr;
+      document.getElementById('plink').textContent = j.link.replace(/^https?:\/\//, '');
+      document.getElementById('pwait').textContent = 'Waiting for your phone…';
+      clearInterval(timer);
+      timer = setInterval(poll, 2000);
+      setTimeout(function () { if (cur === j) start(); }, Math.max(60000, j.expires - Date.now() - 15000));
+    }).catch(function (e) { document.getElementById('pwait').textContent = e.message; });
+  }
+  function poll() {
+    if (!cur) return;
+    fetch('/api/pair/' + cur.id + '?s=' + encodeURIComponent(cur.secret), { headers: { 'X-App': '1' } }).then(function (r) {
+      if (r.status === 404 || r.status === 410) { start(); return; }
+      return r.json().then(function (j) { if (j.ok) { clearInterval(timer); document.getElementById('pwait').textContent = 'Signed in!'; location.replace('/'); } });
+    }).catch(function () {});
+  }
+  function show(phone) {
+    f.classList.toggle('hide', phone); pair.classList.toggle('hide', !phone);
+    if (phone) { start(); document.getElementById('usepw').focus(); } else { clearInterval(timer); cur = null; pw.focus(); }
+  }
+  document.getElementById('usephone').onclick = function () { show(true); };
+  document.getElementById('usepw').onclick = function () { show(false); };
+  // TVs: typing a password with a remote is no fun — start with the code.
+  if (/SMART-TV|SmartTV|Tizen|Web0S|webOS|BRAVIA|AFT|CrKey|GoogleTV|Android TV|HbbTV|NetCast|Viera|AQUOS|PhilipsTV/i.test(navigator.userAgent)) show(true);
 })();
 </script>
 </body>

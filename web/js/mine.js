@@ -2,7 +2,7 @@
 'use strict';
 V.route('mine', function (view, r) {
   var tab = r.args[0] || 'list';
-  var tabs = [{ v: 'list', l: 'My List' }, { v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }];
+  var tabs = [{ v: 'list', l: 'My List' }, { v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }, { v: 'week', l: 'Your week' }];
   view.innerHTML = V.pageHead('My stuff') + '<div class="tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t.v === tab ? ' on' : '') + '" aria-selected="' + (t.v === tab) + '" href="#/mine/' + t.v + '">' + t.l + '</a>'; }).join('') + '</div><div class="tab-body"></div>';
   var body = V.$('.tab-body', view);
   if (tab === 'list') {
@@ -12,6 +12,24 @@ V.route('mine', function (view, r) {
     var favs = S.data.favs.map(V.entry).filter(Boolean);
     if (!favs.length) body.innerHTML = V.empty('No favourite channels', 'Use the heart on a channel to add it.');
     else { body.innerHTML = '<div class="ch-list" data-list></div>'; var box = V.$('.ch-list', body); box._items = favs; box.innerHTML = favs.map(V.channelRow).join(''); box.onclick = function (e) { var f = e.target.closest('[data-fav]'); if (f) { e.preventDefault(); V.toggle('favs', f.dataset.fav).then(function () { V.router.refresh(); }); return; } var row = e.target.closest('[data-k]'); if (row) { e.preventDefault(); V.play(V.entry(row.dataset.k), { list: favs }); } }; }
+  } else if (tab === 'week') {
+    body.innerHTML = '<div class="spinner"></div>';
+    V.api('/api/me/week').then(function (w) {
+      var days = w.days.slice(-7), prev = w.days.slice(0, 7);
+      var sum = function (a, k) { return a.reduce(function (t, d) { return t + (d[k || 's'] || 0); }, 0); };
+      var tot = sum(days), before = sum(prev);
+      var max = Math.max.apply(null, days.map(function (d) { return d.s; }).concat([1]));
+      var h = function (sec) { return sec >= 3600 ? (sec / 3600).toFixed(sec >= 36000 ? 0 : 1) + ' h' : Math.round(sec / 60) + ' min'; };
+      var kinds = [['movie', 'Films'], ['episode', 'Series'], ['live', 'Live TV'], ['other', 'Other']].filter(function (k) { return sum(days, k[0]) > 0; });
+      body.innerHTML = '<section class="card-sec week"><h2>' + (tot ? h(tot) + ' watched in the last 7 days' : 'Nothing watched in the last 7 days') + '</h2>' +
+        (before ? '<p class="dim">' + (tot >= before ? h(tot - before) + ' more' : h(before - tot) + ' less') + ' than the week before.</p>' : '') +
+        '<div class="week-bars" role="img" aria-label="Time watched per day">' + days.map(function (d) {
+          var dt = new Date(d.day + 'T12:00:00');
+          return '<div class="wb"><span class="wb-v num">' + (d.s ? h(d.s) : '') + '</span><span class="wb-bar"><i style="height:' + Math.round(d.s / max * 100) + '%"></i></span><span class="wb-d">' + dt.toLocaleDateString([], { weekday: 'short' }) + '</span></div>';
+        }).join('') + '</div>' +
+        (kinds.length ? '<p>' + kinds.map(function (k) { return '<span class="chip">' + k[1] + ': ' + h(sum(days, k[0])) + '</span>'; }).join(' ') + '</p>' : '') +
+        (w.top.length ? '<h3>Most watched</h3><ol class="week-top">' + w.top.map(function (t) { var it = V.entry(t.k); return '<li>' + (it ? '<a href="' + V.hrefOf(it) + '">' + V.esc(it.n) + '</a>' : V.esc(t.n)) + ' <span class="dim">· ' + h(t.s) + '</span></li>'; }).join('') + '</ol>' : '') + '</section>';
+    }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
   } else if (tab === 'bookmarks') {
     var bms = S.data.bookmarks;
     body.innerHTML = bms.length ? '<ul class="bm-list">' + bms.map(function (b) {

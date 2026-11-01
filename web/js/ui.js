@@ -94,14 +94,17 @@ V.card = function (it, o) {
   var img = it.i || (t === 'episode' ? (V.showOf(it) || {}).i : '');
   var alt = it.i2 || (t === 'episode' && it.i ? (V.showOf(it) || {}).i : '') || '';
   var badges = '';
+  var ne = t === 'show' && V.newEpsOf ? V.newEpsOf(it.k) : null;
   if (o.next) badges += '<span class="badge">Next</span>';
+  else if (ne) badges += '<span class="badge new">' + (ne.n > 1 ? ne.n + ' new' : 'New episode') + '</span>';
   else if (V.isNew(it) && t !== 'live' && t !== 'radio') badges += '<span class="badge new">New</span>';
+  if (it.es === 'live') badges += '<span class="badge live">Live</span>';
   if (it.cu) badges += '<span class="badge" title="Catch-up">' + V.icon('archive') + '</span>';
   if (it.cam) badges += '<span class="badge warn" title="Recorded in a cinema: poor picture and sound">CAM</span>';
   if (it.lo) badges += '<span class="badge" title="On the server">' + V.icon('server') + '</span>';
   var sub = o.sub;
   if (sub === undefined) {
-    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.g; }
+    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event on now' : it.g; }
     else if (t === 'episode') sub = V.epLabel(it) + (it.et ? ' · ' + it.et : '');
     else sub = [it.y, t === 'show' ? (it.ne ? V.plural(it.ne, 'episode') : 'Series') : it.d ? V.fmtLen(it.d) : ''].filter(Boolean).join(' · ');
   }

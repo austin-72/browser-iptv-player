@@ -19,3 +19,13 @@ self.addEventListener('fetch', (e) => {
     return r;
   }).catch(() => caches.match(key).then((r) => r || caches.match('/'))));
 });
+
+// Tapping a notification (e.g. a new episode) opens the app there.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) if ('focus' in c) { c.navigate(url).catch(() => {}); return c.focus(); }
+    return self.clients.openWindow(url);
+  }));
+});

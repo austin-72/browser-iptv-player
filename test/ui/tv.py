@@ -7,6 +7,8 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 1920, 'height': 1080}, user_agent=UA)
     errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.goto(B); pg.wait_for_timeout(400)
+    print('TV sign-in starts with a code:', pg.is_visible('#pair'))
+    if pg.is_visible('#usepw'): pg.click('#usepw')
     if pg.is_visible('#pw'): pg.fill('#pw', 'changeme'); pg.keyboard.press('Enter'); pg.wait_for_timeout(1200)
     f = lambda: pg.evaluate("(() => { const a = document.activeElement; return a ? (a.className || a.tagName) + ' ' + (a.getAttribute('aria-label') || a.textContent || '').trim().slice(0, 40) : null; })()")
     print('focus on picker:', f())

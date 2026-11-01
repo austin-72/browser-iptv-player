@@ -7,6 +7,8 @@ V.watch = { it: null, list: null, mini: false };
 V.play = function (it, opts) {
   opts = opts || {};
   if (!it) return;
+  // "Play on the TV" mode (Remote): send it there instead.
+  if (V.playOnTarget && V.playOnTarget(it, opts)) return;
   if (it.t === 'show') return V.loadEpisodes(it).then(function (eps) { var r = V.resumePoint(it, eps); if (r.ep) V.play(r.ep, Object.assign({}, opts, { startAt: r.pos })); else V.toast('No episodes found', { error: true }); }).catch(V.fail);
   // Episodes fetched on demand (Xtream) live only in the server's memory: after a server restart, have it fetch
   // the show's episodes again before playing (once per show per page load).
@@ -115,7 +117,7 @@ V.watchTick = function (pos, tot) {
     if (skip.hidden || skip.dataset.kind !== showSkip.kind) {
       skip.hidden = false; skip.dataset.kind = showSkip.kind;
       skip.innerHTML = V.icon(showSkip.next ? 'skipnext' : 'ff') + '<span>' + showSkip.label + '</span>';
-      skip.onclick = function (e) { e.stopPropagation(); V.watch.skipped[showSkip.kind] = true; skip.hidden = true; doSkip(showSkip); };
+      skip.onclick = function (e) { e.stopPropagation(); V.watch.skipped[showSkip.kind] = true; V.watch.skipped.byUser = true; V.stillHere(); skip.hidden = true; doSkip(showSkip); };
       if (V.device.tv) skip.focus();
     }
   } else if (!skip.hidden) skip.hidden = true;
@@ -126,7 +128,7 @@ V.watchTick = function (pos, tot) {
     if (pos >= startAt && pos < tot) V.showUpNext(Math.ceil(Math.min(15, tot - pos)));
   }
   function doSkip(s) {
-    if (s.next) { V.play(s.next, { startAt: 0 }); return; }
+    if (s.next) { if (V.watch.skipped.byUser) V.play(s.next, { startAt: 0 }); else V.autoNext(s.next); return; }
     p.seek(s.to);
   }
 };
@@ -144,6 +146,7 @@ V.showUpNext = function (secs) {
       var b = e.target.closest('[data-un]');
       if (!b) return;
       e.stopPropagation();
+      V.stillHere();
       if (b.dataset.un === 'play') V.play(nx, { startAt: 0 }); else { V.watch.upnextDismissed = true; box.hidden = true; }
     };
     if (V.device.tv) V.$('[data-un=play]', box).focus();
@@ -157,7 +160,7 @@ V.onEnded = function () {
   if (V._sleepAt === -1) { V._sleepAt = 0; V.toast('Sleep timer: stopped'); return; }
   if (it && it.t === 'episode' && V.pref('autoplayNext') !== false && !V.watch.upnextDismissed) {
     var nx = V.nextEpisode(it);
-    if (nx) return V.play(nx, { startAt: 0 });
+    if (nx) return V.autoNext(nx);
   }
   if (it && (it.t === 'movie' || it.t === 'episode')) V.player._msg({ title: 'Finished', sub: it.n, actions: [{ label: 'Watch again', fn: function () { V.play(it, { startAt: 0 }); } }, { label: 'Close', primary: true, fn: V.closePlayer }] });
 };
@@ -287,16 +290,41 @@ V.initWatch = function () {
 
   // Another of your devices says "play this here".
   V.on('command', function (d) {
+    var it0 = V.watch.it;
+    var live = it0 && (it0.t === 'live' || it0.t === 'radio' || it0.t === 'catchup');
+    if (d.cmd !== 'watch' && d.cmd !== 'unwatch' && d.cmd !== 'takeover') V.stillHere();
     if (d.cmd === 'play' && d.k) {
       var it = V.entry(d.k);
       if (!it) return V.toast('That isn’t available on this profile', { error: true });
       V.toast('Playing from ' + d.from);
-      V.play(it, { startAt: d.pos || 0 });
+      V.play(it, { startAt: d.pos || undefined });
     } else if (d.cmd === 'pause') p.video.pause();
     else if (d.cmd === 'resume') p.video.play().catch(function () {});
+    else if (d.cmd === 'toggle') p.togglePlay();
     else if (d.cmd === 'stop') V.closePlayer();
     else if (d.cmd === 'seek') p.seek(d.pos || 0, true);
+    else if (d.cmd === 'skip') p.skip(d.d || 10);
+    else if (d.cmd === 'volume') { p.setVolume(V.clamp(d.v, 0, 1)); p.osd('Volume ' + Math.round(p.video.volume * 100) + '%', 900); }
+    else if (d.cmd === 'mute') p.toggleMute(typeof d.on === 'boolean' ? d.on : undefined);
+    else if (d.cmd === 'subs') { var sb = p._tracks().subs; if (sb && sb.items[d.i]) { sb.items[d.i].fn(); p._menuRefresh(); } else p.toggleSubs(); }
+    else if (d.cmd === 'audio') { var au = p._tracks().audio; if (au && au.items[d.i]) au.items[d.i].fn(); else p.cycleAudio(); }
+    else if (d.cmd === 'next') p.onNext();
+    else if (d.cmd === 'zap' && live) V.zap(d.dir || 1);
+    else if (d.cmd === 'channel') V.zapTo(d.n);
+    else if (d.cmd === 'live') p.goLive();
+    else if (d.cmd === 'restart' && it0) { var nn = V.epg.nowNext(it0); if (live && nn.now && V.catchup.available(it0)) V.playCatchup(it0, nn.now, 0); else p.seek(0); }
+    else if (d.cmd === 'sleep') V.setSleep(d.min || 0);
+    else if (d.cmd === 'watch') V.remoteWatch(d.conn, true);
+    else if (d.cmd === 'unwatch') V.remoteWatch(d.conn, false);
+    else if (d.cmd === 'takeover') {
+      if (!V.watch.it) return;
+      V.closePlayer();
+      V.toast((d.from || 'Someone') + ' needed the connection to watch on ' + (d.device || 'another device') + '.', { ms: 10000 });
+    }
+    V.remotePush();
   });
+  // Any key, click or touch on the player means someone's still there.
+  ['keydown', 'pointerdown'].forEach(function (ev) { V.$('#player-layer').addEventListener(ev, function () { V.stillHere(); }, true); });
   // Handoff: progress made on another device for what's open here.
   V.on('remote-progress', function (d) {
     if (!V.watch.it || V.watch.it.k !== d.k || !d.rec || p.video.paused === false) return;
@@ -428,3 +456,65 @@ V.chromecast = function () {
     });
   }).catch(function (e) { if (e && e !== 'cancel' && e.code !== 'cancel') V.toast('Casting failed: ' + (e.description || e.code || e), { error: true }); });
 };
+
+// ---------------------------------------------------------------- are you still watching?
+V.watch.auto = 0; // episodes started on their own since anyone touched anything
+V.watch.lastTouch = Date.now();
+V.stillHere = function () { V.watch.auto = 0; V.watch.lastTouch = Date.now(); };
+/** Start the next episode on its own — unless that's been happening for a while with nobody around. */
+V.autoNext = function (nx) {
+  V.watch.auto++;
+  if (V.watch.auto >= 3 && V.pref('stillWatching') !== false && !V.ls.session('noStillWatching')) return V.askStillWatching(function () { V.play(nx, { startAt: 0 }); });
+  V.play(nx, { startAt: 0 });
+};
+V.askStillWatching = function (go) {
+  var p = V.player, it = V.watch.it;
+  p.video.pause();
+  var name = it ? ((V.showOf(it) || {}).n || it.n) : '';
+  p._msg({
+    title: 'Are you still watching' + (name ? ' “' + name + '”' : '') + '?',
+    actions: [
+      { label: 'Continue watching', primary: true, fn: function () { V.stillHere(); p._msg(null); go(); } },
+      { label: 'Don’t ask again this session', fn: function () { V.ls.session('noStillWatching', 1); V.stillHere(); p._msg(null); go(); } },
+      { label: 'Stop', fn: function () { V.closePlayer(); } },
+    ],
+  });
+  V.remotePush();
+};
+// Live TV for 4 hours with nobody touching anything: ask too (so a forgotten TV doesn't hold the connection all night).
+setInterval(function () {
+  var it = V.watch.it, p = V.player;
+  if (!it || !p || !p.started || p.video.paused || p.vod || V.pref('stillWatching') === false || V.ls.session('noStillWatching')) return;
+  if (Date.now() - V.watch.lastTouch > 4 * 3600e3) V.askStillWatching(function () { p.video.play().catch(function () {}); });
+}, 60e3);
+
+// ---------------------------------------------------------------- phone remote: tell the phones controlling this device what's on
+V.remote = { watchers: {} }; // conn → expiry
+V.remoteWatch = function (conn, on) {
+  if (!conn) return;
+  if (on) V.remote.watchers[conn] = Date.now() + 30e3; else delete V.remote.watchers[conn];
+  V.remotePush(true);
+};
+V.remoteState = function () {
+  var p = V.player, it = V.watch.it;
+  if (!it || !p) return { idle: true, profile: S.profile && S.profile.name };
+  var tr = p.started ? p._tracks() : {};
+  var label = function (x) { return x ? { value: x.value, items: x.items.map(function (i) { return i.label; }), on: x.items.findIndex(function (i) { return i.on; }) } : null; };
+  var show = it.t === 'episode' ? V.showOf(it) : null;
+  var nn = it.t === 'live' || it.t === 'radio' ? V.epg.nowNext(it) : {};
+  return {
+    k: it.t === 'catchup' ? it.catchupOf : it.k, t: it.t, n: show ? show.n : it.n, sub: it.t === 'episode' ? V.epLabel(it) + (it.et ? ' · ' + it.et : '') : nn.now ? nn.now.t : it.ev || '',
+    i: it.i || (show && show.i) || '', no: it.no || 0, pos: p.started ? Math.round(p.position) : 0, dur: Math.round(p.duration || 0), vod: !!p.vod, paused: p.video.paused, started: !!p.started,
+    vol: Math.round(p.video.volume * 100) / 100, muted: p.video.muted, subs: label(tr.subs), audio: label(tr.audio), next: it.t === 'episode' && !!V.nextEpisode(it),
+    msg: V.$('.vp-msg', p.host).hidden ? '' : (V.$('.vp-msg .t', p.host) || {}).textContent || '', sleep: V.sleepLeft ? Math.ceil(V.sleepLeft() / 60000) : 0, profile: S.profile && S.profile.name,
+  };
+};
+V.remotePush = V.throttle(function () {
+  var now = Date.now(), to = [];
+  Object.keys(V.remote.watchers).forEach(function (c) { if (V.remote.watchers[c] > now) to.push(c); else delete V.remote.watchers[c]; });
+  if (!to.length || !S.conn) return;
+  V.api('/api/devices/state', { body: { conn: S.conn, to: to, state: V.remoteState() } }).catch(function () {});
+}, 700);
+setInterval(function () { if (Object.keys(V.remote.watchers).length) V.remotePush(); }, 2000);
+V.on('playing', function () { V.remotePush(); });
+V.on('stopped', function () { V.remotePush(); });

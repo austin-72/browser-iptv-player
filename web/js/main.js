@@ -35,6 +35,15 @@ V._enterApp = function () {
     V.router.stack = [];
     V.router.render();
     // Episodes in your progress/history that aren't loaded yet (Xtream series): fetch, then re-draw the rows they belong in.
+    // A new profile with nothing watched yet: ask what it likes (once).
+    if (!S.data.prefs.onboarded && !S.data.history.length && !Object.keys(S.data.ratings).length && !S.profile.kids) setTimeout(V.onboard, 1200);
+    // The admin hears about provider accounts running out (once a day per device).
+    if (S.alerts && S.alerts.length && V.ls.get('alertDay', '') !== new Date().toDateString()) {
+      V.ls.set('alertDay', new Date().toDateString());
+      var a = S.alerts[0];
+      V.toast(a.kind === 'expiry' ? a.list + (a.days < 0 ? ' has expired' : ' expires in ' + V.plural(a.days, 'day')) : a.list + ': account ' + a.status, { error: true, ms: 12000, action: { label: 'Details', fn: function () { V.router.go('#/admin'); } } });
+    }
+    V.drawRemoteBar();
     V.warmEpisodes().then(function (changed) {
       if (changed && /^(home|mine)$/.test(document.body.dataset.page) && window.scrollY < 400 && !(V.watch && V.watch.it && !V.watch.mini)) V.router.refresh();
       V.offerResume();

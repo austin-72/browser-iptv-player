@@ -204,6 +204,41 @@ Notes:
 - Export the merged list and guide for other apps such as VLC, TiviMate or Kodi, using a secret link.
 - One-click backup and restore of all settings and profiles.
 
+### New in 2.1
+
+**Finding something to watch**
+- **Search by person, genre or decade:** "tom hanks", "nolan", "90s comedy", "horror 2023". Cast and director names on title pages are links.
+- **Filters** on Movies and Series: years, rating and length (for example "under 1½ hours").
+- **Film series:** a title page shows the whole TMDB collection ("The Matrix Collection, 2 of 4 here") with a *Watch in order* button.
+- **New episodes:** shows in My List or that you've been watching get a "New episode" badge, a *New episodes* row, and a notification (also when the app is closed, if you allow it).
+- **On TV now** rows for sports, films, kids and news, from the guide's programme categories.
+- **Surprise me**, **Pick for several of us** (things everyone in the group should like and nobody has seen), and a quick *What do you like?* step for new profiles.
+- **Wrong poster or details?** on any title: pick the right TMDB entry from a few suggestions, and it's fixed for everyone.
+
+**Cleaner lists**
+- Titles are tidied: "EN - Apollo 13 (1995) TOM HANKS" → "Apollo 13 (1995)"; subtitle notes like "(FRENCH ENG-SUB)" become a small label; scene names and ALL CAPS are fixed. Saved history, lists and favourites move to the tidied titles automatically.
+- Categories are tidied ("|NA| USA ESPN+" → "ESPN+") and merged; the admin can add rename / merge / hide rules (Admin → Categories).
+- Better language detection for live channels (US Spanish-language networks, Indian channels, Nordic shelves, "AUS|" meaning Austria…), and pay-per-view event channels show the event; empty event channels are hidden unless asked for.
+
+**Phones and TVs**
+- **Sign in a TV with your phone:** the TV shows a code and QR code; approve it on a signed-in phone (Settings → Sign in a TV). No password typing with the remote.
+- **Phone remote:** Settings → *Use this as a remote*: play/pause, seek, volume, subtitles, audio, channel up/down, channel list, sleep timer — and *Pick things to play here*, which makes every Play button on the phone play on the TV.
+
+**Playback**
+- **Busy providers:** when a title is on several providers, the one with a free connection (and that the page can play directly) is used. When everyone's copy is busy, it says who's watching what, with *Take over*.
+- **Direct playback from an https address:** set a plain-http *direct address* in Admin → Network & proxies, and devices on your https address switch to it for http-only providers so streams come straight from the provider instead of through the server.
+- **MKV films** play directly in Chrome and Edge when their codecs allow (no server conversion); if a file has no sound in the browser it switches to conversion by itself.
+- **Subtitles:** off, always, or only when what you hear isn't one of your languages. Conversions pick your preferred audio language.
+- **Are you still watching?** after 3 episodes in a row (or 4 hours of live TV) with nobody touching anything, with *Don't ask again this session*. The sleep timer fades out and later frees the connection.
+
+**Admin**
+- **Proxies** (HTTP or SOCKS5) for everything the server fetches, per list or as the default — optionally for video too.
+- **Provider accounts:** expiry, connections allowed and in use, with a warning two weeks before an account runs out.
+- **TMDB:** fetch everything not fetched yet, update everything, retry the ones not found, or fetch by category — with live progress.
+- **Nightly backups** kept in `data/backups` (download, restore or delete them in Admin).
+- **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new program files are picked up automatically — the web app reloads and the server restarts itself when nobody is watching through it. You can also upload the app's .zip in Admin; settings and data are never touched.
+- **Your week** (My stuff): time watched per day and what you watched most.
+
 ### Player keys
 
 | Key | Action |

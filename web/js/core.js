@@ -66,6 +66,10 @@ V.ls = {
   get: function (k, d) { try { var v = localStorage.getItem('ip.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set: function (k, v) { try { localStorage.setItem('ip.' + k, JSON.stringify(v)); } catch (e) {} },
   del: function (k) { try { localStorage.removeItem('ip.' + k); } catch (e) {} },
+  /** This tab only, until it's closed: session(k) reads, session(k, v) writes. */
+  session: function (k, v) {
+    try { if (arguments.length > 1) { sessionStorage.setItem('ip.' + k, JSON.stringify(v)); return v; } var x = sessionStorage.getItem('ip.' + k); return x == null ? null : JSON.parse(x); } catch (e) { return arguments.length > 1 ? v : (V._sess || {})[k]; }
+  },
 };
 V.idb = (function () {
   var dbp = null;

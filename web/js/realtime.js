@@ -30,6 +30,10 @@ V.rt = (function () {
     on('profile', function () { V.refreshMe().then(function () { V.loadCatalog().catch(function () {}); }); });
     on('removed', function () { V.toast('This profile was removed.', { error: true }); V.leaveProfile(); });
     on('lists', function () { V.emit('shared-lists'); });
+    on('notify', function (d) { V.notify(d); });
+    on('devstate', function (d) { V.emit('devstate', d); });
+    on('app-updated', function () { V.appUpdated(); });
+    on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {
       if (es && es.readyState === 2) { close(); retry++; setTimeout(connect, Math.min(30000, 1000 * Math.pow(2, retry))); }
     };
@@ -44,8 +48,10 @@ V.rt = (function () {
     presence: function (playing) {
       S.nowPlaying = playing;
       if (!S.conn) return;
-      var body = { conn: S.conn, playing: playing && V.pref('presence') !== false ? playing : null };
-      var sig = JSON.stringify(body.playing && { k: body.playing.k });
+      // With "show what I'm watching" off, the server still learns which provider connection is in use (so others
+      // aren't sent to a busy one), but nobody sees what it is.
+      var body = { conn: S.conn, playing: playing ? (V.pref('presence') !== false ? playing : { k: playing.k, alt: playing.alt, hidden: true }) : null };
+      var sig = JSON.stringify(body.playing && { k: body.playing.k, alt: body.playing.alt });
       if (sig === lastPresence && !(playing && playing.force)) return;
       lastPresence = sig;
       V.api('/api/presence', { body: body }).catch(function () {});
@@ -61,8 +67,31 @@ V.refreshMe = function () {
     if (prefs) S.data.prefs = Object.assign({}, j.data.prefs);
     S.settings = j.settings;
     S.unread = j.unread;
+    S.alerts = j.alerts || [];
     V.emit('me');
     V.emit('data', '*');
     return j;
   });
+};
+
+/** Something worth telling the profile about (a new episode…): a toast here, and a system notification when allowed. */
+V.notify = function (d) {
+  if (!d || !d.title) return;
+  var open = function () { if (d.k) V.router.go(V.hrefOf(V.entry(d.k) || { t: 'show', k: d.k })); };
+  V.toast(d.title + (d.body ? ' — ' + d.body : ''), { action: d.k ? { label: 'Open', fn: open } : null, ms: 9000 });
+  try {
+    if (document.hidden && window.Notification && Notification.permission === 'granted') {
+      var opts = { body: d.body || '', icon: d.i || '/icon-192.png', tag: d.kind + ':' + (d.k || ''), data: { url: location.origin + '/' + (d.k ? '#/title/' + encodeURIComponent(d.k) : '') } };
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function (reg) { reg.showNotification(d.title, opts); });
+      else { var n = new Notification(d.title, opts); n.onclick = function () { window.focus(); open(); n.close(); }; }
+    }
+  } catch (e) {}
+};
+/** A new version of the app is on the server. */
+V.appUpdated = function () {
+  if (V._updToast) return;
+  V._updToast = true;
+  // Not in the middle of something: just reload. Otherwise offer it.
+  if (!(V.watch && V.watch.it) && !document.querySelector('dialog[open]')) { setTimeout(function () { location.reload(); }, 1500); return; }
+  V.toast('A new version is ready.', { action: { label: 'Reload', fn: function () { location.reload(); } }, ms: 30000 });
 };

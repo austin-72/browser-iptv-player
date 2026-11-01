@@ -3,6 +3,7 @@
 
 V.HOME_ROWS = [
   { id: 'continue', name: 'Continue watching' },
+  { id: 'neweps', name: 'New episodes' },
   { id: 'shared', name: 'Sent to you' },
   { id: 'list', name: 'My List' },
   { id: 'top', name: 'Top picks for you' },
@@ -10,6 +11,7 @@ V.HOME_ROWS = [
   { id: 'because', name: 'Because you watched…' },
   { id: 'people', name: 'Actors and directors you like' },
   { id: 'live', name: 'On now' },
+  { id: 'ontv', name: 'On TV now: sports, films, kids, news' },
   { id: 'favs', name: 'Favourite channels' },
   { id: 'household', name: 'Popular in your household' },
   { id: 'new', name: 'New additions' },
@@ -70,7 +72,7 @@ V.route('home', function (view) {
       '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + ' Play</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
       '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
   }
-  if (hasVod) html += '<div class="moods">' + V.MOODS.map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') + '</div>';
+  if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button></div>';
   view.innerHTML = html;
   if (heroIt) {
@@ -84,12 +86,26 @@ V.route('home', function (view) {
     }).catch(function () {});
   }
   V.$('[data-home=customize]', view).onclick = V.customizeHome;
+  var sb = V.$('[data-home=surprise]', view);
+  if (sb) sb.onclick = function () { V.surprise(); };
 
   var rows = V.$('.rows', view);
   var add = function (o) { var r = V.row(o); if (r) rows.appendChild(r); };
   var builders = {
     continue: function () { add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: V.continueWatching().map(function (c) { return { it: c.it, next: c.next, play: true }; }), cardOpts: { shape: 'wide', showName: true }, play: true }); },
     list: function () { add({ id: 'list', title: 'My List', items: keysToItems(S.data.list), more: '#/mine' }); },
+    neweps: function () {
+      var ne = S.data.newEps || {};
+      var items = Object.keys(ne).sort(function (a, b) { return ne[b].at - ne[a].at; }).map(V.entry).filter(notHidden);
+      add({ id: 'neweps', title: 'New episodes', items: items });
+    },
+    ontv: function () {
+      if (!S.live.length) return;
+      V.ON_TV.forEach(function (kind) {
+        var items = V.onTvNow(kind.id).slice(0, 30);
+        if (items.length >= 3) add({ id: 'ontv:' + kind.id, title: kind.label, items: items, play: true, more: '#/guide' });
+      });
+    },
     shared: function () {
       var soc = S.socialCache;
       if (!soc) return;
@@ -187,4 +203,110 @@ V.customizeHome = function () {
       d.addEventListener('change', function (e) { var id = e.target.dataset.show; if (id) { if (e.target.checked) hidden.delete(id); else hidden.add(id); } });
     },
   });
+};
+
+// ---------------------------------------------------------------- on TV now, by kind (from the guide's categories)
+V.ON_TV = [
+  { id: 'sports', label: 'Sports on now', cat: /sport|football|soccer|basketball|baseball|hockey|tennis|golf|racing|motor|boxing|mma|ufc|wrestling|cricket|rugby|athletic|nfl|nba|nhl|mlb|ncaa|f1\b|formula/i, grp: /sport|espn|ppv|dazn|nfl|nba|nhl|mlb|tsn|bein|fox sports|sky sports|tnt sports|golf|racing|ufc|wwe/i },
+  { id: 'movies', label: 'Films on TV now', cat: /^(movie|movies|film|films|feature film|cinema)$|\bmovie\b/i, grp: /movie|cinema|film|hbo|starz|showtime|cinemax|tcm|amc/i, needCat: true },
+  { id: 'kids', label: 'Kids’ TV on now', cat: /kids|children|animation|cartoon|preschool|family/i, grp: /kids|cartoon|disney junior|nick jr|nickelodeon|boomerang|baby/i },
+  { id: 'news', label: 'News on now', cat: /news|current affairs/i, grp: /news|cnn|msnbc|fox news|bbc news|sky news|cnbc|bloomberg/i },
+];
+V.onTvNow = function (kind) {
+  var k = V.ON_TV.filter(function (x) { return x.id === kind; })[0];
+  if (!k) return [];
+  var out = [];
+  var favs = new Set(S.data.favs);
+  for (var i = 0; i < S.live.length; i++) {
+    var c = S.live[i];
+    if (S.data.hidden.indexOf(c.k) >= 0) continue;
+    var now = V.epg.nowNext(c).now;
+    var cats = now && now.c ? [].concat(now.c).join(' ') : '';
+    var hit = false;
+    if (cats) hit = k.cat.test(cats);
+    else if (!k.needCat) hit = (now || c.es === 'live') && k.grp.test(c.g + ' ' + c.n) && (kind !== 'kids' || c.kd || /kids|cartoon|junior|nick/i.test(c.g + ' ' + c.n));
+    if (hit) out.push([c, (favs.has(c.k) ? 2 : 0) + (now ? 1 : 0)]);
+  }
+  out.sort(function (a, b) { return b[1] - a[1]; });
+  return out.map(function (x) { return x[0]; });
+};
+
+// ---------------------------------------------------------------- surprise me
+V.surprise = function () {
+  var recs = S.recs || {};
+  var pool = (recs.top || []).slice(0, 40).map(V.entry).filter(function (x) { return x && !V.progressOf(x.k) && S.data.hidden.indexOf(x.k) < 0; });
+  if (pool.length < 5) pool = pool.concat(S.movies.concat(S.shows).filter(function (x) { return x.i && (x.r || 0) >= 6.5 && !V.progressOf(x.k); }).slice(0, 300));
+  if (!pool.length) return V.toast('Watch a few things first and this gets better.');
+  var shown = [];
+  var pick = function () { var left = pool.filter(function (x) { return shown.indexOf(x) < 0; }); if (!left.length) { shown = []; left = pool; } var it = left[Math.floor(Math.random() * left.length)]; shown.push(it); return it; };
+  var it = pick();
+  var draw = function (d) {
+    V.$('.surprise', d).innerHTML = '<div class="sp-art">' + V.art(it.i, it.n, 'art') + '</div><div class="sp-b"><div class="dim">' + V.esc(it.t === 'show' ? 'Series' : 'Movie') + '</div><h3>' + V.esc(it.n) + '</h3><div class="dim">' + [it.y, it.r ? '★ ' + it.r : '', it.d ? V.fmtLen(it.d) : '', (it.gn || []).slice(0, 3).join(' · ')].filter(Boolean).map(V.esc).join(' · ') + '</div><p class="sp-plot dim clamp3"></p></div>';
+    V.api('/api/item/' + encodeURIComponent(it.k)).then(function (x) { var p = V.$('.sp-plot', d); if (p && x.plot) p.textContent = x.plot; }).catch(function () {});
+  };
+  V.dialog({
+    title: 'How about this?', cls: 'surprise-dlg',
+    body: '<div class="surprise"></div>',
+    actions: [
+      { label: 'Another one', fn: function (d) { it = pick(); draw(d); return false; } },
+      { label: 'More info', fn: function () { V.router.go(V.hrefOf(it)); } },
+      { label: 'Play', primary: true, fn: function () { V.play(it); } },
+    ],
+    onOpen: draw,
+  });
+};
+
+// ---------------------------------------------------------------- pick something for several of us
+V.route('together', function (view, r) {
+  var chosen = (r.q.get('with') || '').split(',').filter(Boolean);
+  var people = ((S.boot && S.boot.profiles) || []).filter(function (p) { return p.id !== S.profile.id; });
+  view.innerHTML = V.pageHead('Pick for several of us') + '<p class="dim">Choose who’s watching with you. You get things everyone should like — and nobody has seen.</p>' +
+    '<div class="together-who">' + people.map(function (p) { var on = chosen.indexOf(p.id) >= 0; return '<button class="who' + (on ? ' on' : '') + '" data-p="' + p.id + '" aria-pressed="' + on + '">' + V.avatar(p.avatar, 'md') + '<span>' + V.esc(p.name) + '</span></button>'; }).join('') + '</div><div class="grid-host"></div>';
+  V.$$('[data-p]', view).forEach(function (b) {
+    b.onclick = function () { var i = chosen.indexOf(b.dataset.p); if (i >= 0) chosen.splice(i, 1); else chosen.push(b.dataset.p); V.router.go('#/together' + (chosen.length ? '?with=' + chosen.join(',') : ''), true); };
+  });
+  var host = V.$('.grid-host', view);
+  if (!chosen.length) { host.innerHTML = V.empty('Who’s with you?', 'Tap the people watching with you.'); return; }
+  host.innerHTML = '<div class="spinner"></div>';
+  V.api('/api/recs/group?ids=' + chosen.join(',')).then(function (res) {
+    var items = res.keys.map(V.entry).filter(Boolean);
+    host.innerHTML = '';
+    if (!res.common) host.insertAdjacentHTML('beforeend', '<p class="dim">You don’t have much in common yet, so here’s a mix of each person’s top picks.</p>');
+    var g = document.createElement('div');
+    host.appendChild(g);
+    V.grid(g, items, { empty: 'Nothing yet — watch a few things first.' });
+  }).catch(function (e) { host.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+});
+
+// ---------------------------------------------------------------- a new profile: what do you like?
+V.onboard = function () {
+  V.api('/api/onboard').then(function (r) {
+    var items = r.keys.map(V.entry).filter(Boolean);
+    if (items.length < 8) { V.setPref('onboarded', true); return; }
+    var picked = [];
+    V.dialog({
+      title: 'What do you like?', wide: true, cls: 'onboard-dlg', dismiss: false,
+      body: '<p class="dim">Pick a few things you’ve enjoyed (3 or more), and your recommendations start from there.</p><div class="onb-grid">' + items.map(function (it) {
+        return '<button class="onb" data-k="' + V.esc(it.k) + '" aria-pressed="false">' + V.art(it.i, it.n, 'art') + '<span class="onb-t">' + V.esc(it.n) + '</span><span class="onb-ok">' + V.icon('check') + '</span></button>';
+      }).join('') + '</div>',
+      actions: [
+        { label: 'Skip', fn: function () { V.setPref('onboarded', true); } },
+        { label: 'Done', primary: true, fn: function (d) {
+          if (picked.length < 3) { V.toast('Pick at least 3'); return false; }
+          return V.api('/api/onboard', { body: { keys: picked } }).then(function () { S.data.prefs.onboarded = true; picked.forEach(function (k) { S.data.ratings[k] = 1; }); V.toast('Thanks! Your picks are being worked out.'); setTimeout(function () { V.loadRecs(); }, 2500); });
+        } },
+      ],
+      onOpen: function (d) {
+        d.addEventListener('click', function (e) {
+          var b = e.target.closest('.onb');
+          if (!b) return;
+          var k = b.dataset.k, i = picked.indexOf(k);
+          if (i >= 0) picked.splice(i, 1); else picked.push(k);
+          b.setAttribute('aria-pressed', i < 0);
+          b.classList.toggle('on', i < 0);
+          V.$('.dlg-f .primary', d).textContent = picked.length ? 'Done (' + picked.length + ')' : 'Done';
+        });
+      },
+    });
+  }).catch(function () {});
 };

@@ -23,6 +23,7 @@
     "settings.js",
     "admin.js",
     "adminstats.js",
+    "remote.js",
     "tv.js",
     "main.js"
   ],

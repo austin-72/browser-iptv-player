@@ -3,7 +3,7 @@
 V.route('admin', function (view, r) {
   if (!S.profile.admin) { view.innerHTML = V.empty('Admin only', 'Only the admin profile can open this.'); return; }
   var tab = r.args[0] || 'overview';
-  var tabs = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles'], ['content', 'Languages & content'], ['playback', 'Playback'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security'], ['apps', 'Other apps & backup']];
+  var tabs = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles'], ['content', 'Languages & content'], ['categories', 'Categories'], ['playback', 'Playback'], ['network', 'Network & proxies'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security'], ['apps', 'Backups, updates & apps']];
   view.innerHTML = V.pageHead('Admin') + '<div class="tabs admin-tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t[0] === tab ? ' on' : '') + '" aria-selected="' + (t[0] === tab) + '" href="#/admin/' + t[0] + '">' + t[1] + '</a>'; }).join('') + '</div><div class="admin-body"><div class="spinner"></div></div>';
   var body = V.$('.admin-body', view);
   V.api('/api/admin').then(function (A) {
@@ -21,14 +21,29 @@ V.adminTabs = {};
 V.adminTabs.overview = function (body, A) {
   var st = A.status;
   var pname = function (id) { var p = A.profiles.filter(function (x) { return x.id === id; })[0]; return p ? p.name : '?'; };
-  body.innerHTML = (st.defaultPassword ? '<div class="note warn">' + V.icon('shield') + ' The site password is still the default. <a href="#/admin/security">Change it</a>.</div>' : '') +
+  var xt = A.lists.filter(function (l) { return l.type === 'xtream' && l.account; });
+  body.innerHTML = (st.alerts || []).map(function (a) { return '<div class="note warn">' + V.icon('bell') + ' ' + (a.kind === 'expiry' ? '<b>' + V.esc(a.list) + '</b> ' + (a.days < 0 ? 'has expired.' : a.days === 0 ? 'expires today.' : 'expires in ' + V.plural(a.days, 'day') + '.') : '<b>' + V.esc(a.list) + '</b>: the provider says the account is “' + V.esc(a.status) + '”.') + '</div>'; }).join('') +
+    (st.defaultPassword ? '<div class="note warn">' + V.icon('shield') + ' The site password is still the default. <a href="#/admin/security">Change it</a>.</div>' : '') +
     (!st.ffmpeg ? '<div class="note warn">' + V.icon('info') + ' ffmpeg isn’t installed, so MKV/AVI/HEVC/RTMP etc. can’t be converted and downloads can’t be converted to MP4. The Docker image includes it.</div>' : '') +
     (!A.lists.length ? '<div class="note">' + V.icon('info') + ' No lists yet. <a href="#/admin/lists">Add your first playlist</a> — everyone sees it right away.</div>' : '') +
     '<div class="stats">' + [['Channels', st.catalog.counts.live || 0], ['Movies', st.catalog.counts.movie || 0], ['Series', st.catalog.counts.show || 0], ['Episodes', st.catalog.counts.episode || 0], ['Radio', st.catalog.counts.radio || 0], ['Guide programmes', st.epg.programmes || 0], ['Profiles', A.profiles.length], ['Signed-in devices', A.devices.length]].map(function (x) { return '<div class="stat"><b class="num">' + Number(x[1]).toLocaleString() + '</b><span>' + x[0] + '</span></div>'; }).join('') + '</div>' +
+    (xt.length ? '<section class="card-sec"><div class="sec-h"><h2>Provider accounts</h2><button class="btn sm" data-acct>' + V.icon('refresh') + ' Check now</button></div><ul class="simple">' + xt.map(function (l) { return '<li>' + V.adminAccountLine(l) + '</li>'; }).join('') + '</ul></section>' : '') +
     '<section class="card-sec"><h2>Watching now</h2>' + (A.watching.length ? '<ul class="simple">' + A.watching.map(function (w) { return '<li><b>' + V.esc(pname(w.pid)) + '</b> · ' + V.esc(w.n) + ' <span class="dim">on ' + V.esc(w.device) + ' · ' + V.fmtAgo(w.at) + '</span></li>'; }).join('') + '</ul>' : '<p class="dim">Nobody is watching right now.</p>') + '</section>' +
     '<section class="card-sec"><h2>Server conversions</h2>' + (st.sessions.length ? '<ul class="simple">' + st.sessions.map(function (s) { return '<li>' + V.esc(s.label) + ' <span class="dim">· ' + (s.transcode ? 'transcoding' + (s.hw ? ' (' + s.hw + ')' : '') + (s.height ? ' ' + s.height + 'p' : '') : 'remuxing') + ' · ' + V.esc(pname(s.owner)) + ' · ' + V.fmtAgo(s.startedAt) + '</span> <button class="btn sm" data-stop="' + s.id + '">Stop</button></li>'; }).join('') + '</ul>' : '<p class="dim">None running.</p>') + '</section>' +
     '<section class="card-sec"><h2>Server</h2><dl class="kv"><dt>Version</dt><dd>' + V.esc(st.version) + '</dd><dt>ffmpeg</dt><dd>' + (st.ffmpeg ? V.esc(st.ffmpegVersion) + (st.hw ? ' · hardware: ' + st.hw : '') : 'not found') + '</dd><dt>Intro detection</dt><dd>' + (st.intro ? 'available' : 'unavailable') + '</dd><dt>TMDB</dt><dd>' + (st.tmdb.enabled ? 'on · ' + st.tmdb.matched + ' titles matched' + (st.tmdb.error ? ' · ' + V.esc(st.tmdb.error) : '') : 'off') + '</dd><dt>Data folder</dt><dd><code>' + V.esc(st.dataDir) + '</code></dd><dt>Listening on</dt><dd>' + V.esc(st.listen) + '</dd><dt>System</dt><dd>' + V.esc(st.platform + ' · Node ' + st.node) + '</dd><dt>Up for</dt><dd>' + V.fmtLen(st.uptime) + '</dd></dl></section>';
-  body.onclick = function (e) { var b = e.target.closest('[data-stop]'); if (b) V.del('/api/admin/sessions/' + b.dataset.stop).then(function () { V.router.refresh(); }); };
+  body.onclick = function (e) {
+    var b = e.target.closest('[data-stop]'); if (b) V.del('/api/admin/sessions/' + b.dataset.stop).then(function () { V.router.refresh(); });
+    var c = e.target.closest('[data-acct]'); if (c) { c.disabled = true; V.api('/api/admin/accounts/check', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(V.fail); }
+  };
+};
+/** "EVESTV · active · expires 30 Oct 2027 (364 days) · 1 connection · in use by Mom (Living Room TV)" */
+V.adminAccountLine = function (l) {
+  var a = l.account || {};
+  var days = a.expires ? Math.floor((a.expires - Date.now()) / 86400e3) : null;
+  var use = l.inUse || [];
+  return '<b>' + V.esc(l.name) + '</b> <span class="dim">· ' + V.esc(a.status || '?') + (a.expires ? ' · expires ' + new Date(a.expires).toLocaleDateString() + ' (<span class="' + (days <= 14 ? 'err' : '') + '">' + (days < 0 ? 'expired' : V.plural(days, 'day')) + '</span>)' : '') +
+    (a.maxConnections ? ' · ' + V.plural(+a.maxConnections, 'connection') + ' allowed' : '') + (a.activeConnections !== undefined && a.activeConnections !== '' ? ' · provider says ' + a.activeConnections + ' in use' : '') + '</span>' +
+    (use.length ? '<div class="small">In use by ' + use.map(function (u) { return V.esc(u.name) + ' (' + V.esc(u.device) + ': ' + V.esc(u.n) + ')'; }).join(', ') + '</div>' : '') + (a.checkedAt ? '<div class="dim small">Checked ' + V.fmtAgo(a.checkedAt) + '</div>' : '');
 };
 
 V.adminTabs.lists = function (body, A) {
@@ -36,7 +51,8 @@ V.adminTabs.lists = function (body, A) {
     body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
       (A.lists.length ? '<ul class="adm-list">' + A.lists.map(function (l, i) {
         var s = l.status || {};
-        var info = l.type === 'xtream' ? (l.account ? 'Account ' + V.esc(l.account.status) + (l.account.expires ? ' · expires ' + new Date(l.account.expires).toLocaleDateString() : '') + (l.account.maxConnections ? ' · ' + l.account.maxConnections + ' connections' : '') : '') : l.type === 'folder' ? V.esc((l.folders || []).join(', ')) : l.type === 'url' ? V.esc(l.url) : 'Uploaded file';
+        var px = l.proxy === 'none' ? 'no proxy' : l.proxy ? ((A.settings.proxies || []).filter(function (x) { return x.id === l.proxy; })[0] || {}).name : '';
+        var info = (l.type === 'xtream' ? (l.account ? V.adminAccountLine(l) : '') : l.type === 'folder' ? V.esc((l.folders || []).join(', ')) : l.type === 'url' ? V.esc(l.url) : 'Uploaded file') + (px ? '<div>' + V.icon('globe', 'tiny') + ' Proxy: ' + V.esc(px) + '</div>' : '');
         return '<li class="' + (l.enabled ? '' : 'off') + '" data-id="' + l.id + '"><div class="al-h"><span class="al-type">' + ({ url: 'Playlist', file: 'File', xtream: 'Xtream', folder: 'Folder' }[l.type]) + '</span><b>' + V.esc(l.name) + '</b>' + (s.format ? '<span class="chip sm">' + V.esc(s.format) + '</span>' : '') + '<span class="sp"></span>' +
           '<button class="icon-btn" data-up aria-label="Move up"' + (i ? '' : ' disabled') + '>' + V.icon('up') + '</button><button class="icon-btn" data-down aria-label="Move down"' + (i < A.lists.length - 1 ? '' : ' disabled') + '>' + V.icon('down') + '</button>' +
           '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label><button class="icon-btn" data-ref aria-label="Refresh now">' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
@@ -122,11 +138,13 @@ V.editListDialog = function (l) {
       (l.type === 'xtream' ? '<label class="field"><span>Server</span><input class="input" name="server" value="' + V.esc(l.server) + '"></label><div class="grid2"><label class="field"><span>Username</span><input class="input" name="username" value="' + V.esc(l.username) + '"></label><label class="field"><span>Password</span><input class="input" type="password" name="password" value="' + V.esc(l.password) + '"></label></div>' : '') +
       (l.type === 'file' ? '<label class="field"><span>Replace the file</span><input class="input" type="file" name="file"></label>' : '') +
       '<div class="grid2"><label class="field"><span>Language of everything in it</span>' + V.langSelect(l.lang) + '</label><label class="field"><span>Refresh every (hours, 0 = never)</span><input class="input" name="refreshHours" type="number" min="0" max="168" value="' + l.refreshHours + '"></label></div>' +
-      (l.type !== 'folder' ? '<label class="field"><span>User-Agent (optional)</span><input class="input" name="ua" value="' + V.esc(l.ua || '') + '"></label><label class="check"><input type="checkbox" name="useGuide"' + (l.useGuide !== false ? ' checked' : '') + '><span>Use the TV guide this list points to</span></label>' : '') + '</form>',
+      (l.type !== 'folder' ? '<label class="field"><span>User-Agent (optional)</span><input class="input" name="ua" value="' + V.esc(l.ua || '') + '"></label><label class="check"><input type="checkbox" name="useGuide"' + (l.useGuide !== false ? ' checked' : '') + '><span>Use the TV guide this list points to</span></label>' +
+        '<label class="field"><span>Proxy for this list</span><select class="input" name="proxy"><option value="">The default (' + V.esc(((S.admin.settings.proxies || []).filter(function (x) { return x.id === S.admin.settings.proxy; })[0] || { name: 'none' }).name) + ')</option><option value="none"' + (l.proxy === 'none' ? ' selected' : '') + '>No proxy</option>' + (S.admin.settings.proxies || []).map(function (x) { return '<option value="' + x.id + '"' + (l.proxy === x.id ? ' selected' : '') + '>' + V.esc(x.name) + '</option>'; }).join('') + '</select><small class="dim">Set up proxies in Admin → Network & proxies.</small></label>' : '') + '</form>',
     actions: [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, fn: function (d) {
       var fd = new FormData(V.$('form', d));
       var patch = {};
-      ['name', 'url', 'server', 'username', 'password', 'ua', 'lang', 'refreshHours'].forEach(function (k) { if (fd.has(k)) patch[k] = fd.get(k); });
+      ['name', 'url', 'server', 'username', 'password', 'ua', 'lang', 'refreshHours', 'proxy'].forEach(function (k) { if (fd.has(k)) patch[k] = fd.get(k); });
+      if (patch.proxy === (l.proxy || '')) delete patch.proxy;
       if (V.$('[name=useGuide]', d)) patch.useGuide = !!fd.get('useGuide');
       var file = fd.get('file');
       return V.put('/api/admin/lists/' + l.id, patch).then(function () {
@@ -257,16 +275,131 @@ V.adminTabs.recs = function (body, A) {
     '<ol class="small dim"><li>Create a free account at themoviedb.org.</li><li>Settings → API → request an API key (choose “Developer”, any app name).</li><li>Paste the “API Key” or “API Read Access Token” below.</li></ol>' +
     '<label class="field"><span>TMDB key</span><div class="inline"><input class="input" data-key value="' + V.esc(s.tmdbKey || '') + '" placeholder="Paste the key"><button class="btn" data-save>Save</button><button class="btn" data-test>Test</button></div></label>' +
     '<p class="dim small">Status: ' + (A.status.tmdb.enabled ? 'on · ' + A.status.tmdb.matched + ' titles have details' + (A.status.tmdb.error ? ' · <span class="err">' + V.esc(A.status.tmdb.error) + '</span>' : '') : 'off') + '</p>' +
-    '<div class="btn-row"><button class="btn" data-enrich>' + V.icon('refresh') + ' Fetch details for all movies and series</button><span class="dim small" data-enrich-st></span></div></section>' +
-    '<section class="card-sec"><h2>How recommendations work</h2><p class="dim">Each profile’s picks are worked out on the server and saved on disk. They use what the profile watched (more weight for finished and recent things), thumbs up/down, My List and chosen interests; TMDB’s related titles; and what others in the household watch. Titles that keep being shown without being opened make way for new ones, and rows are re-ranked for variety.</p></section>';
-  var st = V.$('[data-enrich-st]', body);
-  var poll = function () { V.api('/api/admin/tmdb/enrich').then(function (j) { if (j.running) { st.textContent = j.done + ' of ' + j.total + ' done…'; setTimeout(poll, 3000); } else st.textContent = ''; }); };
-  poll();
+    '<div class="tmdb-fetch"></div></section>' +
+    '<section class="card-sec"><h2>How recommendations work</h2><p class="dim">Each profile’s picks are worked out on the server and saved on disk. They use what the profile watched (more weight for finished and recent things), thumbs up/down, My List and chosen interests; TMDB’s related titles; actors and directors you keep watching; titles several of your favourites point to; and what others in the household watch. Titles that keep being shown without being opened make way for new ones, and rows are re-ranked for variety.</p></section>';
   body.onclick = function (e) {
     if (e.target.closest('[data-save]')) V.adminSave({ tmdbKey: V.$('[data-key]', body).value }).then(function () { V.router.refresh(); });
     if (e.target.closest('[data-test]')) V.api('/api/admin/tmdb/test', { method: 'POST' }).then(function (j) { V.toast(j.ok ? 'TMDB works' : 'TMDB: ' + j.error, { error: !j.ok }); });
-    if (e.target.closest('[data-enrich]')) V.api('/api/admin/tmdb/enrich', { method: 'POST' }).then(function (j) { st.textContent = 'Started: ' + j.total + ' titles'; setTimeout(poll, 2000); }).catch(V.fail);
   };
+  if (A.status.tmdb.enabled) V.tmdbFetchPanel(V.$('.tmdb-fetch', body));
+};
+
+/** Admin → Recommendations: fetch TMDB details (what's missing, everything again, or chosen categories) with progress. */
+V.tmdbFetchPanel = function (box) {
+  var info = null, groupF = '', picked = new Set(), timer = null;
+  var draw = function () {
+    var j = info.job || null, c = info.counts, last = info.last;
+    var pct = j && j.total ? j.done / j.total : 0;
+    var eta = j && j.done > 5 ? (Date.now() - j.started) / j.done * (j.total - j.done) / 1000 : 0;
+    box.innerHTML = '<div class="stats small-stats">' + [['Movies & series', c.titles], ['With details', c.fetched], ['Not looked up yet', c.missing], ['Not found on TMDB', c.noMatch]].map(function (x) { return '<div class="stat"><b class="num">' + Number(x[1]).toLocaleString() + '</b><span>' + x[0] + '</span></div>'; }).join('') + '</div>' +
+      (j ? '<div class="tf-job"><div class="tf-h"><b>' + ({ visible: 'Filling in what the household can see', missing: 'Fetching everything not fetched yet', all: 'Updating everything', groups: 'Fetching: ' + V.esc(j.label || 'chosen categories') }[j.mode] || 'Fetching') + '</b><span class="sp"></span><button class="btn sm" data-tf-stop>Stop</button></div>' +
+        '<div class="bar big"><i style="width:' + (pct * 100).toFixed(1) + '%"></i></div><div class="dim small">' + j.done.toLocaleString() + ' of ' + j.total.toLocaleString() + ' (' + Math.floor(pct * 100) + '%) · ' + (j.found || 0).toLocaleString() + ' found · ' + (j.missed || 0).toLocaleString() + ' not on TMDB' + (eta ? ' · about ' + V.fmtLen(eta) + ' left' : '') + (j.current ? '<br>Now: ' + V.esc(j.current) : '') + '</div></div>'
+        : last && last.finished && Date.now() - last.finished < 3600e3 ? '<p class="dim small">' + (last.stopped ? 'Stopped' : 'Finished') + ' ' + V.fmtAgo(last.finished) + ': ' + (last.found || 0).toLocaleString() + ' found, ' + (last.missed || 0).toLocaleString() + ' not on TMDB.</p>' : '') +
+      '<div class="btn-row tf-acts"' + (j ? ' hidden' : '') + '>' +
+      '<button class="btn primary" data-tf="missing">' + V.icon('download') + ' Fetch everything not fetched yet</button>' +
+      '<button class="btn" data-tf="visible">Only what profiles can see</button>' +
+      '<button class="btn" data-tf="all">' + V.icon('refresh') + ' Update everything</button>' +
+      '<button class="btn" data-tf="retry">Try again for ones TMDB didn’t find</button></div>' +
+      '<details class="tf-groups"' + (picked.size ? ' open' : '') + '><summary>By category</summary><div class="inline"><input class="input" type="search" data-tf-filter placeholder="Filter categories" value="' + V.esc(groupF) + '"><button class="btn" data-tf="groups"' + (j || !picked.size ? ' disabled' : '') + '>Fetch ' + (picked.size ? V.plural(picked.size, 'category', 'categories') : 'selected') + '</button></div>' +
+      '<div class="tf-glist">' + info.groups.filter(function (g) { return !groupF || V.norm(g.name).indexOf(V.norm(groupF)) >= 0; }).slice(0, 400).map(function (g) {
+        return '<label class="check"><input type="checkbox" value="' + V.esc(g.id) + '"' + (picked.has(g.id) ? ' checked' : '') + '><span>' + V.esc(g.name) + ' <small class="dim">' + (g.t === 'show' ? 'series' : 'movies') + ' · ' + g.fetched + '/' + g.total + '</small><span class="mini-bar"><i style="width:' + (g.total ? g.fetched / g.total * 100 : 0) + '%"></i></span></span></label>';
+      }).join('') + '</div></details>';
+  };
+  var load = function () {
+    clearTimeout(timer);
+    return V.api('/api/admin/tmdb/enrich').then(function (r) {
+      info = r;
+      var f = document.activeElement && document.activeElement.matches && document.activeElement.matches('[data-tf-filter]');
+      draw();
+      if (f) { var inp = V.$('[data-tf-filter]', box); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      if (r.job && box.isConnected) timer = setTimeout(load, 2000);
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  box.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tf]');
+    if (b) {
+      var mode = b.dataset.tf, body = { mode: mode === 'retry' ? 'missing' : mode, retry: mode === 'retry' };
+      if (mode === 'groups') body.groups = Array.from(picked);
+      var go = function () { V.api('/api/admin/tmdb/enrich', { body: body }).then(function (j) { if (j.nothing) V.toast('Nothing to fetch there'); picked.clear(); load(); }).catch(V.fail); };
+      if (mode === 'all') V.confirm('Fetch details again for all ' + info.counts.titles.toLocaleString() + ' movies and series? At about 7 a second this takes a while; everything keeps working meanwhile.', { ok: 'Update everything' }).then(function (ok) { if (ok) go(); });
+      else go();
+    }
+    if (e.target.closest('[data-tf-stop]')) V.del('/api/admin/tmdb/enrich').then(load);
+  });
+  box.addEventListener('change', function (e) { if (e.target.closest('.tf-glist')) { if (e.target.checked) picked.add(e.target.value); else picked.delete(e.target.value); var gb = V.$('[data-tf=groups]', box); gb.disabled = !picked.size; gb.textContent = 'Fetch ' + (picked.size ? V.plural(picked.size, 'category', 'categories') : 'selected'); } });
+  box.addEventListener('input', V.debounce(function (e) { if (e.target.matches('[data-tf-filter]')) { groupF = e.target.value; draw(); var inp = V.$('[data-tf-filter]', box); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } }, 200));
+  load();
+  var prevCleanup = V.pageCleanup;
+  V.pageCleanup = function () { clearTimeout(timer); if (prevCleanup) prevCleanup(); };
+};
+
+V.adminTabs.network = function (body, A) {
+  var st = A.settings;
+  var proxies = (st.proxies || []).map(function (x) { return Object.assign({}, x); });
+  var draw = function () {
+    body.innerHTML = '<section class="card-sec"><h2>Proxies</h2><p class="dim">Send the server’s own traffic to providers through a proxy (HTTP or SOCKS5): list downloads, account checks, TV guides, TMDB, and every stream that goes through the server (relays and conversions). Each list can use the default, another proxy, or none (Admin → Lists → edit).</p>' +
+      '<ul class="adm-list proxies">' + (proxies.length ? proxies.map(function (x, i) {
+        return '<li data-i="' + i + '"><div class="grid2"><label class="field"><span>Name</span><input class="input" data-k="name" value="' + V.esc(x.name) + '"></label><label class="field"><span>Address</span><input class="input" data-k="url" value="' + V.esc(x.url) + '" placeholder="socks5://user:password@host:1080"></label></div>' +
+          '<label class="check"><input type="checkbox" data-k="video"' + (x.video ? ' checked' : '') + '><span>Video too: viewers’ streams from lists using this proxy always go through the server (and so through the proxy) instead of straight from the provider</span></label>' +
+          '<div class="btn-row"><button class="btn sm" data-test>Test</button><button class="btn sm danger" data-rm>Remove</button><span class="dim small" data-res></span></div></li>';
+      }).join('') : '<li class="dim">No proxies.</li>') + '</ul>' +
+      '<div class="btn-row"><button class="btn" data-add>' + V.icon('plus') + ' Add a proxy</button></div>' +
+      '<label class="field"><span>Default for everything</span><select class="input" data-def><option value="">No proxy</option>' + proxies.filter(function (x) { return x.id; }).map(function (x) { return '<option value="' + x.id + '"' + (st.proxy === x.id ? ' selected' : '') + '>' + V.esc(x.name) + '</option>'; }).join('') + '</select></label>' +
+      '<button class="btn primary" data-save-p>Save proxies</button></section>' +
+      '<section class="card-sec"><h2>Direct playback from an https address</h2><p class="dim">Browsers won’t play a plain-http stream on a secure (https) page, so streams from http-only providers have to go through the server when people use your https address. Give this server’s plain-http address here (your home network address, e.g. <code>http://192.168.1.20:' + (location.port || 8080) + '</code>, or a public one) and those devices can switch to it and play straight from the provider. They stay signed in.</p>' +
+      '<p class="dim small">Note: on plain http, what the app sends isn’t encrypted. A home-network address keeps that inside your home (and then the switch only works at home).</p>' +
+      '<label class="field"><span>Direct (http) address</span><div class="inline"><input class="input" data-direct value="' + V.esc(st.directAddress || '') + '" placeholder="http://192.168.1.20:8080">' + (st.directAddress ? '<a class="btn" target="_blank" rel="noopener" href="' + V.esc(st.directAddress) + '">Test</a>' : '') + '</div></label>' +
+      '<label class="field"><span>When a stream needs it</span><select class="input" data-dmode>' + [['ask', 'Ask the viewer (they can remember the choice per device)'], ['auto', 'Switch automatically'], ['off', 'Never switch (play through the server)']].map(function (o) { return '<option value="' + o[0] + '"' + ((st.directSwitch || 'ask') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+      '<button class="btn primary" data-save-d>Save</button></section>';
+  };
+  draw();
+  var collect = function () { V.$$('.proxies [data-i]', body).forEach(function (li) { var x = proxies[+li.dataset.i]; x.name = V.$('[data-k=name]', li).value; x.url = V.$('[data-k=url]', li).value.trim(); x.video = V.$('[data-k=video]', li).checked; }); };
+  body.onclick = function (e) {
+    var li = e.target.closest('[data-i]');
+    if (e.target.closest('[data-add]')) { collect(); proxies.push({ name: 'Proxy ' + (proxies.length + 1), url: '', video: false }); draw(); }
+    else if (li && e.target.closest('[data-rm]')) { collect(); proxies.splice(+li.dataset.i, 1); draw(); }
+    else if (li && e.target.closest('[data-test]')) {
+      collect();
+      var x = proxies[+li.dataset.i], res = V.$('[data-res]', li);
+      res.textContent = 'Testing…';
+      V.api('/api/admin/proxy/test', { body: { url: x.url, id: x.id } }).then(function (r) { res.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' Works · ' + r.ms + ' ms' + (r.ip ? ' · the internet sees ' + V.esc(r.ip) : '') : '<span class="err">' + V.esc(r.error || 'HTTP ' + r.status) + '</span>'; });
+    } else if (e.target.closest('[data-save-p]')) { collect(); V.adminSave({ proxies: proxies, proxy: V.$('[data-def]', body).value }, 'Saved — lists using a changed proxy refresh').then(function (r) { proxies = r.proxies.map(function (x) { return Object.assign({}, x); }); st = r; draw(); }); }
+    else if (e.target.closest('[data-save-d]')) V.adminSave({ directAddress: V.$('[data-direct]', body).value.trim(), directSwitch: V.$('[data-dmode]', body).value }).then(function (r) { st = r; S.settings.directAddress = r.directAddress; S.settings.directSwitch = r.directSwitch; draw(); });
+  };
+};
+
+V.adminTabs.categories = function (body, A) {
+  var st = A.settings;
+  var rules = (st.groupRules || []).map(function (r) { return Object.assign({}, r); });
+  var groups = [];
+  var draw = function () {
+    body.innerHTML = '<section class="card-sec"><h2>Tidy category names</h2><label class="switch"><input type="checkbox" data-tidy' + (st.tidyGroups !== false ? ' checked' : '') + '><span class="sw"></span><span>Clean up providers’ category names: “|NA| USA ESPN+” → “ESPN+”, “VOD - NETFLIX” → “Netflix”, “TV ᴿᴬᵂ ⁶⁰ᶠᵖˢ” → “TV”, ALL CAPITALS → Title Case. Categories that end up with the same name are merged.</span></label></section>' +
+      '<section class="card-sec"><h2>Your rules</h2><p class="dim">Rename, merge or hide categories. <code>*</code> matches anything (<code>Netflix*</code>, <code>*PPV*</code>). The first rule that matches wins. Rename several to the same name to merge them.</p>' +
+      '<table class="rules"><thead><tr><th>Category</th><th>Becomes</th><th>Hide</th><th>Only for</th><th></th></tr></thead><tbody>' + rules.map(function (r, i) {
+        return '<tr data-i="' + i + '"><td><input class="input" data-k="match" value="' + V.esc(r.match) + '" list="grp-names" placeholder="NETFLIX*"></td><td><input class="input" data-k="to" value="' + V.esc(r.to || '') + '" placeholder="Netflix"' + (r.hide ? ' disabled' : '') + '></td><td><input type="checkbox" data-k="hide"' + (r.hide ? ' checked' : '') + ' aria-label="Hide"></td>' +
+          '<td><select class="input" data-k="types"><option value="">Everything</option>' + [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']].map(function (t) { return '<option value="' + t[0] + '"' + ((r.types || [])[0] === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></td><td><button class="icon-btn" data-rm aria-label="Remove rule">' + V.icon('trash') + '</button></td></tr>';
+      }).join('') + '</tbody></table><datalist id="grp-names">' + groups.slice(0, 2000).map(function (g) { return '<option value="' + V.esc(g.name) + '">'; }).join('') + '</datalist>' +
+      '<div class="btn-row"><button class="btn" data-add>' + V.icon('plus') + ' Add a rule</button><button class="btn primary" data-save>Save and rebuild</button></div></section>' +
+      '<section class="card-sec"><h2>Categories now</h2><input class="input" type="search" data-f placeholder="Filter"><div class="cat-now dim small"></div></section>';
+    listNow('');
+  };
+  var listNow = function (q) {
+    var nq = V.norm(q);
+    var box = V.$('.cat-now', body);
+    if (box) box.innerHTML = groups.filter(function (g) { return !nq || V.norm(g.name).indexOf(nq) >= 0; }).slice(0, 600).map(function (g) { var t = Object.keys(g.types).map(function (k) { return g.types[k] + ' ' + (V.TYPE_NAMES[k] || k).toLowerCase(); }).join(', '); return '<button class="chip sm" data-use="' + V.esc(g.name) + '" title="Make a rule for this">' + V.esc(g.name) + ' <small>' + V.esc(t) + '</small></button>'; }).join(' ');
+  };
+  var collect = function () { V.$$('.rules [data-i]', body).forEach(function (tr) { var r = rules[+tr.dataset.i]; r.match = V.$('[data-k=match]', tr).value.trim(); r.to = V.$('[data-k=to]', tr).value.trim(); r.hide = V.$('[data-k=hide]', tr).checked; var t = V.$('[data-k=types]', tr).value; r.types = t ? [t] : []; }); };
+  V.api('/api/admin/groups').then(function (g) { groups = g.groups; draw(); });
+  draw();
+  body.onclick = function (e) {
+    var tr = e.target.closest('[data-i]');
+    if (e.target.closest('[data-add]')) { collect(); rules.push({ match: '', to: '', hide: false, types: [] }); draw(); }
+    else if (tr && e.target.closest('[data-rm]')) { collect(); rules.splice(+tr.dataset.i, 1); draw(); }
+    else if (e.target.closest('[data-use]')) { collect(); rules.push({ match: e.target.closest('[data-use]').dataset.use, to: '', hide: false, types: [] }); draw(); var last = V.$$('.rules [data-k=to]', body).pop(); if (last) last.focus(); }
+    else if (e.target.closest('[data-save]')) { collect(); V.adminSave({ groupRules: rules.filter(function (r) { return r.match; }), tidyGroups: V.$('[data-tidy]', body).checked }, 'Saved — the catalogue is being rebuilt').then(function (r) { st = r; rules = (r.groupRules || []).map(function (x) { return Object.assign({}, x); }); setTimeout(function () { V.api('/api/admin/groups').then(function (g) { groups = g.groups; draw(); }); }, 4000); }); }
+  };
+  body.onchange = function (e) { if (e.target.dataset.k === 'hide') { var to = V.$('[data-k=to]', e.target.closest('tr')); to.disabled = e.target.checked; } if (e.target.hasAttribute('data-tidy')) V.adminSave({ tidyGroups: e.target.checked }, 'Saved — the catalogue is being rebuilt'); };
+  body.oninput = V.debounce(function (e) { if (e.target.hasAttribute('data-f')) listNow(e.target.value); }, 150);
 };
 
 V.adminTabs.brand = function (body, A) {
@@ -319,12 +452,43 @@ V.adminTabs.apps = function (body, A) {
     '<label class="field"><span>Playlist (M3U)</span><div class="inline"><input class="input" readonly value="' + V.esc(base + '/playlist.m3u') + '"><button class="btn" data-copy="' + V.esc(base + '/playlist.m3u') + '">Copy</button></div></label>' +
     '<label class="field"><span>TV guide (XMLTV)</span><div class="inline"><input class="input" readonly value="' + V.esc(base + '/epg.xml') + '"><button class="btn" data-copy="' + V.esc(base + '/epg.xml') + '">Copy</button></div></label>' +
     '<button class="btn" data-newkey>Make a new key (old addresses stop working)</button></section>' +
-    '<section class="card-sec"><h2>Backup</h2><p class="dim">Everything: settings, lists, profiles, history, messages, recommendations. Restoring replaces it all and restarts the server (Docker restarts it automatically).</p><div class="btn-row"><a class="btn primary" href="/api/admin/backup">' + V.icon('download') + ' Download a backup</a><label class="btn">' + V.icon('upload') + ' Restore a backup<input type="file" accept=".gz,.json" data-restore hidden></label></div></section>';
+    '<section class="card-sec"><h2>Backups</h2><p class="dim">Everything: settings, lists, profiles, history, messages, recommendations (providers’ channel lists are downloaded again after a restore). A backup is made every night and kept in the data folder’s <code>backups</code> folder. Restoring replaces it all and restarts the server (Docker restarts it automatically).</p>' +
+    '<label class="field narrow"><span>Nightly backups to keep (0 = none)</span><input class="input" type="number" min="0" max="60" data-bdays value="' + (A.settings.backupDays === undefined ? 7 : A.settings.backupDays) + '"></label>' +
+    '<ul class="simple backups"><li class="dim">Loading…</li></ul>' +
+    '<div class="btn-row"><button class="btn primary" data-bnow>' + V.icon('plus') + ' Make a backup now</button><a class="btn" href="/api/admin/backup">' + V.icon('download') + ' Download a fresh backup</a><label class="btn">' + V.icon('upload') + ' Restore from a file<input type="file" accept=".gz,.json" data-restore hidden></label></div></section>' +
+    '<section class="card-sec"><h2>Updates</h2><div class="upd dim">Loading…</div>' +
+    '<p class="dim small">Upload the app’s .zip (the GitHub copy) and it replaces the program files only — your settings (defaults.json, docker-compose.yml) and data are never touched.</p><label class="btn">' + V.icon('upload') + ' Update from a .zip<input type="file" accept=".zip" data-update hidden></label></section>';
+  var loadBackups = function () {
+    V.api('/api/admin/backups').then(function (r) {
+      V.$('.backups', body).innerHTML = r.list.length ? r.list.map(function (b) { return '<li>' + V.icon('archive', 'tiny') + ' <b>' + V.esc(b.name.replace(/^backup-|\.json\.gz$/g, '').replace(/-manual-(\d\d)(\d\d)/, ' (made by hand at $1:$2)')) + '</b> <span class="dim">· ' + V.fmtSize(b.size) + '</span> <a class="btn sm" href="/api/admin/backups/' + encodeURIComponent(b.name) + '">Download</a> <button class="btn sm" data-brestore="' + V.esc(b.name) + '">Restore</button> <button class="icon-btn sm" data-bdel="' + V.esc(b.name) + '" aria-label="Delete">' + V.icon('trash') + '</button></li>'; }).join('') : '<li class="dim">No backups yet — the first nightly one is made after 3 am.</li>';
+    }).catch(function () {});
+  };
+  var loadUpdate = function () {
+    V.api('/api/admin/update').then(function (u) {
+      V.$('.upd', body).innerHTML = '<p>Running version <b>' + V.esc(u.version) + '</b>' + (u.onDisk && u.onDisk !== u.version ? ' · version <b>' + V.esc(u.onDisk) + '</b> is on disk' : '') + ' · started ' + V.fmtAgo(u.started) + '.</p>' +
+        (u.pending ? '<p class="note">' + V.icon('refresh') + ' New code found — restarting as soon as nobody is watching through the server.</p>' : u.needsRestart ? '<p class="note warn">' + V.icon('refresh') + ' New code is on disk. Restart the server to use it.</p>' : '') +
+        '<p class="small">' + (u.autoRestart ? 'New program files dropped into the app folder are picked up automatically: the web app reloads on its own, and the server restarts itself when nobody is watching through it.' : 'New web-app files are picked up automatically; new server files need a restart.') + '</p>';
+    }).catch(function () {});
+  };
+  loadBackups(); loadUpdate();
   body.onclick = function (e) {
     var c = e.target.closest('[data-copy]'); if (c) V.copy(c.dataset.copy);
+    if (e.target.closest('[data-bnow]')) V.api('/api/admin/backups', { method: 'POST' }).then(function () { V.toast('Backup made'); loadBackups(); }).catch(V.fail);
+    var br = e.target.closest('[data-brestore]');
+    if (br) V.confirm('Replace everything on this server with the backup from ' + br.dataset.brestore + '?', { ok: 'Restore', danger: true }).then(function (ok) { if (ok) V.api('/api/admin/backups/' + encodeURIComponent(br.dataset.brestore) + '/restore', { method: 'POST' }).then(function () { V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 6000); }).catch(V.fail); });
+    var bd = e.target.closest('[data-bdel]');
+    if (bd) V.confirm('Delete the backup ' + bd.dataset.bdel + '?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/backups/' + encodeURIComponent(bd.dataset.bdel)).then(loadBackups); });
     if (e.target.closest('[data-newkey]')) V.confirm('Make a new key? Apps using the old addresses stop working.', { ok: 'New key', danger: true }).then(function (ok) { if (ok) V.adminSave({ newExportKey: true }).then(function () { V.router.refresh(); }); });
   };
   body.onchange = function (e) {
+    if (e.target.hasAttribute('data-bdays')) { V.adminSave({ backupDays: +e.target.value }); return; }
+    if (e.target.dataset.update !== undefined) {
+      var z = e.target.files[0];
+      if (!z) return;
+      V.toast('Uploading the update…');
+      fetch('/api/admin/update', { method: 'POST', headers: { 'X-App': '1' }, body: z, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); V.toast('Updated ' + V.plural(j.files, 'file') + (j.version ? ' to version ' + j.version : '') + (j.restart ? ' — the server restarts when nobody is watching.' : ' — restart the server to finish.'), { ms: 10000 }); loadUpdate(); }); }).catch(V.fail);
+      return;
+    }
     if (e.target.dataset.restore === undefined) return;
     var f = e.target.files[0];
     if (!f) return;

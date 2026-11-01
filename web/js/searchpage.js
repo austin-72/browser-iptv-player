@@ -7,7 +7,7 @@ V.route('search', function (view, r) {
     '<input type="search" class="input" data-q placeholder="Movies, series, channels, people…" aria-label="Search" autocomplete="off" enterkeyhint="search" value="' + V.esc(q0) + '">' +
     (voice ? '<button type="button" class="icon-btn" data-voice aria-label="Search by voice">' + V.icon('mic') + '</button>' : '') + '</form><div class="search-out"></div></div>';
   var input = V.$('[data-q]', view), out = V.$('.search-out', view);
-  var epgReq = 0;
+  var epgReq = 0, peopleReq = 0;
   var run = function (q) {
     q = q.trim();
     history.replaceState(null, '', '#/search' + (q ? '?q=' + encodeURIComponent(q) : ''));
@@ -25,10 +25,37 @@ V.route('search', function (view, r) {
     var by = { movie: [], show: [], live: [], radio: [], episode: [] };
     all.forEach(function (it) { if (by[it.t]) by[it.t].push(it); });
     var top = all.filter(function (it) { return it.t !== 'episode'; }).slice(0, 18);
-    out.innerHTML = all.length ? '<div class="sr-rows"></div>' : '<div class="empty"><h2>No matches for “' + V.esc(q) + '”</h2><p>Try fewer words, or check the spelling.</p></div>';
+    // "90s comedy", "horror 2023", "sci-fi 1980s": genre and years as filters.
+    var f = V.searchFilters(q);
+    var filtered = null;
+    if (f) {
+      var pool = f.rest ? V.search.find(f.rest, { types: ['movie', 'show'], limit: 2000 }) : S.movies.concat(S.shows);
+      filtered = pool.filter(function (it) { return (!f.genres.length || f.genres.every(function (g) { return (it.gn || []).indexOf(g) >= 0; })) && (!f.from || (it.y && it.y >= f.from && it.y <= f.to)) && S.data.hidden.indexOf(it.k) < 0; });
+      if (!f.rest) filtered.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+    }
+    out.innerHTML = all.length || (filtered && filtered.length) ? '<div class="sr-people"></div><div class="sr-rows"></div>' : '<div class="sr-people"></div><div class="empty"><h2>No matches for “' + V.esc(q) + '”</h2><p>Try fewer words, or check the spelling.</p></div>';
     var rows = V.$('.sr-rows', out);
+    // Actors and directors (the server knows everyone's cast), after a short pause.
+    var my2 = ++peopleReq;
+    if (q.length >= 3) setTimeout(function () {
+      if (my2 !== peopleReq) return;
+      V.api('/api/search/people?q=' + encodeURIComponent(q)).then(function (people) {
+        if (my2 !== peopleReq || !people.length) return;
+        var box = V.$('.sr-people', out);
+        if (!box) return;
+        var empty = V.$('.empty', out);
+        if (empty) empty.remove();
+        people.forEach(function (pp) {
+          var both = pp.dir.length && pp.cast.length;
+          var mk = function (keys, label) { var items = keys.map(V.entry).filter(Boolean); if (items.length) { var x = V.row({ id: 'p:' + pp.name + label, title: pp.name + label, items: items }); if (x) box.appendChild(x); } };
+          if (pp.dir.length) mk(pp.dir, both || pp.role === 'dir' ? ' · directed' : '');
+          if (pp.cast.length) mk(pp.cast, both ? ' · starring' : '');
+        });
+      }).catch(function () {});
+    }, 350);
     if (rows) {
       var add = function (o) { var x = V.row(o); if (x) rows.appendChild(x); };
+      if (filtered && filtered.length) add({ id: 'filt', title: f.label, items: filtered.slice(0, 60) });
       add({ id: 'top', title: 'Top results', items: top });
       add({ id: 'ch', title: 'Channels', items: by.live, play: true });
       add({ id: 'mv', title: 'Movies', items: by.movie });
@@ -77,3 +104,28 @@ V.route('search', function (view, r) {
   run(q0);
   if (!V.device.tv) setTimeout(function () { input.focus(); }, 50);
 });
+
+/** "90s comedy" → { genres: ['Comedy'], from: 1990, to: 1999, rest: '', label: 'Comedy from the 1990s' }; null when there's nothing to filter on. */
+V.searchFilters = function (q) {
+  var words = V.norm(q).split(' ').filter(Boolean);
+  if (!words.length) return null;
+  var genres = [], from = 0, to = 0, rest = [];
+  var known = {};
+  S.genres.forEach(function (list, name) { known[V.norm(name)] = name; });
+  var alias = { scifi: 'Science Fiction', 'sci': 'Science Fiction', romcom: 'Romance', cartoon: 'Animation', cartoons: 'Animation', animated: 'Animation', docs: 'Documentary', documentaries: 'Documentary', doc: 'Documentary', scary: 'Horror', funny: 'Comedy', comedies: 'Comedy', thrillers: 'Thriller', westerns: 'Western', musicals: 'Music', kids: 'Family', war: 'War' };
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i], two = words[i + 1] ? w + ' ' + words[i + 1] : '';
+    var m;
+    if (two && known[two]) { genres.push(known[two]); i++; continue; }
+    if (two === 'sci fi' || two === 'science fiction') { genres.push('Science Fiction'); i++; continue; }
+    if (known[w] && w.length > 2) { genres.push(known[w]); continue; }
+    if (known[w.replace(/s$/, '')] && w.length > 3) { genres.push(known[w.replace(/s$/, '')]); continue; }
+    if (alias[w] && known[V.norm(alias[w])]) { genres.push(alias[w]); continue; }
+    if ((m = /^(19|20)?(\d)0s$/.exec(w))) { var c = m[1] ? +(m[1] + m[2] + '0') : (+m[2] >= 3 ? 1900 + +m[2] * 10 : 2000 + +m[2] * 10); from = c; to = c + 9; continue; }
+    if ((m = /^((?:19|20)\d\d)$/.exec(w)) && words.length > 1) { from = to = +m[1]; continue; }
+    rest.push(w);
+  }
+  if (!genres.length && !from) return null;
+  var label = (genres.length ? genres.join(' & ') : 'Films and series') + (from ? (from === to ? ' from ' + from : ' from the ' + from + 's') : '');
+  return { genres: genres, from: from, to: to, rest: rest.join(' '), label: label };
+};

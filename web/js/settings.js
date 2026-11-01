@@ -28,16 +28,20 @@ V.route('settings', function (view) {
     '<div class="grid2"><label class="field"><span>Quality</span><select class="input" data-pref-sel="quality">' + [['auto', 'Automatic (best for the connection)'], ['1080', 'Up to 1080p'], ['720', 'Up to 720p'], ['480', 'Up to 480p'], ['360', 'Up to 360p']].map(function (o) { return '<option value="' + o[0] + '"' + (String(pf.quality) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>Preferred audio language</span><select class="input" data-pref-sel="audioLang">' + langOpts(pf.audioLang) + '</select></label>' +
     '<label class="field"><span>Subtitle language</span><select class="input" data-pref-sel="subLang">' + langOpts(pf.subLang) + '</select></label></div>' +
-    sw('subsDefault', 'Turn subtitles on automatically', 'When a track in your subtitle language exists') + sw('dataSaver', 'Data saver', 'Lower quality to use less data (good on mobile)') +
+    '<label class="field"><span>Subtitles</span><select class="input" data-pref-sel="subsMode">' + [['off', 'Off unless I turn them on'], ['foreign', 'On when what I hear isn’t one of my languages'], ['always', 'Always on (when there are some in my language)']].map(function (o) { var cur = pf.subsMode || (pf.subsDefault ? 'always' : 'off'); return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+    sw('stillWatching', 'Ask “Are you still watching?”', 'After 3 episodes in a row, or 4 hours of live TV, with nobody touching anything — so a forgotten TV doesn’t keep the connection busy') +
+    sw('dataSaver', 'Data saver', 'Lower quality to use less data (good on mobile)') +
     '<button class="btn" data-a="substyle">' + V.icon('cc') + ' Subtitle style…</button></section>' +
 
+    '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Sign a TV in by typing the code it shows (no password typing with the remote), and control what’s playing on it from here.</p><div class="btn-row"><button class="btn" data-a="pair">' + V.icon('tv') + ' Sign in a TV</button><a class="btn" href="#/remote">' + V.icon('remote') + ' Use this as a remote</a></div></section>' +
+    '<section class="card-sec"><h2>Notifications</h2>' + sw('newEpisodeAlerts', 'New episodes', 'Of series in My List or that you’ve been watching') +
+    (window.Notification ? '<button class="btn" data-a="notif">' + V.icon('bell') + ' ' + (Notification.permission === 'granted' ? 'Notifications on this device are on' : Notification.permission === 'denied' ? 'Notifications are blocked in this browser' : 'Also notify me when the app isn’t open') + '</button>' : '') + '</section>' +
     '<section class="card-sec"><h2>Privacy</h2>' + sw('presence', 'Let others in the household see what I’m watching') +
     '<p><a href="#/mine/history">Watch history</a> · pause it or clear it there.</p></section>' +
 
     '<section class="card-sec"><h2>This device</h2><label class="field"><span>Device name (shown when you use “Play on…”)</span><div class="inline"><input class="input" data-devname value="' + V.esc(V.device.name) + '" maxlength="40"><button class="btn" data-a="devname">Save</button></div></label>' +
     '<label class="check"><input type="checkbox" data-askprofile' + (V.ls.get('askProfile', false) ? ' checked' : '') + '><span>Ask “Who’s watching?” every time the app opens on this device</span></label>' +
-    '<div class="btn-row">' + (window.Notification ? '<button class="btn" data-a="notif">' + V.icon('bell') + ' ' + (Notification.permission === 'granted' ? 'Notifications are on' : 'Allow notifications') + '</button>' : '') +
-    (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
+    '<div class="btn-row">' + (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
     V.directHelperSection() +
 
@@ -77,6 +81,7 @@ V.route('settings', function (view) {
     else if (a === 'notif') Notification.requestPermission().then(function () { V.router.refresh(); });
     else if (a === 'install' && V.installPrompt) { V.installPrompt.prompt(); V.installPrompt = null; }
     else if (a === 'keys') V.shortcutsHelp();
+    else if (a === 'pair') V.pairDialog();
     else if (a === 'delete') V.prompt('Remove your profile? Enter your PIN (or leave empty if you have none) to confirm.', { type: 'password', ok: 'Remove' }).then(function (pin) { if (pin === null) return; V.del('/api/me', { pin: pin }).then(function () { V.leaveProfile(); }).catch(V.fail); });
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "browser-iptv-player",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A self-hosted IPTV and media player for your household: profiles, Netflix-style browsing, live TV guide, watch parties and messaging — in any browser. No dependencies besides Node.js and ffmpeg.",
   "main": "server.js",
   "scripts": {
