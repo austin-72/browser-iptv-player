@@ -69,7 +69,10 @@ function channelsPage(view, r, type) {
   var showEmpty = V.ls.get('showEmptyEvents', false);
   var emptyN = list.filter(function (c) { return c.es === 'none' || c.es === 'ended'; }).length;
   if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !(c.es === 'none' || c.es === 'ended') || V.inList('favs', c.k); });
-  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</div>') +
+  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') +
+    // Radio and live TV link to each other (on phones the tab bar has one Live TV tab for both).
+    (type === 'live' && S.radio.length ? '<a class="btn" href="#/radio">' + V.icon('radio') + ' Radio</a>' : '') +
+    (type === 'radio' && S.live.length ? '<a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</div>') +
     '<div class="live-layout"><nav class="groups" aria-label="Channel groups">' +
     [{ v: '', l: 'All channels', n: all.length }, { v: '__fav', l: 'Favourites', n: favs.length }, { v: '__recent', l: 'Recently watched', n: recent.length }].concat(groups.map(function (x) { return { v: x.name, l: x.name, n: x.items.length }; }))
       .map(function (x) { return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +

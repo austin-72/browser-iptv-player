@@ -55,7 +55,7 @@ V.adminAccountLine = function (l) {
 
 V.adminTabs.lists = function (body, A) {
   var draw = function () {
-    body.innerHTML = '<p class="dim small">Priority viewers come first when too many people are watching: if a provider has no free connection, a priority viewer’s player takes one from someone on a standard profile, and standard viewers can’t take one from them.</p><div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
+    body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
       (A.lists.length ? '<ul class="adm-list">' + A.lists.map(function (l, i) {
         var s = l.status || {};
         var px = l.proxy === 'none' ? 'no proxy' : l.proxy ? ((A.settings.proxies || []).filter(function (x) { return x.id === l.proxy; })[0] || {}).name : '';
@@ -285,7 +285,7 @@ V.adminTabs.guides = function (body, A) {
 
 V.adminTabs.profiles = function (body, A) {
   var certs = [['', 'No limit'], ['0', 'Little kids (G, TV-Y)'], ['1', 'Kids (PG, TV-PG)'], ['2', 'Teens (PG-13, TV-14)'], ['3', 'Mature (R, TV-MA)']];
-  body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><label class="check"><input type="checkbox" data-aop' + (A.settings.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles</span></label></div>' +
+  body.innerHTML = '<p class="dim small">Priority viewers come first when too many people are watching: if a provider has no free connection, a priority viewer’s player takes one from someone on a standard profile, and standard viewers can’t take one from them.</p><div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><label class="check"><input type="checkbox" data-aop' + (A.settings.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles</span></label></div>' +
     '<ul class="adm-profiles">' + A.profiles.map(function (p) {
       var r = p.restrictions || {};
       return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri" data-prichip>Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +

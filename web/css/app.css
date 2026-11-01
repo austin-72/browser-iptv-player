@@ -27,7 +27,7 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
   .mainnav { display: none; }
   .brand { margin-right: auto; }
   .brand-name { font-size: 1.1rem; max-width: 12rem; }
-  #topbar [data-nav=search], #topbar .msg-btn { display: none; }
+  /* (Search and Messages sit in the top bar on phones; the tab bar has the sections.) */
   #tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; height: var(--tab); padding-bottom: env(safe-area-inset-bottom); background: var(--bg2); border-top: 1px solid var(--line); }
   #tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; color: var(--dim); font-size: .7rem; font-weight: 600; position: relative; }
   #tabbar a.on { color: var(--text); }
@@ -149,10 +149,12 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
 .page-tools .sel select { max-width: 16rem; }
 /* Phones: the film and series filters in one row you swipe along, instead of four rows above the posters. */
 @media (max-width: 600px) {
-  .view-movies .page-tools, .view-series .page-tools { position: relative; flex: 1 1 100%; min-width: 0; max-width: calc(100% + 2 * var(--gutter)); flex-wrap: nowrap; overflow-x: auto; margin: 0 calc(-1 * var(--gutter)); padding: 2px var(--gutter) 6px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  .view-movies .page-tools::-webkit-scrollbar, .view-series .page-tools::-webkit-scrollbar { display: none; }
-  .view-movies .page-tools > *, .view-series .page-tools > * { flex: none; }
-  .view-movies .page-tools .input, .view-series .page-tools .input { min-width: 0; width: auto; }
+  /* Every filter in view (two to a row), rather than a row that scrolls sideways where the last ones go unnoticed. */
+  .view-movies .page-tools, .view-series .page-tools { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; flex: 1 1 100%; min-width: 0; }
+  .view-movies .page-tools > *, .view-series .page-tools > * { min-width: 0; }
+  .view-movies .page-tools .sel, .view-series .page-tools .sel { display: block; }
+  .view-movies .page-tools .input, .view-series .page-tools .input, .view-movies .page-tools .sel select, .view-series .page-tools .sel select { min-width: 0; width: 100%; max-width: none; }
+  .view-movies .page-tools .btn, .view-series .page-tools .btn { grid-column: 1 / -1; justify-self: start; }
 }
 .count { margin: 0 0 .8rem; font-size: .9rem; }
 

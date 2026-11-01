@@ -1,27 +1,102 @@
 # Browser IPTV Player
 
-A self-hosted IPTV and media server with a Netflix-style web app. The household signs in, picks a profile, and watches live TV, movies and series from the playlists the admin has set up. It works on computers, phones, tablets and TV browsers.
+**Your IPTV playlists, turned into a Netflix-style app for the whole household. It runs in any web browser: computer, phone, tablet or smart TV.**
 
-- **One sign-in, many profiles.** There are 142 profile pictures, PINs are optional and every profile keeps its own history.
-- **The admin sets up the playlists once.** That can be M3U links or files, Xtream Codes accounts, or folders of your own videos. They are merged and deduplicated, then filtered per profile by language and age rating.
-- **It plays almost anything.** Streams go straight from the provider to the browser when they can. When a browser can't play a stream (blocked by CORS, needs special headers, wrong codec, wrong container), the server relays or converts it automatically.
-- **Recommendations, watch parties, messaging, offline downloads, casting**, and themes with a TV-remote mode.
+You run one small server at home and add your playlists or provider accounts once. Everyone in the house opens the site, picks their profile and watches live TV, films and series. Nothing needs installing on any device.
 
-No npm dependencies. You need Node.js 20 or later (22 recommended), plus ffmpeg for the conversion features.
+![The home screen: a big "picked for you" title, mood buttons and a Continue watching row](docs/screenshots/home.jpg)
+
+<p align="center">
+  <a href="#why-this-one">Why this one?</a> ·
+  <a href="#a-quick-tour">Tour</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#how-playback-works">How playback works</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#security">Security</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+> **Bring your own content.** This is a player. It doesn't come with any channels, films or accounts; you add playlists or provider logins that you're entitled to use. Every title, channel, poster and person in these screenshots is made up (the demo artwork was generated for this page).
+
+---
+
+## Why this one?
+
+Most IPTV players are an app you install and set up again on every device. Media servers such as Jellyfin and Plex are built around your own files, with IPTV added on the side. This project is built for a household sharing one or more IPTV subscriptions:
+
+- **Nothing to install on any device.** Any modern browser works, including smart-TV browsers (2015 TVs onward) and phones. You can install it as an app from the browser if you like, and sign a TV in by scanning a code with your phone.
+- **Set it up once for everyone.** The admin adds the playlists (M3U links or files, Xtream Codes accounts, folders of your own videos) and the TV guides. Each person just picks their profile.
+- **Films and series that look like a streaming service.** Posters, plots, cast, seasons and episodes, Continue watching, My List, recommendations and "Because you watched…". The full Xtream Codes film and series catalogue is browsable, not just live channels.
+- **Several providers merged into one tidy catalogue.** Duplicates are combined, and the extra copies become automatic backups. Provider junk like `|EN| ★ Title (2023) [MULTI-SUB] 4K` is cleaned up to "Title (2023)", and a series spread across two providers gets every season from both.
+- **Video goes straight from the provider to the viewer whenever possible.** Your server doesn't carry the stream, so a small box can serve a whole house. When a browser can't play a stream as it is, the server (or the browser itself) converts it automatically.
+- **It knows your provider's connection limit.** It shows who's using each connection, picks a copy on a provider with a free one, lets you take a connection over, and gives **priority profiles** first claim when there aren't enough to go round.
+- **Made for households.** Profiles with optional PINs and age limits, Kids profiles, messages between profiles, watch parties, shared lists, and a phone that works as a remote for the TV.
+- **Free and open source** (MIT). It needs no npm packages; you only need Node.js, plus ffmpeg for the conversion features.
+
+### How it compares
+
+|  | **Browser IPTV Player** | IPTV apps (e.g. TiviMate, IPTV Smarters) | Media servers (e.g. Jellyfin, Plex) |
+|---|---|---|---|
+| Install on each device | No, any browser | Yes, one app per device (TiviMate is Android-only) | Server plus apps (Jellyfin and Plex also have web players) |
+| Add playlists once for the whole household | ✅ | ❌ (set up per device) | ✅ |
+| Xtream films and series as a browsable library | ✅ | ✅ | Jellyfin: via plugins · Plex: no M3U/Xtream support built in |
+| Several providers merged, duplicates removed, backups | ✅ | Separate playlists | Live channels only |
+| Video straight from provider to viewer | ✅ when possible | ✅ | ❌ (usually through the server) |
+| Knows provider connection limits, takeover, priority | ✅ | ❌ | ❌ |
+| Profiles, PINs, kids limits | ✅ | Varies | ✅ |
+| Watch parties, messages, phone remote | ✅ | ❌ | Jellyfin: SyncPlay watch parties |
+| Price | Free, open source | TiviMate: paid Premium for multiple playlists, catch-up and recording | Jellyfin free · Plex: free tier and paid Plex Pass; its Live TV is built around antenna tuners |
+
+<sub>Based on each project's own documentation as of late 2026. Other apps change, so check theirs if a feature matters to you.</sub>
+
+---
+
+## A quick tour
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/profiles.jpg" alt="Who's watching? Five profiles with cartoon pictures"><br><b>Who's watching?</b> One sign-in for the house, a profile each. PINs are optional.</td>
+<td width="50%"><img src="docs/screenshots/title.jpg" alt="A film page with backdrop, rating, cast and similar titles"><br><b>Every title has a proper page,</b> with plot, cast, rating, trailer and "More like this".</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/series.jpg" alt="A series page with episode list and seasons"><br><b>Series</b> have seasons and episodes, with progress and "Also watched by".</td>
+<td width="50%"><img src="docs/screenshots/movies.jpg" alt="The Movies page with category, year, rating and length filters"><br><b>Browse and filter</b> by category, genre, decade, rating and length.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/guide.jpg" alt="A TV guide grid with channels and programmes"><br><b>TV guide:</b> a grid with now and next, catch-up, reminders and guide search.</td>
+<td width="50%"><img src="docs/screenshots/player-live.jpg" alt="A live channel playing with the channel list open beside it"><br><b>Live TV:</b> zap with arrow keys or the channel list, with what's on now.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/search.jpg" alt="Search results for harbor across titles, episodes and TV"><br><b>One search</b> across titles, episodes, channels and the guide. It's typo-tolerant and also understands people, genres and decades.</td>
+<td width="50%"><img src="docs/screenshots/messages.jpg" alt="Messages between profiles with a shared film card"><br><b>Messages</b> between profiles: share a title, react, or start a watch party.</td>
+</tr>
+</table>
+
+**Phones.** The full app works on a phone. The tab bar has Home, Live TV, Movies, Series and My List, with search and messages at the top. Any phone can also be a **remote** for the TV:
+
+![Four phone screens: home, a series page, the TV remote, and the TV guide](docs/screenshots/phones.jpg)
+
+**TVs.** On a smart-TV browser it switches to a **TV mode** (big focus rings, arrow keys and remote buttons). To sign in, scan a code with your phone; there's no password typing with a remote.
+
+![TV mode home screen and the "Sign in with your phone" code screen](docs/screenshots/tv.jpg)
 
 ---
 
 ## Quick start
 
-### With Docker
+### With Docker (recommended)
 
 ```bash
+git clone https://github.com/austin-72/browser-iptv-player.git
+cd browser-iptv-player
 docker compose up -d
 ```
 
 Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./data`.
 
-Without Compose:
+<details>
+<summary>Without Compose</summary>
 
 ```bash
 docker build -t browser-iptv-player .
@@ -29,28 +104,137 @@ docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-sto
 ```
 
 The image includes ffmpeg. It runs as an unprivileged user and fixes the owner of `/data` on start-up. Set `PUID`/`PGID` to run as a specific host user instead.
+</details>
 
 ### Without Docker
 
 ```bash
-# install Node.js 22 and ffmpeg (e.g. `sudo apt install ffmpeg`, `brew install ffmpeg`, `winget install ffmpeg`)
+# install Node.js 22 (20 or later works) and ffmpeg, e.g. `sudo apt install ffmpeg`, `brew install ffmpeg`, `winget install ffmpeg`
 node server.js            # or: npm start
 ```
 
-Options can go on the command line (`--port 9000 --data /srv/iptv`) or in environment variables (see below).
+Options can go on the command line (`--port 9000 --data /srv/iptv`) or in environment variables (see [Configuration](#configuration)).
 
-### First run
+### First run (about 5 minutes)
 
-1. Sign in with the default site password: **`changeme`**, or whatever you put in `SITE_PASSWORD`.
-2. Create the first profile. **It becomes the only admin** and must have a PIN.
-3. Open **Admin**:
-   - **Security**: change the site password.
-   - **Lists**: add your playlists.
-   - **TV guides**: add an XMLTV guide if your lists don't name one.
-   - **Languages & content**: choose the default languages, e.g. English only.
-4. Everyone else signs in with the site password and adds their own profile. You can also set **Admin → Profiles → Only the admin can add profiles**.
+1. **Sign in** with the default site password **`changeme`** (or whatever you set in `SITE_PASSWORD`).
+2. **Create the first profile.** It becomes the admin and must have a PIN.
+3. **Open Admin** (the shield icon):
+   - **Security:** change the site password.
+   - **Lists:** add your playlists or Xtream Codes accounts.
+   - **TV guides:** add an XMLTV guide if your lists don't name one.
+   - **Languages & content:** pick the default languages, for example English only.
+4. **Share the address.** Everyone else signs in with the site password and adds their own profile. You can also set **Admin → Profiles → Only the admin can add profiles**.
 
-Nothing is shown to someone who hasn't signed in: not the brand, the channels or the profiles. All they get is a plain sign-in page.
+Nothing is shown to someone who hasn't signed in: not the brand, the channels or the profiles. They only see a plain sign-in page.
+
+---
+
+## Features
+
+### Watching
+
+![The player showing stream info: playback Direct, 1280×720, straight from the provider](docs/screenshots/stream-info.jpg)
+
+- **Plays almost anything:** HLS, MPEG-TS, MP4, MKV, DASH, ClearKey DRM, and AC-3/E-AC-3 sound, from M3U, Xtream Codes or your own folders. It chooses the most direct way to play each stream (see [How playback works](#how-playback-works)). The *Stream info* panel shows which route is in use.
+- **Resume anywhere.** Progress syncs live between devices, and the next episode autoplays with a countdown.
+- **Skip intro and skip credits.** Found automatically by comparing episodes, read from chapter names, or marked by hand.
+- **Subtitles and audio tracks:** built-in or from the file, with adjustable style. Subtitles can be set to "only when the audio isn't in my language".
+- Speed 0.25–3×, frame step, seek-bar thumbnails, picture-in-picture, a mini player while browsing, bookmarks with notes, a sleep timer and *Are you still watching?*.
+- **Live TV:** channel numbers, zapping with arrow keys or channel buttons, previous channel, a channel list, catch-up and timeshift.
+- **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay and the Remote Playback API.
+
+### Finding something to watch
+
+- A home page with Continue watching, Top picks, "Because you watched…", New episodes, trending in the household, On TV now, genre rows and mood buttons ("Something funny", "Edge of my seat"…). Every row can be hidden, pinned or reordered.
+- **Recommendations** blend what the profile watches and rates, what's related (from TMDB) and what the household likes. **Surprise me** picks one title, and **Pick for several of us** finds something everyone should like and nobody has seen.
+- **Search** is instant and typo-tolerant, with voice search where the browser supports it. It also understands people ("tom hanks"), genres and decades ("90s comedy").
+- **Filters** by category, genre, decade, rating and length. A film page also shows its whole collection ("2 of 4 here") with *Watch in order*.
+- An optional free [TMDB](https://www.themoviedb.org/) key adds posters, plots, cast, certificates and similar titles. Without one it uses what your provider sends.
+
+### Profiles and the household
+
+![Admin → Profiles with a Priority viewer switch on each profile](docs/screenshots/admin-profiles.jpg)
+
+- Unlimited profiles with 142 original profile pictures, or upload a photo. Each device remembers its profile.
+- **Optional PINs,** remembered on a device for 6 months or for 30 minutes, with a lockout after wrong guesses.
+- **Kids profiles and age limits** (five levels, read from US, UK and EU ratings). Profiles can also be limited by type (live, films, series, radio) and category. Adult content is hidden unless allowed.
+- Each profile keeps its own history, My List, favourites, ratings, hidden titles, home layout, theme, subtitle style and languages.
+- **Busy providers:** if someone is already using the provider's connection, it says who's watching what and offers *Take over*. Titles on several providers play from the one with a free connection.
+- **Priority viewers:** mark profiles as *Priority* in Admin → Profiles. When a provider has no free connection, a priority viewer automatically takes one from someone on a standard profile, and that person's screen says who needed it. Standard profiles can't take a connection from a priority viewer.
+- **Together:** messages with titles and reactions, shared watchlists, and **watch parties** that keep play, pause and seek in sync, with chat and emoji reactions.
+- **Play on another device:** send what you're watching to any signed-in screen, or use your phone as a remote. The remote has play/pause, seek, volume, subtitles, audio, channels and a sleep timer. You can also choose *Pick things to play here* on a phone so its Play buttons start on the TV.
+
+### Phones, tablets and TVs
+
+- Phone, tablet and desktop layouts. On phones the full app is there: Home, Live TV (with the guide and radio), Movies, Series, My List, search, messages, admin and every filter.
+- **TV mode** turns on by itself on smart-TV browsers. Everything works with arrow keys and the remote's OK, Back, Menu/Info and media keys. The app is plain ES5 with fallbacks, so it also runs on older TV browsers.
+- **Sign in a TV with your phone:** the TV shows a code and a QR code, and you approve it on a phone that's already signed in.
+- Installable as an app (PWA). Media keys and lock-screen controls work, and the screen stays on while playing.
+
+### Look and accessibility
+
+<img src="docs/screenshots/themes.jpg" alt="The Look settings: 25 themes, including dark, OLED black, high contrast and light themes" width="560">
+
+- 25 themes (dark, OLED black, high contrast, light and more), or match the device.
+- Keyboard access everywhere, labelled controls and visible focus, reduced motion, adjustable text size and subtitle styling.
+
+### For the admin
+
+![Admin → Lists with two provider accounts, their expiry dates and connection limits](docs/screenshots/admin-lists.jpg)
+
+- **Lists:** M3U/M3U8 links or uploads (gzip, any text encoding), Xtream Codes (live, films and series, with an M3U fallback), and folders of video files on the server. Lists are merged in the order you choose and refresh automatically.
+- **Provider accounts:** expiry, connections allowed and in use, with a warning two weeks before an account runs out.
+- **How many streams at once?** The pulse button on a list tests the provider's real limit for live TV, series and films (up to 6 each). It finds where the provider refuses another connection or cuts an older one off, and uses that result from then on.
+- **Clean-up rules:** category rename, merge and hide rules, language detection from tags and prefixes (`EN|`, `[FR]`, `(DE)`), and fixes for wrong posters ("Wrong poster or details?" on any title fixes it for everyone).
+- **Overview and statistics:** who's watching what, server conversions, playback routes used, and time watched.
+- **Playback settings:** routing (*direct first*, *always through the server*, *direct only*), transcoding limits, hardware acceleration (VAAPI, QSV, NVENC, VideoToolbox), and HTTP/SOCKS5 proxies per list.
+- **Other apps:** export the merged list and guide for VLC, TiviMate or Kodi through a secret link.
+- **Backups:** nightly backups (kept in `data/backups`), plus one-click backup and restore of all settings and profiles.
+- **Updates without restarts:** with the app folder mounted (see `docker-compose.yml`), new web-app files are picked up and open pages reload. New server files wait until *you* restart; the server never restarts on its own unless you set `SELF_RESTART=1`.
+
+---
+
+## How playback works
+
+Web IPTV players often fail because the browser blocks video from another site unless that site allows it (CORS), and many providers don't. This player checks what the browser would be allowed to do, provider by provider, and then uses the most direct route that works:
+
+| Route | When it's used | Server load |
+|---|---|---|
+| **Direct** | The provider allows web players, or the browser's own player can play it (MP4, and HLS on Safari, Android, TVs and current Chrome/Edge) | None |
+| **Direct video, playlist via server** | Only the playlists are blocked; the video still comes straight from the provider | A few KB |
+| **Another copy, direct** | This copy can't play directly but another provider's copy of the same title can | None |
+| **Converted in the browser** | MKV/TS files, or sound browsers can't play (AC-3, E-AC-3, FLAC), converted inside the page with [Mediabunny](https://mediabunny.dev) | None |
+| **Relayed by the server** | Streams that are blocked completely, need special headers, or are http on an https page | Bandwidth only |
+| **Converted on the server** | What's left: DTS sound, UDP/RTMP, or a quality you picked. ffmpeg repackages or transcodes it | CPU |
+
+<details>
+<summary>The details, for the curious</summary>
+
+Before playing, the server asks the provider exactly what the browser would be told: the same Origin header, every redirect hop, and the playlist and segments checked separately. It remembers the answer per provider, so zapping doesn't open extra connections.
+
+1. **Direct, full controls.** The provider allows web players. hls.js, mpegts.js or Shaka read the stream straight from the provider. If a redirect is what blocks it, the browser is given the final address instead.
+2. **Direct, built-in player.** No permission needed: MP4/WebM films play in every browser, and HLS plays on Safari, iPhone/iPad, Android, most smart TVs and current Chrome/Edge.
+3. **Direct, HLS copy.** A raw MPEG-TS channel from an Xtream Codes panel is also offered as HLS (`/live/user/pass/123.m3u8`), which the browser's own HLS player tries even when the account doesn't list HLS.
+4. **Direct video, playlist via the server.** When only the playlists are blocked, the server passes on the playlist text and the browser fetches the video itself.
+5. **Another copy, direct.** The player checks up to three other copies (other providers) for a direct route first, skipping any whose connection someone in the household is using.
+6. **Converted in the browser.** MKV and MPEG-TS films and episodes, and files with AC-3, E-AC-3 or FLAC sound, are read straight from the provider and remuxed in the page. The picture is copied (or re-encoded when the browser can't take it) and the sound becomes AAC or Opus. This needs WebCodecs (Chrome, Edge, Safari 16.4+, Firefox 130+) and a provider that lets web pages read its files. Turn it off for a profile with the `noBrowserConvert` preference.
+7. **Through the server (relay).** The last resort for streams that are blocked completely, need special headers, or are http on an https page. It still uses one provider connection per viewer, as direct would.
+8. **Convert on the server.** For DTS sound, live channels with AC-3 sound, UDP/RTMP, a quality you picked, or a provider that doesn't let web pages read its files.
+9. **Backup sources.** When the same channel or title is in several lists, any copy can take over.
+
+**Which copy plays first.** For films and episodes the browser says what it can play by itself (MKV, HEVC, Dolby sound, in-browser conversion), and the server ranks each copy using the codecs the provider reports.
+
+**http streams on an https site.** Browsers refuse plain-http video on an https page unless the viewer allows *insecure content* for the site (Chrome/Edge: the icon left of the address → Site settings → Insecure content → Allow). The player checks for this and then plays such streams directly. *Settings → http streams* shows the state and the steps. You can also set a plain-http *direct address* in Admin → Network & proxies, which devices switch to for http-only providers.
+
+**Direct streams helper.** On desktop Chrome, Edge, Brave or Opera, an optional small browser extension (in `extension/`, download it from Settings → Direct streaming) makes every stream direct. It only adds the permission header to responses for requests made by this site's pages.
+
+**Downloads, casting and audio tracks.** Downloads come straight from the provider when it allows it, either as they are or converted to MP4 in the browser. Casting gives the Chromecast the provider's own address when it can play it. Sound tracks are switched by the browser itself, or by the in-browser conversion.
+
+**Provider accounts that allow one connection.** The server never opens a second connection while someone might be watching. Preview pictures, track reading and intro detection are switched off for those titles; intro detection needs 3 or more connections.
+
+Still needing the server: streams that need headers browsers can't send, an admin's proxy for video, RTMP/RTSP/UDP, DTS sound, subtitles stored inside a file, your own media folders, and background work such as preview pictures and intro detection.
+</details>
 
 ---
 
@@ -64,17 +248,18 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 | `HOST` | `0.0.0.0` | Address to listen on |
 | `DATA_DIR` | `./data` (`/data` in Docker) | Where accounts, lists, caches and history are stored |
 | `SITE_PASSWORD` | `changeme` | The site password used the very first time. After that, change it in Admin → Security |
-| `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see Security) |
+| `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see [Security](#security)) |
 | `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used |
 | `HTTPS_CERT`, `HTTPS_KEY` | — | Paths to a certificate and key, so the server speaks https itself |
 | `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Falls back to software if it fails |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Render device for VAAPI |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` | Where ffmpeg is installed if it isn't on the PATH |
-| `TMDB_BASE` | TMDB's API | Only for testing |
+| `MAX_MEMORY_MB` | 60% of RAM (4–12 GB) | Memory limit for the server; big catalogues and guides need room |
+| `SELF_RESTART` | off | Set to `1` to let the server restart itself after an update |
 
 ### Branding
 
-**Admin → Brand** sets the site name, logo and accent colour. To ship a build that is already branded, put a `defaults.json` next to `server.js` (see `defaults.example.json`):
+**Admin → Brand** sets the site name, logo and accent colour. To ship a build that's already branded, put a `defaults.json` next to `server.js` (see `defaults.example.json`):
 
 ```json
 { "brand": { "name": "Our TV", "accent": "#e50914" }, "sitePassword": "something-better" }
@@ -84,193 +269,53 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 
 ---
 
-## How playback works (and getting around CORS)
+## Security
 
-When a page's JavaScript reads video from another site, the browser asks that site for permission (CORS), and many IPTV providers don't give it. That is why web IPTV players so often fail on live channels. But the check only applies to JavaScript reading the bytes. The browser's own player doesn't need permission, and providers often block their playlists while allowing their video segments. So before playing, the server asks the provider exactly what the browser would be told: same Origin header, every redirect hop checked, playlist and segments checked separately. It remembers the answer per provider, so zapping doesn't open extra connections. Then the player uses the most direct route that will work:
+- The site password and PINs are hashed (scrypt). Sessions are http-only cookies, and sign-in attempts are rate-limited.
+- Every API request needs a custom header, so other websites can't act on your behalf (CSRF).
+- **Until you change the default password,** the server only answers on localhost, private IP addresses and `.local` names, plus any names in `ALLOWED_HOSTS`. Once you change it, any host name works.
+- Streams are relayed through signed, expiring links only.
+- **To use it outside your home network,** put it behind https. Casting, installing as an app and in-browser downloads also need https (or localhost):
+  - **Tailscale:** the easiest, private with no open ports. `tailscale serve --bg 8080` gives you an https name.
+  - **Caddy:** `tv.example.com { reverse_proxy 127.0.0.1:8080 }`, then set `TRUST_PROXY=1`.
+  - **Built in:** set `HTTPS_CERT` and `HTTPS_KEY`.
 
-1. **Direct, full controls.** The provider allows web players. hls.js, mpegts.js or Shaka read the stream straight from the provider. If a redirect is what blocks it, the browser is given the final address instead.
-2. **Direct, built-in player.** No permission needed:
-   - MP4/WebM films play in every browser;
-   - HLS plays on Safari, iPhone/iPad, Android, most smart TVs and current Chrome/Edge.
-3. **Direct, HLS copy.** A raw MPEG-TS channel from an Xtream Codes panel is also served as HLS (`/live/user/pass/123.m3u8`), which routes 1, 2 or 4 can use. The player also tries that address with the browser's own HLS player when the account doesn't list HLS, since that needs no permission.
-4. **Direct video, playlist via the server.** When only the playlists are blocked, the server passes on the playlist text (a few KB every few seconds) and the browser fetches all the video straight from the provider.
-5. **Another copy, direct.** When this copy could only go through the server, the player checks up to three other copies of the title (other providers) for a direct route first, skipping any whose connection someone in the household is using.
-6. **Converted in the browser.** MKV and MPEG-TS films and episodes, and files whose sound browsers can't play (AC-3, E-AC-3, FLAC), are read straight from the provider and turned into something the browser plays, inside the page. It uses [Mediabunny](https://mediabunny.dev) (MPL-2.0, in `public/vendor/`) with its WebAssembly AC-3/E-AC-3 decoder. The picture is copied as it is (or re-encoded when the browser can't take it), and the sound becomes AAC or Opus. Seeking within what's loaded is instant; further away it starts again from there. It needs WebCodecs (Chrome, Edge, Safari 16.4+, Firefox 130+) and a provider that lets web pages read its files. Turn it off for a profile with the `noBrowserConvert` preference.
-7. **Through the server (relay).** This is the last resort, for streams that are blocked completely, need special headers, or are http on an https page. It still uses one provider connection per viewer, as direct would.
-8. **Convert on the server.** For what's left: DTS sound, live channels with AC-3 sound, UDP/RTMP, a quality you picked, or a provider that doesn't let web pages read its files. ffmpeg repackages or transcodes it.
-9. **Backup sources.** When the same channel appears in several lists, any copy can take over.
+## Data
 
-**Which copy plays first.** For films and episodes, the browser tells the server what it plays by itself (MKV, HEVC, Dolby sound, in-browser conversion). The server ranks each copy: an MP4 with AAC sound plays as it is; an MKV with H.264 + AAC plays as it is in Chrome and Edge; others need converting. The ranking uses the codecs the Xtream provider reports for each episode and film.
+Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json` and `cache/`. Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
 
-**http streams on an https site.** Browsers refuse plain-http video on an https page unless the viewer allows *insecure content* for the site (Chrome/Edge: the icon left of the address → Site settings → Insecure content → Allow). The player checks whether this browser allows it and then plays such streams directly. Settings → http streams shows the state and the steps, and the player suggests it once when an http stream goes through the server.
+## Limits
 
-**Downloads, casting and audio tracks.**
-- Downloads in the original quality come straight from the provider when it allows that: as they are, or converted to MP4 in the browser. In Chrome/Edge, "save as a file" streams straight to the file you pick.
-- Casting gives the Chromecast the provider's own address when it can play it, and the server's otherwise.
-- Sound tracks are switched by the browser itself where it lists them, or by the in-browser conversion.
-
-The routes that still need the server: streams that need headers browsers can't send; an admin's proxy for video; RTMP/RTSP/UDP; DTS sound; subtitles stored inside a file (the server reads them); your own media folders; and preview pictures and intro detection, which are background work, not watching.
-
-**The direct-streams helper.** On desktop Chrome, Edge, Brave or Opera, a small browser extension makes *every* stream direct. Settings → Direct streaming has a download button and three steps. It only adds the permission header to responses for requests made by this site's pages; nothing else is touched. The source is in `extension/`. Firefox can load it too, but only until the next restart.
-
-**Provider accounts that allow one connection.** The server never opens a second connection while someone might be watching. Preview pictures, reading tracks or subtitles out of the file, and intro detection are switched off for those titles. Intro detection needs 3 or more connections. Conversion and the direct-playback check wait a moment, so the provider has freed the slot before the stream starts.
-
-Notes:
-- The player's stream info (the gear menu → Stream info) shows which route is in use.
-- **Admin → Playback** chooses the routing: *direct first* (default), *always through the server*, or *direct only*.
-- Errors say what actually went wrong (e.g. "the provider said 403 Forbidden").
+- Converting on the server uses CPU. A small machine can handle a few transcodes at once; repackaging costs very little. **Admin → Playback** sets the maximum.
+- DRM: ClearKey works, and so does Widevine/PlayReady where the browser supports it and the playlist provides a licence URL. Nothing is decrypted on the server.
+- Casting to Chromecast falls back to the server's address when the Chromecast can't play the provider's, so the server must be reachable from the Chromecast.
+- Intro detection needs at least two episodes of a season.
 
 ---
 
-## Features
+## FAQ
 
-**Profiles & accounts**
-- Netflix-style "Who's watching?" screen.
-- Unlimited profiles and 142 original profile pictures.
-- Each device opens straight into the profile last used on it; nobody has to sign in or pick a profile again.
-- Optional PINs:
-  - "Remember on this device" keeps the PIN for 6 months; untick it to keep it for only 30 minutes;
-  - **Lock profile** in the profile menu asks for it again next time;
-  - a lockout after wrong guesses.
-- Settings has a switch to show "Who's watching?" every time instead.
-- The first profile is the admin. The admin can edit or delete profiles, reset PINs, set limits and hand over admin.
-- Kids profiles and per-profile age limits: five levels, read from US, UK and EU ratings. Profiles can also be limited to certain types and categories. Adult content is hidden unless allowed.
-- Each profile keeps its own:
-  - progress, history, My List, favourites, ratings, bookmarks and notes;
-  - hidden titles, hidden or pinned categories, reminders and recent searches;
-  - home-screen layout, theme, subtitle style and language choices.
+**Does it come with channels?**
+No. You add your own M3U playlists, Xtream Codes accounts or video folders.
 
-**Library**
-- Lists:
-  - M3U/M3U8 links or uploads (gzip, any text encoding);
-  - Xtream Codes (live, films and series via the API, with an M3U fallback);
-  - folders of video files on the server.
-- Lists are merged and deduplicated across sources. Duplicates become backup sources.
-  - Names are compared after the providers' end tags come off ("Preacher-eng", "Parish_eng", "Evil Dead Burn - 2026 CAM", "(HDAM)") and "&" is read as "and".
-  - Films also match when one copy has no year, or when the years are one apart and a TMDB id supports it. A TMDB id that differs keeps them apart ("Ghostbusters" 1984 / 2016), and so does anything that happens yearly ("… Race 2024" / "2025").
-  - A series listed under two names with the same TMDB id and year is one series ("Lioness" / "Special Ops: Lioness").
-  - A series on several providers (or listed twice by one) gets its episodes from all of them. Seasons they share appear once, with the other copies as backups, and seasons only one has are added.
-  - Watch history, My List and favourites move to the combined entry.
-- Automatic refresh.
-- Episodes are grouped into shows and seasons by name patterns, tags or folder structure.
-- Languages are detected from tags, group names, country codes and name prefixes such as `EN|`, `[FR]` or `(DE)`. The admin sets the defaults; each profile can choose any combination.
-- XMLTV guides (gzip supported), matched by ID and name.
-- Grid guide, now/next, catch-up/timeshift, reminders, and guide search.
-- Optional TMDB key (free, from themoviedb.org) for:
-  - posters, plots, cast, genres and certificates;
-  - similar-title recommendations.
+**What does the server need?**
+Very little bandwidth or CPU when streams play directly: any machine that runs Node.js 20 or later or Docker, such as a mini PC or a NAS. Memory depends on the size of your lists: a few GB for very large provider catalogues and TV guides. Server-side conversion needs ffmpeg and some CPU, or a GPU with hardware acceleration.
 
-**Discovery**
-- Home screen with continue watching, picks for you, "Because you watched …", genre rows, trending in the household, new arrivals and mood chips.
-- Every row can be hidden, pinned or reordered.
-- Recommendations:
-  - blend everything the profile has watched or rated, plus TMDB's related titles and what the household watches;
-  - mixed for variety, and titles the profile keeps scrolling past are pushed down;
-  - saved per profile on disk and refreshed in the background.
-- Fast, typo-tolerant search across titles, channels, categories and the TV guide. Voice search where the browser supports it.
+**Will it use up my provider's connections?**
+It's careful with them. It never opens a second connection while someone might be watching, shows who is using each one, and lets you test the real limit (Admin → Lists → pulse button). Priority profiles get first claim.
 
-**Playback**
-- Resume anywhere; progress syncs between devices in real time.
-- Speed 0.25–3×, frame step, 10 s / 60 s skips, seek-bar thumbnails, picture-in-picture and fullscreen.
-- Subtitles: built into the stream, or read from the file and converted to WebVTT. Size, colour, background and position can be changed.
-- Audio track selection (switches tracks during conversion if needed).
-- Quality choice and automatic bitrate adaptation.
-- **Skip intro / skip credits:**
-  - found automatically by comparing the audio of episodes in the same season;
-  - also uses chapter names;
-  - can be marked by hand, for one episode or the whole season.
-- Autoplay next episode with a countdown.
-- Bookmarks with notes, and a mini player while browsing.
-- Live TV:
-  - channel numbers, zapping with ↑/↓ or channel buttons;
-  - previous channel, a channel list side panel and an info card.
-- Media keys and lock-screen controls (Media Session). The screen stays on while playing.
+**Which browsers work?**
+Current Chrome, Edge, Firefox and Safari on computers and phones, and smart-TV browsers (Samsung Tizen, LG webOS, Android TV, Fire TV) back to about 2015.
 
-**Social**
-- Messages between profiles, with titles, reactions and an unread badge.
-- Notifications appear immediately (server-sent events).
-- Share a title, or recommend it to several people at once.
-- Shared watchlists that several profiles can edit.
-- **Watch parties:**
-  - play, pause and seek stay in sync, and drift is corrected;
-  - chat, emoji reactions, invites, and host hand-over.
-- "Watching now" presence.
+**Can I use it with VLC, Kodi or TiviMate too?**
+Yes. Admin → Other apps gives you a secret link to the merged, cleaned-up playlist and guide.
 
-**Devices**
-- Responsive layouts for phone, tablet and desktop.
-- **TV mode** for smart-TV browsers: big focus rings, arrow-key navigation and remote Back/media keys. It turns on automatically and can be toggled.
-- **Play on another device:** send what you're watching to any signed-in screen, or take it over from one.
-- **Casting:** Chromecast (Chrome), AirPlay (Safari) and the Remote Playback API.
-- Installable as an app (PWA).
-- **Offline downloads** in the browser (converted to MP4 when needed), with a queue, storage use and auto-delete when watched. There is also a plain "Save file" download.
-- Accessibility:
-  - keyboard everywhere, labelled controls and visible focus;
-  - reduced motion and high-contrast themes;
-  - adjustable text size and subtitle styling.
+---
 
-**Look**
-- 25 themes with previews, including OLED black, high contrast and light themes.
-- Accent colour, text size and reduced motion.
+## Keyboard shortcuts
 
-**Admin**
-- Admin tabs:
-  - overview (counts, who's watching, running conversions, server status);
-  - lists, guides and profiles;
-  - languages & content (defaults, hidden categories, ratings);
-  - playback (routing, transcoding, hardware acceleration);
-  - recommendations/TMDB, brand and security.
-- Export the merged list and guide for other apps such as VLC, TiviMate or Kodi, using a secret link.
-- One-click backup and restore of all settings and profiles.
-
-### New in 2.1
-
-**Finding something to watch**
-- **Search by person, genre or decade:** "tom hanks", "nolan", "90s comedy", "horror 2023". Cast and director names on title pages are links.
-- **Filters** on Movies and Series: years, rating and length (for example "under 1½ hours").
-- **Film series:** a title page shows the whole TMDB collection ("The Matrix Collection, 2 of 4 here") with a *Watch in order* button.
-- **New episodes:** shows in My List or that you've been watching get a "New episode" badge, a *New episodes* row, and a notification (also when the app is closed, if you allow it).
-- **On TV now** rows for sports, films, kids and news, from the guide's programme categories.
-- **Surprise me**, **Pick for several of us** (things everyone in the group should like and nobody has seen), and a quick *What do you like?* step for new profiles.
-- **Wrong poster or details?** on any title: pick the right TMDB entry from a few suggestions, and it's fixed for everyone.
-
-**Cleaner lists**
-- Titles are tidied: "EN - Apollo 13 (1995) TOM HANKS" → "Apollo 13 (1995)"; subtitle notes like "(FRENCH ENG-SUB)" become a small label; scene names and ALL CAPS are fixed. Saved history, lists and favourites move to the tidied titles automatically.
-- Categories are tidied ("|NA| USA ESPN+" → "ESPN+") and merged; the admin can add rename / merge / hide rules (Admin → Categories).
-- Better language detection for live channels (US Spanish-language networks, Indian channels, Nordic shelves, "AUS|" meaning Austria…), and pay-per-view event channels show the event; empty event channels are hidden unless asked for.
-
-**Phones and TVs**
-- **Sign in a TV with your phone:** the TV shows a code and QR code; approve it on a signed-in phone (Settings → Sign in a TV). No password typing with the remote.
-- **Phone remote:** Settings → *Use this as a remote*: play/pause, seek, volume, subtitles, audio, channel up/down, channel list, sleep timer — and *Pick things to play here*, which makes every Play button on the phone play on the TV.
-
-**Playback**
-- **Busy providers:** when a title is on several providers, the one with a free connection (and that the page can play directly) is used. When everyone's copy is busy, it says who's watching what, with *Take over*.
-- **Priority viewers:** in Admin → Profiles, any profile can be made a *Priority viewer*. When a provider has no free connection, a priority viewer's player takes one automatically from someone on a standard profile (your own other devices first, then whoever started watching most recently); that person's player stops and says who needed it. Standard profiles can't take over, or squeeze in beside, a priority viewer. When the server is full of conversions, a priority viewer's conversion also stops a standard profile's one rather than being turned away.
-- **Direct playback from an https address:** set a plain-http *direct address* in Admin → Network & proxies, and devices on your https address switch to it for http-only providers so streams come straight from the provider instead of through the server.
-- **MKV films** play directly in Chrome and Edge when their codecs allow (no server conversion); if a file has no sound in the browser it switches to conversion by itself.
-- **Subtitles:** off, always, or only when what you hear isn't one of your languages. Conversions pick your preferred audio language.
-- **Are you still watching?** after 3 episodes in a row (or 4 hours of live TV) with nobody touching anything, with *Don't ask again this session*. The sleep timer fades out and later frees the connection.
-
-**Admin**
-- **Proxies** (HTTP or SOCKS5) for everything the server fetches, per list or as the default — optionally for video too.
-- **Provider accounts:** expiry, connections allowed and in use, with a warning two weeks before an account runs out.
-- **How many at once?** Admin → Lists → the pulse button on a list. The server opens live channels, then episodes, then movies from that list one after another, up to 6 of each, without closing the earlier ones. It finds where the provider refuses another (HTTP 403/509, a "max connections" message, nothing sent) or cuts an older one off. A refused stream is retried with one known to work, so a dead channel doesn't count as the limit. Movies are read slowly so whole films aren't downloaded. HLS channels are followed like a player would. The result replaces the provider's own figure for *Busy providers* (above). Test it yourself: `node --test test/conntest.test.js`.
-- **TMDB:** fetch everything not fetched yet, update everything, retry the ones not found, or fetch by category — with live progress.
-- **Nightly backups** kept in `data/backups` (download, restore or delete them in Admin).
-- **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new web-app files are picked up automatically and open pages reload. New server files wait until you restart the server yourself (Admin shows when an update is waiting); it never restarts on its own unless you set `SELF_RESTART=1`. You can also upload the app's .zip in Admin; settings and data are never touched.
-- **Your week** (My stuff): time watched per day and what you watched most.
-
-**Speed and reliability**
-- **Smaller catalogue updates:** when the lists change, devices download only what changed (a few KB instead of the whole catalogue).
-- **The server keeps answering while it works:** big catalogues are rebuilt in short slices in the background, so nobody's stream stalls and pages stay quick during a list refresh. After a restart the page loads at once and the catalogue follows when ready.
-- **Less memory:** the providers' raw lists aren't kept in memory between refreshes (they're read again from disk when needed).
-- **Older TVs and browsers:** the web app is plain ES5 with small built-in fallbacks (layout spacing, sizes, colours and focus rings for browsers without flexbox `gap`, `aspect-ratio`, `clamp()` or CSS variables; key names for remotes on 2015–17 TVs; dialogs where `<dialog>` is missing), so it runs and looks right on older smart-TV browsers too.
-- **Connection note:** if the device goes offline or the server can't be reached, a small note says so (downloads keep playing) and everything catches up when it's back.
-- **Restarts are smooth:** a page opened while the server restarts waits and says *Connecting to the server…* instead of dropping to offline mode, and goes back in by itself.
-- **Big lists are saved without pausing anything,** and a half-written copy can never replace a good one.
-- **TV remotes:** every chip, switch and checkbox can be reached with the arrow keys and ticked with OK; Back closes menus and dialogs; the Menu/Info key opens a poster's options; the guide opens on what's on now (and Up/Left from its edge go back to the buttons); Up/Down move a line at a time and stay at the end of a row instead of jumping elsewhere; on long pages with nothing to select (statistics tables) Up/Down scroll; the sign-in code screen is larger on TVs and gets a new code by itself if it couldn't get one; press **?** anywhere for the keyboard shortcuts. `python3 test/ui/tvreach.py http://localhost:8080` checks that everything on each page can be reached with the arrow keys.
-- **Small things:** searching for an actor or director answers instantly on big catalogues; a channel that's down offers *Next channel*; a series whose episodes the provider didn't send says so with *Try again*; the resume offer isn't repeated for what you just watched on the same device.
-
-### Player keys
+<details>
+<summary>Player keys (press <kbd>?</kbd> anywhere to see them in the app)</summary>
 
 | Key | Action |
 |---|---|
@@ -292,50 +337,19 @@ Notes:
 | Menu / Info (remote) | Options for the highlighted poster or channel (My List, hide, download…) |
 | Esc / Back | Close |
 
----
-
-## Security
-
-- The site password and PINs are hashed (scrypt). Sessions are http-only cookies, and sign-in attempts are rate-limited.
-- Every API request needs a custom header, so other websites can't act on your behalf (CSRF).
-- **Until you change the default password**, the server only answers on localhost, private IP addresses and `.local` names, plus any names in `ALLOWED_HOSTS`. Once you change it, any host name works.
-- Streams are relayed through signed, expiring links only.
-- **For use outside your home network**, put it behind https. Casting, installing as an app and in-browser downloads also need https (or localhost):
-  - **Tailscale**: easiest; private, no open ports. `tailscale serve --bg 8080` gives you an https name.
-  - **Caddy**: `tv.example.com { reverse_proxy 127.0.0.1:8080 }`, then set `TRUST_PROXY=1`.
-  - **Built in**: set `HTTPS_CERT` and `HTTPS_KEY`.
-
-## Data
-
-Everything lives in `DATA_DIR`:
-- `accounts.json`
-- `settings.json`
-- `lists/`
-- `epg/`
-- `users/<profile>.json`, with saved recommendations in `users/<profile>.recs.json`
-- `markers.json`
-- `cache/`
-
-Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
-
-## Limits
-
-- Conversion uses CPU. A small machine can handle a few transcodes at once; repackaging costs very little. **Admin → Playback** sets the maximum number of transcodes.
-- DRM: ClearKey works, and so does Widevine/PlayReady where the browser supports it and the playlist provides a licence URL. Nothing is decrypted on the server.
-- Casting to Chromecast sends the stream through your server, so the server must be reachable from the Chromecast.
-- Intro detection needs at least two episodes of a season and reads their first and last minutes in the background.
+On phones, double-tap the left or right side of the video to skip back or forward, and swipe up or down on live TV to change channel.
+</details>
 
 ## Development
 
 ```bash
 DEV=1 node server.js        # rebuilds the front-end bundle on every request
-node test/langs.test.js     # language detection tests
-node test/reach.test.js     # direct-playback (CORS) checks
-node test/intro.test.js     # intro detection tests (needs ffmpeg)
+npm test                    # unit tests (language detection, playback checks, duplicates, guides, connection test…)
+python3 test/ui/tvreach.py http://localhost:8080   # checks everything can be reached with a TV remote
 ```
 
-The front end is plain JavaScript and CSS in `web/` (no build step), joined in the order given by `web/order.json`. It is written without optional chaining (`?.`) or `??` so that older TV browsers can run it.
+The front end is plain JavaScript and CSS in `web/`, with no build step. Files are joined in the order given by `web/order.json`, and the code avoids optional chaining (`?.`) and `??` so older TV browsers can run it.
 
 ## Licence
 
-MIT. Bundled players: hls.js (Apache-2.0), mpegts.js (Apache-2.0) and Shaka Player (Apache-2.0); see `public/vendor/`.
+MIT. Bundled players: hls.js (Apache-2.0), mpegts.js (Apache-2.0) and Shaka Player (Apache-2.0). In-browser conversion uses Mediabunny and its AC-3 decoder (MPL-2.0). All of them are in `public/vendor/`.

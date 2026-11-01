@@ -81,9 +81,13 @@ V.route('home', function (view) {
     var lb = V.$('[data-hero=list]', view);
     if (lb) lb.onclick = function () { V.toggle('list', heroIt.k).then(function (on) { lb.innerHTML = V.icon(on ? 'check' : 'plus'); V.toast(on ? 'Added to My List' : 'Removed from My List'); }); };
     V.details(heroIt.k).then(function (d) {
+      // (The page may have been drawn again with another title by now.)
+      var ht = V.$('.hero-t', view);
+      if (!ht || ht.textContent !== heroIt.n) return;
       var p = V.$('.hero-plot', view);
       if (p && d.plot) { p.textContent = d.plot; p.hidden = false; }
-      if (d.bd && !heroIt.bd) { heroIt.bd = d.bd; var img = V.$('.hero-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
+      // Swap the blurred poster for the backdrop (something else may already have copied the details onto the item).
+      if (d.bd) { if (!heroIt.bd) heroIt.bd = d.bd; var img = V.$('.hero-bg img.blur', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
     }).catch(function () {});
   }
   V.$('[data-home=customize]', view).onclick = V.customizeHome;

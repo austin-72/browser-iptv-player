@@ -31,7 +31,7 @@ V.router = {
     if (V.router.stack.length > 50) V.router.stack.shift();
     V.closeMenus();
     if (V.watch && V.watch.it && !V.watch.mini && !keepScroll) V.setMini(true);
-    V.$$('[data-nav]').forEach(function (a) { var on = a.dataset.nav === r.name || (a.dataset.nav === 'home' && !V.routes[r.name]); a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    V.$$('[data-nav]').forEach(function (a) { var on = a.dataset.nav === r.name || (a.dataset.nav === 'home' && !V.routes[r.name]) || (!!a.dataset.also && a.dataset.also.split(',').indexOf(r.name) >= 0); a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     document.body.dataset.page = r.name;
     if (V.pageCleanup) { try { V.pageCleanup(); } catch (e) {} V.pageCleanup = null; }
     // A fresh container for every page: listeners a page attached (and late async renders) can't leak into the next.
@@ -69,6 +69,9 @@ V.renderShell = function () {
   V.$$('[data-admin-only]').forEach(function (x) { x.hidden = !S.profile.admin; });
   var types = new Set(S.items.map(function (i) { return i.t; }));
   V.$$('[data-need]').forEach(function (x) { x.hidden = !x.dataset.need.split(',').some(function (t) { return types.has(t); }); });
+  // Phones: the one Live TV tab opens radio when there are radio stations and no TV channels.
+  var lt = V.$('#tabbar [data-nav=live]');
+  if (lt) { var radioOnly = !types.has('live') && types.has('radio'); lt.setAttribute('href', radioOnly ? '#/radio' : '#/live'); V.$('span', lt).textContent = radioOnly ? 'Radio' : 'Live TV'; V.$('use', lt).setAttribute('href', radioOnly ? '#i-radio' : '#i-tv'); }
   V.updateUnread();
   document.title = b.name || '';
 };
