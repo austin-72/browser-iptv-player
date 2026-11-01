@@ -1,5 +1,5 @@
-// Stand-ins for the subtitle sources (SubDL, Podnapisi, Gestdown, OpenSubtitles) and Trakt (tests only).
-// start({ quota }) → { base, osBase, traktBase, subdlBase, subdlDlBase, podnapisiBase, gestdownBase, state, close }.
+// Stand-ins for the subtitle sources (SubDL, Gestdown, OpenSubtitles) and Trakt (tests only).
+// start({ quota }) → { base, osBase, traktBase, subdlBase, subdlDlBase, gestdownBase, state, close }.
 const http = require('http');
 const { zip } = require('../../lib/zip');
 
@@ -7,7 +7,7 @@ const SRT = (text) => `1\n00:00:01,000 --> 00:00:02,000\n${text}\n`;
 
 function start(opts = {}) {
   const state = {
-    subs: { subdl: [], podnapisi: [], gestdown: [], subdlOff: !!opts.subdlOff, podnapisiDown: !!opts.podnapisiDown },
+    subs: { subdl: [], gestdown: [], subdlOff: !!opts.subdlOff, gestdownDown: !!opts.gestdownDown },
     osDownloads: 0, osSearches: 0, osQuota: opts.quota === undefined ? 5 : opts.quota, osLogins: 0,
     trakt: { approved: false, polls: 0, scrobbles: [], watchlist: { movies: [{ movie: { title: 'Remote Film', year: 2020, ids: { trakt: 9, tmdb: 777 } } }], shows: [] }, ratings: [], history: [], removed: [], refreshes: 0, token: 'tok1' },
     hooks: [], hookFailFirst: opts.hookFailFirst || 0,
@@ -40,27 +40,11 @@ function start(opts = {}) {
       res.writeHead(200, { 'Content-Type': 'application/zip' });
       return res.end(zip(files));
     }
-    // ---------------- Podnapisi
-    if (p === '/pn/subtitles/search/advanced') {
-      state.subs.podnapisi.push(u.search);
-      if (state.subs.podnapisiDown) { res.writeHead(503); return res.end(); }
-      if (req.headers.accept !== 'application/json') return json(res, 400, {});
-      const lang = u.searchParams.get('language');
-      const tv = u.searchParams.getAll('movie_type').includes('tv-series');
-      const data = tv ? [{ id: 'pnEp' + lang, language: lang, releases: ['Show.S02E03.HDTV'], flags: [], movie: { title: 'Show', year: 2019, episode_info: { season: 2, episode: 3 } } },
-        { id: 'pnOther', language: lang, releases: ['Show.S02E04'], movie: { title: 'Show', episode_info: { season: 2, episode: 4 } } }]
-        : [{ id: 'pnFilm' + lang, language: lang, releases: ['Film.2020.BluRay'], flags: ['hearing_impaired'], movie: { title: 'Film', year: 2020 } },
-          { id: 'pnWrong', language: lang, releases: ['Other'], movie: { title: 'A Different Film', year: 2020 } }];
-      return json(res, 200, { data, page: 1, all_pages: 1 });
-    }
     let mm;
-    if ((mm = /^\/pn\/subtitles\/([\w-]+)\/download$/.exec(p))) {
-      res.writeHead(200, { 'Content-Type': 'application/zip' });
-      return res.end(zip([{ name: mm[1] + '.srt', data: SRT('Podnapisi ' + mm[1]) }]));
-    }
     // ---------------- Gestdown (Addic7ed)
     if ((mm = /^\/gd\/shows\/search\/(.+)$/.exec(p))) {
       state.subs.gestdown.push(p);
+      if (state.subs.gestdownDown) { res.writeHead(503); return res.end(); }
       return decodeURIComponent(mm[1]) === 'Show' ? json(res, 200, { shows: [{ id: 'show-uuid', name: 'Show', tmdbId: 4242 }] }) : json(res, 404, {});
     }
     if ((mm = /^\/gd\/subtitles\/get\/([\w-]+)\/(\d+)\/(\d+)\/(.+)$/.exec(p))) {
@@ -139,7 +123,7 @@ function start(opts = {}) {
   });
   return new Promise((ok) => srv.listen(opts.port || 0, '127.0.0.1', () => {
     const base = `http://127.0.0.1:${srv.address().port}`;
-    ok({ base, osBase: base + '/os', traktBase: base + '/trakt', subdlBase: base + '/subdl', subdlDlBase: base + '/subdl-dl', podnapisiBase: base + '/pn', gestdownBase: base + '/gd', state, close: () => { srv.close(); srv.closeAllConnections(); } });
+    ok({ base, osBase: base + '/os', traktBase: base + '/trakt', subdlBase: base + '/subdl', subdlDlBase: base + '/subdl-dl', gestdownBase: base + '/gd', state, close: () => { srv.close(); srv.closeAllConnections(); } });
   }));
 }
 

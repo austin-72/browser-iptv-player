@@ -17,7 +17,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
   const m = await mock.start();
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p5srv-'));
-  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, TRAKT_BASE: m.traktBase, SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, PODNAPISI_BASE: m.podnapisiBase, GESTDOWN_BASE: m.gestdownBase }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, TRAKT_BASE: m.traktBase, SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, GESTDOWN_BASE: m.gestdownBase }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   app.stdout.on('data', (d) => { out += d; });
   app.stderr.on('data', (d) => { out += d; });
@@ -110,10 +110,10 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
     await req('PUT', '/api/admin/integrations', { body: { subdl: { apiKey: 'sdkey' }, sources: { gestdown: false } }, headers: X });
     const i3 = await req('GET', '/api/admin/integrations');
     assert.ok(!JSON.stringify(i3.json).includes('sdkey'), 'the SubDL key isn’t sent back');
-    assert.deepStrictEqual(i3.json.sources, { podnapisi: true, gestdown: false });
+    assert.deepStrictEqual(i3.json.sources, { gestdown: false });
     assert.strictEqual(i3.json.opensubtitles.reserve, 2);
     const st = await req('POST', '/api/admin/integrations/subtitles/test', { headers: X });
-    assert.deepStrictEqual([st.json.subdl.ok, st.json.podnapisi.ok, st.json.gestdown.on], [true, true, false]);
+    assert.deepStrictEqual([st.json.subdl.ok, st.json.gestdown.on, st.json.podnapisi], [true, false, undefined]);
     const me = await req('GET', '/api/boot');
     assert.ok(me.status === 200);
     const t = await req('POST', '/api/trakt/connect', { headers: X });

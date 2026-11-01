@@ -1,4 +1,4 @@
-// Subtitles (SubDL, Podnapisi, Gestdown, OpenSubtitles), Trakt, API keys and webhooks — against local stand-ins (test/mock/integrations.js).
+// Subtitles (SubDL, Gestdown, OpenSubtitles), Trakt, API keys and webhooks — against local stand-ins (test/mock/integrations.js).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -71,17 +71,16 @@ test('Subtitle sources: languages, season packs', () => {
 
 test('Subtitles from every source: free ones first, OpenSubtitles kept back', async () => {
   const m = await mock.start({ quota: 3 });
-  const env = { SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, PODNAPISI_BASE: m.podnapisiBase, GESTDOWN_BASE: m.gestdownBase };
+  const env = { SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, GESTDOWN_BASE: m.gestdownBase };
   const saved = {}; for (const k in env) { saved[k] = process.env[k]; process.env[k] = env[k]; }
   const dir = tmp();
-  const conf = { subdl: { apiKey: 'sdkey' }, sources: { podnapisi: true, gestdown: true }, opensubtitles: { apiKey: 'oskey' } };
+  const conf = { subdl: { apiKey: 'sdkey' }, sources: { gestdown: true }, opensubtitles: { apiKey: 'oskey' } };
   const subs = new Subtitles({ dataDir: dir, getConf: () => conf, fetch, osBase: m.osBase });
   try {
-    assert.deepStrictEqual(subs.active(), ['subdl', 'podnapisi', 'gestdown', 'opensubtitles']);
-    // A film: SubDL, Podnapisi (only the right title) and OpenSubtitles; English first, free before OpenSubtitles.
+    assert.deepStrictEqual(subs.active(), ['subdl', 'gestdown', 'opensubtitles']);
+    // A film: SubDL and OpenSubtitles; English first, free before OpenSubtitles.
     const film = await subs.search({ tmdb: 603, query: 'Film', year: 2020, langs: ['en', 'fr'] });
-    assert.deepStrictEqual(film.filter((x) => x.lang === 'en').map((x) => x.source), ['subdl', 'podnapisi', 'opensubtitles', 'opensubtitles', 'opensubtitles']);
-    assert.ok(!film.some((x) => /Different/.test(x.name) || x.id === 'pn:0:0:pnWrong'), 'other titles left out');
+    assert.deepStrictEqual(film.filter((x) => x.lang === 'en').map((x) => x.source), ['subdl', 'opensubtitles', 'opensubtitles', 'opensubtitles']);
     assert.ok(film.filter((x) => x.source === 'opensubtitles').every((x) => x.costly && x.from === 'OpenSubtitles'));
     assert.ok(film.filter((x) => x.source !== 'opensubtitles').every((x) => !x.costly));
     assert.strictEqual(m.state.subs.subdl[0].tmdb_id, '603');
@@ -96,12 +95,11 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     assert.strictEqual(m.state.subs.subdlDownloads, 1);
     const again = await subs.search({ tmdb: 603, query: 'Film', year: 2020, langs: ['en', 'fr'] });
     assert.ok(again.find((x) => x.id === film[0].id).cached, 'shown as saved here');
-    assert.match(fs.readFileSync(subs.file(await subs.get(film.find((x) => x.source === 'podnapisi').id)), 'utf8'), /Podnapisi pnFilmen/);
 
     // An episode: all four; the single episode before the season pack; Addic7ed's unfinished one left out.
     const ep = await subs.search({ parentTmdb: 4242, query: 'Show', season: 2, episode: 3, langs: ['en'] });
     const srcs = ep.map((x) => x.source);
-    assert.ok(srcs.includes('subdl') && srcs.includes('podnapisi') && srcs.includes('gestdown') && srcs.includes('opensubtitles'));
+    assert.ok(srcs.includes('subdl') && srcs.includes('gestdown') && srcs.includes('opensubtitles'));
     assert.ok(!ep.some((x) => /WIP|S02E04/.test(x.name)));
     const sd = ep.filter((x) => x.source === 'subdl');
     assert.deepStrictEqual(sd.map((x) => x.pack), [false, true]);
@@ -112,7 +110,7 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     assert.match(fs.readFileSync(subs.file(await subs.get(ep.find((x) => x.source === 'gestdown').id)), 'utf8'), /Addic7ed g1/);
 
     // Fetching automatically: a free one, never OpenSubtitles unless allowed.
-    conf.subdl.apiKey = ''; conf.sources = { podnapisi: false, gestdown: false }; subs.clear();
+    conf.subdl.apiKey = ''; conf.sources = { gestdown: false }; subs.clear();
     const before = m.state.osDownloads;
     assert.strictEqual(await subs.auto({ tmdb: 1, query: 'Film', year: 2020 }, 'en'), null, 'only OpenSubtitles has it: not used yet');
     assert.strictEqual(m.state.osDownloads, before);
@@ -131,14 +129,16 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     assert.strictEqual(m.state.osDownloads, before + 2);
 
     // A bad SubDL key is reported; a source that's down doesn't stop the others.
-    conf.subdl.apiKey = 'wrong'; conf.sources = { podnapisi: true, gestdown: false }; conf.opensubtitles.apiKey = ''; subs.clear();
-    m.state.subs.podnapisiDown = true;
-    await assert.rejects(subs.search({ tmdb: 2, query: 'Film', langs: ['en'] }), /SubDL: Invalid API key/);
+    conf.subdl.apiKey = 'wrong'; conf.sources = { gestdown: true }; conf.opensubtitles.apiKey = ''; subs.clear();
+    m.state.subs.gestdownDown = true;
+    await assert.rejects(subs.search({ parentTmdb: 4242, query: 'Show', season: 2, episode: 3, langs: ['en'] }), /SubDL: Invalid API key/);
     const t = await subs.test();
-    assert.deepStrictEqual([t.subdl.ok, t.podnapisi.on, t.gestdown.on, t.opensubtitles.on], [false, true, false, false]);
-    m.state.subs.podnapisiDown = false; conf.subdl.apiKey = 'sdkey'; subs.clear();
-    assert.ok((await subs.search({ tmdb: 2, query: 'Film', langs: ['en'] })).length >= 2);
+    assert.deepStrictEqual([t.subdl.ok, t.gestdown.on, t.opensubtitles.on], [false, true, false]);
+    conf.subdl.apiKey = 'sdkey'; subs.clear();
+    assert.strictEqual((await subs.search({ parentTmdb: 4242, query: 'Show', season: 2, episode: 3, langs: ['en'] })).length, 2, 'SubDL still answers with Gestdown down');
+    m.state.subs.gestdownDown = false;
     await assert.rejects(subs.get('zz:1'), /Bad subtitle/);
+    await assert.rejects(subs.get('pn:0:0:abc'), /Bad subtitle/);
     await assert.rejects(subs.get('sd:0:0:../../etc/passwd'), /Bad subtitle/);
   } finally {
     for (const k in saved) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }

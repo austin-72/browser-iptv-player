@@ -9,7 +9,6 @@ When a film or episode has no subtitles in your language, the player can find so
 | Source | Cost | Covers | Setup |
 | --- | --- | --- | --- |
 | **SubDL** (main) | Free: 2,000 searches a day, downloads not counted | Films and series | A free API key from subdl.com (your account → API key) |
-| **Podnapisi.net** | Free | Films and series | Nothing — on by default |
 | **Addic7ed** (through Gestdown) | Free | TV episodes only; often first after an episode airs | Nothing — on by default |
 | **OpenSubtitles.com** (backup) | 5 downloads a day on a free key, shared by everyone here; more only with VIP | The biggest library | A free API key (your profile → API consumers) |
 
@@ -17,7 +16,7 @@ Each subtitle is downloaded once, converted to WebVTT and kept on the server (up
 
 - **Fetch automatically:** Settings → *Subtitles found online* → *Fetch subtitles automatically*. When you'd want subtitles and there are none in your language, the free sources are tried about 15 seconds in. OpenSubtitles is only tried if they have nothing **and** you've watched for 3 minutes (so channel-surfing doesn't use up its downloads), and never when it would leave fewer than 2 of today's downloads for choosing by hand.
 - In **Find subtitles**, OpenSubtitles results say they use one of today's downloads, and how many are left.
-- **Setup (admin):** Admin → **Integrations** → *Subtitles found online*: the SubDL key, the Podnapisi and Addic7ed switches, and *Test all sources*. OpenSubtitles is the section below it; an account there only helps with a VIP subscription.
+- **Setup (admin):** Admin → **Integrations** → *Subtitles found online*: the SubDL key, the Addic7ed switch, and *Test all sources*. OpenSubtitles is the section below it; an account there only helps with a VIP subscription.
 - When OpenSubtitles' downloads are used up, the message says so; the other sources keep working.
 
 ## Trakt
@@ -134,4 +133,4 @@ automation:
 
 ### Environment variables (testing only)
 
-`SUBDL_BASE`, `SUBDL_DL_BASE`, `PODNAPISI_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`).
+`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`).

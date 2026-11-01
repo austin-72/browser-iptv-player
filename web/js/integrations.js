@@ -1,4 +1,4 @@
-/* Integrations: subtitles found online (SubDL, Podnapisi, Addic7ed, OpenSubtitles), Trakt, playback health reports (for Admin → Overview),
+/* Integrations: subtitles found online (SubDL, Addic7ed, OpenSubtitles), Trakt, playback health reports (for Admin → Overview),
    the connection speed test, and the admin's Integrations and "API & automations" pages. */
 'use strict';
 (function () {
@@ -413,7 +413,6 @@
       body.innerHTML = '<section class="card-sec"><h2>Subtitles found online</h2><p class="dim">Lets anyone find subtitles for a film or episode that has none in their language (the subtitles button → Find subtitles), or fetch them automatically. Sources are searched together; the free ones are used first.</p>' +
         '<h3>SubDL <span class="dim small">· main source</span></h3><p class="dim small">Free: sign up at subdl.com, then your account → API key. 2,000 searches a day; downloads aren’t counted.</p>' +
         '<div class="int-fields">' + secretField('sd.apiKey', 'API key', sd.apiKey) + '</div>' +
-        '<label class="switch"><input type="checkbox" data-src="podnapisi"' + (src.podnapisi !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Podnapisi.net</b><small>Free, no key needed. Films and series.</small></span></label>' +
         '<label class="switch"><input type="checkbox" data-src="gestdown"' + (src.gestdown !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Addic7ed (through Gestdown)</b><small>Free, no key needed. TV episodes only — often the quickest after an episode airs.</small></span></label>' +
         '<div class="btn-row"><button class="btn primary" data-save="sd">Save</button><button class="btn" data-test="all">Test all sources</button></div><div class="all-test small"></div></section>' +
         '<section class="card-sec"><h2>Backup: OpenSubtitles.com</h2><p class="dim">The biggest library, used when the free sources have nothing. A free API key (opensubtitles.com → your profile → API consumers) allows 5 downloads a day, shared by everyone here; subtitles already saved here don’t count again. Signing in with an account only raises that with a VIP subscription.</p>' +
@@ -429,7 +428,7 @@
           var val = function (k) { var el = V.$('[data-f="' + k + '"]', body); return el ? el.value : undefined; };
           var on = function (k) { var el = V.$('[data-src="' + k + '"]', body); return !!(el && el.checked); };
           var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } }
-            : s.dataset.save === 'sd' ? { subdl: { apiKey: val('sd.apiKey') }, sources: { podnapisi: on('podnapisi'), gestdown: on('gestdown') } }
+            : s.dataset.save === 'sd' ? { subdl: { apiKey: val('sd.apiKey') }, sources: { gestdown: on('gestdown') } }
             : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
           V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body); }).catch(V.fail);
         }
@@ -437,7 +436,7 @@
         if (tb && tb.dataset.test === 'all') {
           var box = V.$('.all-test', body);
           box.textContent = 'Testing…';
-          var NAMES = { subdl: 'SubDL', podnapisi: 'Podnapisi', gestdown: 'Addic7ed (Gestdown)', opensubtitles: 'OpenSubtitles' };
+          var NAMES = { subdl: 'SubDL', gestdown: 'Addic7ed (Gestdown)', opensubtitles: 'OpenSubtitles' };
           V.api('/api/admin/integrations/subtitles/test', { method: 'POST' }).then(function (r) {
             box.innerHTML = '<ul class="simple">' + Object.keys(NAMES).map(function (k) {
               var x = r[k] || {};

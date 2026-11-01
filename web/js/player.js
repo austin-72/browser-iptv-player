@@ -1401,7 +1401,7 @@ PP._menuPages = function (kind) {
     if (tr.subs) { main.push({ label: 'Subtitles', value: tr.subs.value, page: 'subs' }); pages.subs = tr.subs.items; } else main.push({ label: 'Subtitles', value: 'None', fn: function () {} });
     if (tr.audio) { main.push({ label: 'Audio', value: tr.audio.value, page: 'audio' }); pages.audio = tr.audio.items; }
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
-    // Subtitles found online (SubDL, Podnapisi, Addic7ed, OpenSubtitles): see integrations.js.
+    // Subtitles found online (SubDL, Addic7ed, OpenSubtitles): see integrations.js.
     if ((S.settings.subtitles || S.settings.opensubtitles) && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
     pages.main = main;
     return pages;
