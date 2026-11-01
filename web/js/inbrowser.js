@@ -119,7 +119,7 @@
                   sb = ms.addSourceBuffer(mime);
                   if (ctl.duration) { try { ms.duration = Math.max(1, ctl.duration - ctl.offset); } catch (e) {} }
                 });
-                var wait = function () { return ahead() > 60 && !stopped ? sleep(400).then(wait) : trim(); };
+                var wait = function () { return ahead() > (V.tune ? V.tune.mbAhead() : 60) && !stopped ? sleep(400).then(wait) : trim(); };
                 return ready.then(wait).then(function () { return append(chunk.data); }).then(function () {
                   if (firstData && v.buffered.length && v.buffered.end(v.buffered.length - 1) > 2) { firstData(); firstData = null; }
                 });

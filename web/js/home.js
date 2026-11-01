@@ -12,6 +12,7 @@ V.HOME_ROWS = [
   { id: 'people', name: 'Actors and directors you like' },
   { id: 'live', name: 'On now' },
   { id: 'ontv', name: 'On TV now: sports, films, kids, news' },
+  { id: 'onlater', name: 'On later today: films and sport' },
   { id: 'favs', name: 'Favourite channels' },
   { id: 'household', name: 'Popular in your household' },
   { id: 'new', name: 'New additions' },
@@ -111,6 +112,7 @@ V.route('home', function (view) {
         if (items.length >= 3) add({ id: 'ontv:' + kind.id, title: kind.label, items: items, play: true, more: '#/guide' });
       });
     },
+    onlater: function () { var r = V.onLaterRow && V.onLaterRow(); if (r) rows.appendChild(r); },
     shared: function () {
       var soc = S.socialCache;
       if (!soc) return;
@@ -241,6 +243,7 @@ V.onTvNow = function (kind) {
     var c = S.live[i];
     if (S.data.hidden.indexOf(c.k) >= 0) continue;
     var now = V.epg.nowNext(c).now;
+    if (now && now.ph) now = null; // (a placeholder block isn't a programme)
     var cats = now && now.c ? [].concat(now.c).join(' ') : '';
     var hit = false;
     if (cats) hit = k.cat.test(cats);

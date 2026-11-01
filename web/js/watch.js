@@ -10,6 +10,9 @@ V.play = function (it, opts) {
   if (!it) return;
   // "Play on the TV" mode (Remote): send it there instead.
   if (V.playOnTarget && V.playOnTarget(it, opts)) return;
+  // A 24/7 channel from My channels: plays whatever is on it now (see mychannels.js).
+  if (V.mychPlay && /^mych:/.test(it.u || '') && !opts.mych) return V.mychPlay(it, opts);
+  V.watch.mych = opts.mych || null;
   if (it.t === 'show') return V.loadEpisodes(it).then(function (eps) { var r = V.resumePoint(it, eps); if (r.ep) V.play(r.ep, Object.assign({}, opts, { startAt: r.pos })); else V.toast('No episodes found', { error: true }); }).catch(V.fail);
   // Episodes fetched on demand (Xtream) live only in the server's memory: after a server restart, have it fetch
   // the show's episodes again before playing (once per show per page load).
@@ -29,7 +32,9 @@ V.play = function (it, opts) {
   else if (it.t === 'live' || it.t === 'radio') V.watch.list = V.watch.list && V.watch.list.indexOf(it) >= 0 ? V.watch.list : (it.t === 'live' ? S.live : S.radio);
   V.setMini(opts.mini === true ? true : false);
   if (it.t === 'live' || it.t === 'radio') V.watch.lastChannel = V.watch.channel && V.watch.channel !== it ? V.watch.channel : V.watch.lastChannel, V.watch.channel = it;
-  V.player.load(it, { startAt: startAt });
+  // In a watch party that shares one connection, play the party's stream (through the server).
+  var pc = V.party && V.party.current;
+  V.player.load(it, { startAt: startAt, share: pc && pc.share && it.t !== 'catchup' ? pc.id : undefined });
   V.watch.upnextDismissed = false;
   V.watch.skipped = {};
   V.$('[data-a=next]', V.player.host).hidden = it.t !== 'episode' || !V.nextEpisode(it);
@@ -124,7 +129,7 @@ V.watchTick = function (pos, tot) {
   } else if (!skip.hidden) skip.hidden = true;
 
   // Up next: in the last 25 s of an episode (or when credits start).
-  if (it.t === 'episode' && tot > 60 && !V.watch.upnextDismissed && V.pref('autoplayNext') !== false) {
+  if (it.t === 'episode' && tot > 60 && !V.watch.upnextDismissed && !V.watch.mych && V.pref('autoplayNext') !== false) {
     var startAt = m && m.credits ? m.credits.start : tot - 25;
     if (pos >= startAt && pos < tot) V.showUpNext(Math.ceil(Math.min(15, tot - pos)));
   }
@@ -159,6 +164,7 @@ V.showUpNext = function (secs) {
 V.onEnded = function () {
   var it = V.watch.it;
   if (V._sleepAt === -1) { V._sleepAt = 0; V.toast('Sleep timer: stopped'); return; }
+  if (V.watch.mych && V.mychNext) return V.mychNext();
   if (it && it.t === 'episode' && V.pref('autoplayNext') !== false && !V.watch.upnextDismissed) {
     var nx = V.nextEpisode(it);
     if (nx) return V.autoNext(nx);
@@ -190,7 +196,12 @@ V.openSide = function (kind) {
   } else if (kind === 'channels') {
     var list = V.watch.list || S.live;
     var cur = it.t === 'catchup' ? V.entry(it.catchupOf) : it;
-    side.innerHTML = head('Channels') + '<input class="input side-filter" placeholder="Filter channels" aria-label="Filter channels"><div class="side-list"></div>';
+    var ctype = cur && cur.t === 'radio' ? 'radio' : 'live';
+    // Which channels: the list it was started from, or any of your groups (favourites, your lists, categories).
+    var sideGroups = V.channelGroups ? V.channelGroups(ctype) : [];
+    side.innerHTML = head('Channels') + (sideGroups.length ? '<select class="input side-grp" aria-label="Channel group"><option value="__now">' + (V.watch.list && V.watch.list !== S.live && V.watch.list !== S.radio ? 'The list you were watching' : 'All channels') + '</option>' + sideGroups.slice(1).map(function (x) { return '<option value="' + V.esc(x.v) + '">' + V.esc(x.l) + '</option>'; }).join('') + '</select>' : '') + '<input class="input side-filter" placeholder="Filter channels" aria-label="Filter channels"><div class="side-list"></div>';
+    var sg = V.$('.side-grp', side);
+    if (sg) sg.onchange = function () { list = sg.value === '__now' ? (V.watch.list || S.live) : V.channelsFor(sg.value, ctype); render(V.$('.side-filter', side).value); var f = V.$('.side-list button', side); if (f) f.scrollIntoView({ block: 'nearest' }); };
     var render = function (q) {
       var nq = V.norm(q);
       var rows = list.filter(function (c) { return !nq || V.norm(c.n).indexOf(nq) >= 0 || String(c.no) === q; }).slice(0, 400);
@@ -272,14 +283,14 @@ V.initWatch = function () {
     else if (k === 'b' && it && p.vod) V.bookmarkNow();
     else if (k === 'n' && it && it.t === 'episode') p.onNext();
     else if (k === 's') { var sb = V.$('.vp-skip', p.host); if (!sb.hidden) sb.click(); }
-    else if (k === 'j' || k === 'MediaRewind') p.skip(-10);
-    else if (k === 'l' || k === 'MediaFastForward') p.skip(10);
+    else if (k === 'j' || k === 'MediaRewind') p.skip(-V.skipLen('back'));
+    else if (k === 'l' || k === 'MediaFastForward') p.skip(V.skipLen('fwd'));
     else if (k === ',') p.step(-1);
     else if (k === '.') p.step(1);
     else if (k === '<') p.setRate(Math.max(0.25, Math.round((p.video.playbackRate - 0.25) * 4) / 4));
     else if (k === '>') p.setRate(Math.min(3, Math.round((p.video.playbackRate + 0.25) * 4) / 4));
-    else if (k === 'ArrowLeft') p.skip(e.shiftKey ? -60 : -10);
-    else if (k === 'ArrowRight') p.skip(e.shiftKey ? 60 : 10);
+    else if (k === 'ArrowLeft') p.skip(e.shiftKey ? -60 : -V.skipLen('back'));
+    else if (k === 'ArrowRight') p.skip(e.shiftKey ? 60 : V.skipLen('fwd'));
     else if ((k === 'ArrowUp' || k === 'ChannelUp' || k === 'PageUp') && live) V.zap(-1);
     else if ((k === 'ArrowDown' || k === 'ChannelDown' || k === 'PageDown') && live) V.zap(1);
     else if (k === 'ArrowUp') p.setVolume(p.video.volume + 0.05);
@@ -307,7 +318,7 @@ V.initWatch = function () {
     else if (d.cmd === 'toggle') p.togglePlay();
     else if (d.cmd === 'stop') V.closePlayer();
     else if (d.cmd === 'seek') p.seek(d.pos || 0, true);
-    else if (d.cmd === 'skip') p.skip(d.d || 10);
+    else if (d.cmd === 'skip') p.skip(d.d || V.skipLen('fwd'));
     else if (d.cmd === 'volume') { p.setVolume(V.clamp(d.v, 0, 1)); p.osd('Volume ' + Math.round(p.video.volume * 100) + '%', 900); }
     else if (d.cmd === 'mute') p.toggleMute(typeof d.on === 'boolean' ? d.on : undefined);
     else if (d.cmd === 'subs') { var sb = p._tracks().subs; if (sb && sb.items[d.i]) { sb.items[d.i].fn(); p._menuRefresh(); } else p.toggleSubs(); }
@@ -321,6 +332,7 @@ V.initWatch = function () {
     else if (d.cmd === 'watch') V.remoteWatch(d.conn, true);
     else if (d.cmd === 'unwatch') V.remoteWatch(d.conn, false);
     else if (d.cmd === 'takeover') {
+      if (V.multiview && V.multiview.takeover(d)) return;
       if (!V.watch.it) return;
       V.closePlayer();
       V.toast((d.from || 'Someone') + (d.priority ? ' has priority and' : '') + ' needed the connection to watch on ' + (d.device || 'another device') + '.', { ms: 10000 });
@@ -538,8 +550,8 @@ V.keyHelp = function (inPlayer, live) { // inPlayer: true, false or 'all'
   var row = function (keys, what) { return '<tr><td>' + keys.map(function (x) { return '<kbd>' + V.esc(x) + '</kbd>'; }).join(' ') + '</td><td>' + V.esc(what) + '</td></tr>'; };
   var player = [
     row(['Space', 'K'], 'Play / pause'),
-    row(['←', '→'], 'Back / forward 10 s (with Shift: 60 s)'),
-    row(['J', 'L'], 'Back / forward 10 s'),
+    row(['←', '→'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s (with Shift: 60 s)'),
+    row(['J', 'L'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s'),
     row(['↑', '↓'], live ? 'Change channel' : 'Volume'),
     row(['F'], 'Full screen'), row(['M'], 'Mute'), row(['P'], 'Picture-in-picture'),
     row(['C'], 'Subtitles on / off'), row(['A'], 'Next audio track'),

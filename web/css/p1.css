@@ -1,0 +1,33 @@
+/* Player extras: audio sync (picture held back), sound only, open in another app, reminder countdown. */
+.vp .av-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; pointer-events: none; }
+.vp .av-cues { position: absolute; left: 5%; right: 5%; bottom: 9%; display: flex; flex-direction: column; align-items: center; gap: .15em; pointer-events: none; line-height: 1.25; text-align: center; }
+.vp .av-cues span { padding: .05em .35em; border-radius: 3px; white-space: pre-line; }
+.vp:not(.idle) .av-cues { bottom: calc(9% + 4.5rem); }
+
+/* Sound only: the picture is off, a "listening" card shows the channel and what's on. */
+.vp.audio-only video, .vp.audio-only .av-canvas { visibility: hidden; }
+.vp.audio-only .vp-art { z-index: 0; }
+.vp-art .ao-now { font-size: 1.05rem; text-align: center; padding: 0 1rem; }
+.vp-art .ao-next { font-size: .9rem; text-align: center; padding: 0 1rem; }
+.vp-art .ao-tag { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; opacity: .85; flex-wrap: wrap; justify-content: center; }
+.vp-art .ao-tag .i { width: 1rem; height: 1rem; }
+.vp-art .ao-tag .linkish { color: inherit; text-decoration: underline; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+.pbtn[data-a=audioonly].on { color: var(--accent); }
+
+/* Open in another app */
+.extapp-dlg .ext-apps { display: grid; gap: .5rem; margin: .6rem 0; }
+.extapp-dlg .ext-apps .btn { justify-content: flex-start; flex-wrap: wrap; text-align: left; }
+.extapp-dlg .ext-apps .btn small { flex-basis: 100%; margin-left: 1.9rem; font-weight: 400; }
+
+/* A reminder switching channel: the countdown note */
+.toast.rem-switch .toast-act + .toast-act { margin-left: .3rem; }
+
+/* Settings → Player */
+.player-prefs h3 { margin-top: 1rem; }
+.player-prefs .field small { display: block; margin-top: .3rem; }
+@media (max-width: 600px) { .player-prefs .grid2 { grid-template-columns: 1fr; } }
+
+/* Live TV this browser can rewind: the skip buttons come back. */
+@media (min-width: 601px) { .vp.is-live.can-rewind [data-a=rw], .vp.is-live.can-rewind [data-a=ff] { display: inline-flex; } }
+/* (Phones: double-tap the sides, as for films.) */
+#player-layer.mini .vp-art .ao-now, #player-layer.mini .vp-art .ao-next, #player-layer.mini .vp-art .ao-tag, #player-layer.mini .vp-art .radio-name { display: none; }

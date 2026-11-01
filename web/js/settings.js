@@ -32,6 +32,7 @@ V.route('settings', function (view) {
     sw('stillWatching', 'Ask “Are you still watching?”', 'After 3 episodes in a row, or 4 hours of live TV, with nobody touching anything — so a forgotten TV doesn’t keep the connection busy') +
     sw('dataSaver', 'Data saver', 'Lower quality to use less data (good on mobile)') +
     '<button class="btn" data-a="substyle">' + V.icon('cc') + ' Subtitle style…</button></section>' +
+    (V.playerPrefsHtml ? V.playerPrefsHtml() : '') +
 
     '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Sign a TV in by typing the code it shows (no password typing with the remote), and control what’s playing on it from here.</p><div class="btn-row"><button class="btn" data-a="pair">' + V.icon('tv') + ' Sign in a TV</button><a class="btn" href="#/remote">' + V.icon('remote') + ' Use this as a remote</a></div></section>' +
     '<section class="card-sec"><h2>Notifications</h2>' + sw('newEpisodeAlerts', 'New episodes', 'Of series in My List or that you’ve been watching') +
@@ -44,11 +45,14 @@ V.route('settings', function (view) {
     '<div class="btn-row">' + (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
     V.mixedSection() + V.directHelperSection() +
+    (V.settingsExtra ? V.settingsExtra() : '') + // Trakt, OpenSubtitles, connection test (integrations.js)
 
     (!pr.admin ? '<section class="card-sec danger-zone"><h2>Remove this profile</h2><p class="dim">Deletes your history, lists and settings.</p><button class="btn danger" data-a="delete">Remove my profile</button></section>' : '') +
     '<p class="dim small center">' + V.esc((S.settings.brand || {}).name) + ' · version ' + V.esc(S.settings.version) + '</p>' +
     (S.settings.tmdb ? '<p class="dim small center tmdb-credit">' + 'Data and images from ' + V.TMDB_LOGO + '.<br>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>' : '') + '</div>';
 
+  if (V.settingsExtraBind) V.settingsExtraBind(view);
+  if (V.bindPlayerPrefs) V.bindPlayerPrefs(view);
   // http streams on this https site: does this browser let them through?
   var ms = V.$('.mixed-state', view);
   if (ms) {

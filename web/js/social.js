@@ -132,19 +132,24 @@ V.party = (function () {
 
   function startDialog(it) {
     if (!it) return;
-    V.api('/api/social').then(function (soc) {
+    // (Whether the provider limits connections decides if the party shares one by default.)
+    var lim = V.api('/api/play/sources', { body: { k: it.k, origin: location.origin } }).then(function (r) { return ((r.sources || [])[0] || {}).limit || 0; }, function () { return 0; });
+    Promise.all([V.api('/api/social'), lim]).then(function (rs) {
+      var soc = rs[0], limit = rs[1];
       S.socialCache = soc;
       var others = soc.profiles.filter(function (p) { return p.id !== me(); });
       V.dialog({
         title: 'Watch “' + it.n + '” together',
         body: '<p class="dim">Everyone in the party sees the same thing at the same moment — play, pause and skipping stay in sync, with chat and reactions.</p>' +
           (others.length ? '<div class="pick-people">' + others.map(function (p) { return '<label class="person"><input type="checkbox" value="' + p.id + '"' + (p.online ? ' checked' : '') + '>' + V.avatar(p.avatar, 'sm') + '<span>' + V.esc(p.name) + (p.online ? ' <small class="ok">online</small>' : '') + '</span></label>'; }).join('') + '</div>' : '<p>There’s nobody else to invite yet.</p>') +
-          '<label class="check"><input type="checkbox" data-host-only><span>Only I can pause and skip</span></label>',
+          '<label class="check"><input type="checkbox" data-host-only><span>Only I can pause and skip</span></label>' +
+          '<label class="check"><input type="checkbox" data-share' + (limit > 0 ? ' checked' : '') + '><span>Share one connection <small class="dim">— the server fetches it once for everyone' + (limit > 0 ? ' (your provider allows ' + (limit === 1 ? 'one stream' : limit + ' streams') + ' at a time)' : '') + '</small></span></label>',
         actions: [{ label: 'Cancel' }, { label: 'Start the party', primary: true, fn: function (d) {
           var invite = V.$$('.person input:checked', d).map(function (x) { return x.value; });
           var hostOnly = V.$('[data-host-only]', d).checked;
+          var share = V.$('[data-share]', d).checked;
           var pos = V.watch.it && V.watch.it.k === it.k && V.player.vod ? V.player.position : 0;
-          return V.api('/api/party', { body: { k: it.k, n: it.n, t: it.t, i: it.i || (V.showOf(it) || {}).i || '', pos: pos, invite: invite } }).then(function (p) {
+          return V.api('/api/party', { body: { k: it.k, n: it.n, t: it.t, i: it.i || (V.showOf(it) || {}).i || '', pos: pos, invite: invite, share: share } }).then(function (p) {
             if (hostOnly) V.api('/api/party/' + p.id + '/settings', { body: { hostOnly: true } }).catch(function () {});
             enter(p, true);
             V.toast(invite.length ? 'Invites sent' : 'Party started');
@@ -201,7 +206,18 @@ V.party = (function () {
     else if (d.kind === 'emoji') floatEmoji(d.emoji);
     else if (d.kind === 'join') { if (cur.members.indexOf(d.who) < 0) cur.members.push(d.who); var j = V.profileById(d.who); if (j && d.who !== me()) V.toast(j.name + ' joined the party'); drawMembers(); if (cur.host === me()) setTimeout(send, 500); }
     else if (d.kind === 'leave') { cur.members = cur.members.filter(function (x) { return x !== d.who; }); cur.host = d.host; var l = V.profileById(d.who); if (l) V.toast(l.name + ' left the party'); drawMembers(); }
-    else if (d.kind === 'settings') cur.hostOnly = d.hostOnly;
+    else if (d.kind === 'settings') {
+      cur.hostOnly = d.hostOnly;
+      if (typeof d.share === 'boolean' && d.share !== !!cur.share) {
+        cur.share = d.share;
+        drawShare();
+        V.toast(d.share ? 'The party now shares one connection' : 'Everyone now plays it from the provider themselves');
+        // Start again the new way, at the same moment.
+        var nowIt = V.watch.it, wasOpen = V.watch.side === 'party';
+        if (nowIt) V.play(nowIt, { startAt: p.vod ? p.position : 0, fromParty: true });
+        if (nowIt && wasOpen) setTimeout(function () { if (V.watch.side !== 'party') V.openSide('party'); }, 400);
+      }
+    }
   }
 
   function floatEmoji(e) {
@@ -218,8 +234,9 @@ V.party = (function () {
     side.innerHTML = head('Watch party') + '<div class="party-members"></div><div class="party-chat" role="log"></div>' +
       '<div class="party-react">' + V.REACTIONS.map(function (e) { return '<button class="react-btn" data-emoji="' + e + '" aria-label="React ' + e + '">' + e + '</button>'; }).join('') + '</div>' +
       '<form class="party-form"><input class="input" placeholder="Say something" maxlength="500" aria-label="Chat message"><button class="icon-btn" aria-label="Send">' + V.icon('send') + '</button></form>' +
+      '<div class="party-share"></div>' +
       '<button class="btn block ghost" data-invite>' + V.icon('plus') + ' Invite more</button><button class="btn block danger" data-leave>Leave the party</button>';
-    drawMembers(); drawChat();
+    drawMembers(); drawChat(); drawShare();
     V.$('.party-form', side).onsubmit = function (e) { e.preventDefault(); var inp = V.$('input', side); var t = inp.value.trim(); if (!t) return; inp.value = ''; V.api('/api/party/' + cur.id + '/chat', { body: { text: t } }).catch(V.fail); };
     // The side panel element is reused, so replace (not add) our listener each time it's drawn.
     if (side._partyClick) side.removeEventListener('click', side._partyClick);
@@ -235,6 +252,16 @@ V.party = (function () {
     var box = V.$('.party-members', V.player.host);
     if (!box || !cur) return;
     box.innerHTML = cur.members.map(function (id) { var p = V.profileById(id); return p ? '<span class="pm" title="' + V.esc(p.name) + '">' + V.avatar(p.avatar, 'xs') + V.esc(p.name) + (id === cur.host ? ' <small class="dim">host</small>' : '') + '</span>' : ''; }).join('');
+  }
+  /** "Share one connection": the host can switch it; everyone sees whether it's on. */
+  function drawShare() {
+    var box = V.$('.party-share', V.player.host);
+    if (!box || !cur) return;
+    var host = cur.host === me();
+    box.innerHTML = '<label class="check"><input type="checkbox" data-share' + (cur.share ? ' checked' : '') + (host ? '' : ' disabled') + '><span>Share one connection <small class="dim">' +
+      (cur.share ? '— the server fetches it once and everyone watches from there' : '— everyone plays it from the provider') + '</small></span></label>';
+    var cb = V.$('[data-share]', box);
+    cb.onchange = function () { V.api('/api/party/' + cur.id + '/settings', { body: { share: cb.checked } }).catch(function (e) { cb.checked = !cb.checked; V.fail(e); }); };
   }
   function drawChat() {
     var box = V.$('.party-chat', V.player.host);

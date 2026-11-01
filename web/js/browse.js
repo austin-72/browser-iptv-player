@@ -60,21 +60,22 @@ V.route('series', function (view, r) { vodPage(view, r, 'show', 'Series'); });
 // ---------------------------------------------------------------- Live TV & radio
 function channelsPage(view, r, type) {
   var all = type === 'radio' ? S.radio : S.live;
-  var g = r.q.get('g') || V.ls.get('livegroup.' + type) || '';
+  var g = r.q.get('g') || (type === 'live' ? V.startGroup('live', V.ls.get('livegroup.' + type)) : V.ls.get('livegroup.' + type)) || '';
   var groups = V.groupsOf(type).sort(function (a, b) { return a.name.localeCompare(b.name); });
-  var favs = all.filter(function (c) { return V.inList('favs', c.k); });
+  var favs = V.favChannels(type);
   var recent = V.recentChannels().filter(function (c) { return c.t === type; });
-  var list = g === '__fav' ? favs : g === '__recent' ? recent : g ? all.filter(function (c) { return c.g === g; }) : all;
+  var list = g === '__fav' ? favs : g === '__recent' ? recent : g ? V.channelsFor(g, type) : all;
   // Pay-per-view channels with nothing on ("No event streaming now") or a finished event: hidden unless asked for.
   var showEmpty = V.ls.get('showEmptyEvents', false);
   var emptyN = list.filter(function (c) { return c.es === 'none' || c.es === 'ended'; }).length;
   if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !(c.es === 'none' || c.es === 'ended') || V.inList('favs', c.k); });
-  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') +
+  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
+    (type === 'live' && V.multiview && all.length > 1 ? '<a class="btn" href="#/multiview">' + V.icon('grid') + ' Multiview</a>' : '') +
     // Radio and live TV link to each other (on phones the tab bar has one Live TV tab for both).
     (type === 'live' && S.radio.length ? '<a class="btn" href="#/radio">' + V.icon('radio') + ' Radio</a>' : '') +
     (type === 'radio' && S.live.length ? '<a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</div>') +
     '<div class="live-layout"><nav class="groups" aria-label="Channel groups">' +
-    [{ v: '', l: 'All channels', n: all.length }, { v: '__fav', l: 'Favourites', n: favs.length }, { v: '__recent', l: 'Recently watched', n: recent.length }].concat(groups.map(function (x) { return { v: x.name, l: x.name, n: x.items.length }; }))
+    V.channelGroups(type)
       .map(function (x) { return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +
     '</nav><div class="ch-col">' + (emptyN ? '<label class="check small ev-toggle"><input type="checkbox" data-empty-ev' + (showEmpty ? ' checked' : '') + '><span>Show ' + V.plural(emptyN, 'event channel') + ' with nothing on</span></label>' : '') + '<div class="ch-list" data-list></div></div></div>';
   var box = V.$('.ch-list', view);
@@ -91,7 +92,7 @@ function channelsPage(view, r, type) {
       box.insertAdjacentHTML('beforeend', html);
     };
     more();
-    if (!items.length) box.innerHTML = V.empty(g === '__fav' ? 'No favourites yet' : 'No channels here', g === '__fav' ? 'Use the heart on a channel to add it.' : '');
+    if (!items.length) box.innerHTML = V.empty(g === '__fav' ? 'No favourites yet' : 'No channels here', g === '__fav' ? 'Use the heart on a channel to add it.' : g.indexOf('__my:') === 0 ? 'Add channels to this list in “Your lists”.' : '');
     box.onscroll = null;
     var io = new IntersectionObserver(function (es) { if (es[0].isIntersecting && n < items.length) { more(); io.unobserve(es[0].target); var last = box.lastElementChild; if (last) io.observe(last); } }, { rootMargin: '800px' });
     if (box.lastElementChild && n < items.length) io.observe(box.lastElementChild);
@@ -121,8 +122,8 @@ V.channelRow = function (c) {
   return '<a class="chr' + (playing ? ' on' : '') + '" href="#/channel/' + encodeURIComponent(c.k) + '" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc((c.no ? 'Channel ' + c.no + ', ' : '') + c.n + (nn.now ? ', now: ' + nn.now.t : '')) + '">' +
     '<span class="chr-no num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art chr-logo') +
     '<span class="chr-main"><span class="chr-name truncate">' + V.esc(c.n) + (c.cu ? ' ' + V.icon('archive', 'tiny') : '') + '</span>' +
-    (nn.now ? '<span class="chr-now truncate">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event on now' : c.g) + '</span>') + '</span>' +
-    '<span class="chr-next dim truncate">' + (nn.next ? V.fmtClock(nn.next.s) + ' ' + V.esc(nn.next.t) : '') + '</span>' +
+    (c.lk && !V.parental.open(c) ? '<span class="chr-now dim truncate">' + V.icon('lock', 'tiny') + ' Locked</span>' : nn.now ? '<span class="chr-now truncate' + (nn.now.ph ? ' ph' : '') + '">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event on now' : c.g) + '</span>') + '</span>' +
+    '<span class="chr-next dim truncate">' + (nn.next && !nn.next.ph ? V.fmtClock(nn.next.s) + ' ' + V.esc(nn.next.t) : '') + '</span>' +
     '<button class="icon-btn" data-fav="' + V.esc(c.k) + '" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button></a>';
 };
 /** A pay-per-view channel's event: "LIVE · Chelsea vs. Man Utd", "Ended · …". */
@@ -143,7 +144,7 @@ V.route('channel', function (view, r) {
   view.innerHTML = '<div class="ch-page"><header class="ch-head">' + V.art(c.i, c.n, 'art ch-big') + '<div><div class="dim">' + V.esc(c.g) + (c.no ? ' · Channel ' + c.no : '') + (canCU ? ' · ' + V.icon('archive', 'tiny') + ' Catch-up ' + ((c.cu && c.cu.days) || 7) + ' days' : '') + '</div><h1>' + V.esc(c.n) + '</h1>' +
     (nn.now ? '<p><b>Now:</b> ' + V.esc(nn.now.t) + ' <span class="dim">' + V.fmtClock(nn.now.s) + '–' + V.fmtClock(nn.now.e) + '</span></p>' : '') +
     '<div class="acts"><button class="btn primary lg" data-a="play">' + V.icon('play') + ' Watch</button>' + (canCU && nn.now ? '<button class="btn lg" data-a="start">' + V.icon('restart') + ' Start over</button>' : '') +
-    '<button class="icon-btn lg" data-a="fav" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button><button class="icon-btn lg" data-a="share" aria-label="Send to someone">' + V.icon('send') + '</button>' + (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" aria-label="Watch together">' + V.icon('party') + '</button>' : '') + '</div></div></header>' +
+    '<button class="icon-btn lg" data-a="fav" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button><button class="icon-btn lg" data-a="mylist" aria-label="Add to one of your lists">' + V.icon('list') + '</button><button class="icon-btn lg" data-a="share" aria-label="Send to someone">' + V.icon('send') + '</button>' + (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" aria-label="Watch together">' + V.icon('party') + '</button>' : '') + '</div></div></header>' +
     '<div class="sched"><div class="spinner"></div></div></div>';
   var acts = function (e) {
     var b = e.target.closest('[data-a]');
@@ -153,6 +154,7 @@ V.route('channel', function (view, r) {
     else if (a === 'start') V.playCatchup(c, nn.now, 0);
     else if (a === 'fav') V.toggle('favs', c.k).then(function (on) { b.innerHTML = V.icon(on ? 'heartf' : 'heart'); b.setAttribute('aria-pressed', on); });
     else if (a === 'share') V.shareDialog(c);
+    else if (a === 'mylist') V.addToChannelList(c, b);
     else if (a === 'party') V.party.startDialog(c);
   };
   view.addEventListener('click', acts);
@@ -208,7 +210,8 @@ V.checkReminders = function () {
     var c = V.entry(r.k);
     if (!c) return;
     var msg = '“' + r.t + '” is starting on ' + c.n;
-    V.toast(msg, { action: { label: 'Watch', fn: function () { V.play(c); } }, ms: 20000 });
+    if (V.pref('reminderAction') === 'switch' && V.reminderSwitch && !document.hidden) V.reminderSwitch(c, r);
+    else V.toast(msg, { action: { label: 'Watch', fn: function () { V.play(c); } }, ms: 20000 });
     try { if (window.Notification && Notification.permission === 'granted' && document.hidden) new Notification(msg); } catch (e) {}
   });
   var keep = S.data.reminders.filter(function (r) { return r.e > now; });

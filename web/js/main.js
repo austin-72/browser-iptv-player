@@ -46,6 +46,7 @@ V._enterApp = function () {
     if (!location.hash || location.hash === '#' || location.hash === '#/') location.replace('#/home');
     V.router.stack = [];
     V.router.render();
+    if (V.startupPlay) V.startupPlay();
     // Episodes in your progress/history that aren't loaded yet (Xtream series): fetch, then re-draw the rows they belong in.
     // A new profile with nothing watched yet: ask what it likes (once).
     if (!S.data.prefs.onboarded && !S.data.history.length && !Object.keys(S.data.ratings).length && !S.profile.kids) setTimeout(V.onboard, 1200);

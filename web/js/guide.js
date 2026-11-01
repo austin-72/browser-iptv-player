@@ -4,7 +4,8 @@ V.route('guide', function (view, r) {
   var PX = V.device.touch && window.innerWidth < 700 ? 4 : 6; // pixels per minute
   var ROW = 64;
   var dayOff = parseInt(r.q.get('d') || '0', 10) || 0;
-  var g = r.q.get('g') || V.ls.get('guidegroup') || '';
+  var g = r.q.get('g') || V.startGroup('guide', V.ls.get('guidegroup')) || '';
+  var colours = V.pref('guideColours') !== false;
   var onlyEpg = V.ls.get('guideOnlyEpg', true);
   var maxPast = Math.max(0, Math.min(7, S.live.reduce(function (m, c) { return c.cu ? Math.max(m, (c.cu.days || 7)) : m; }, 0)));
   var day0 = new Date(); day0.setHours(0, 0, 0, 0);
@@ -15,15 +16,17 @@ V.route('guide', function (view, r) {
   // of the guide (they're still on the Live TV page). Favourites always show.
   var want = (S.profile && S.profile.langs && S.profile.langs.length ? S.profile.langs : (S.settings.defaultLangs || []));
   var langOk = function (c) { if (!want.length || V.inList('favs', c.k)) return true; return (c.lg || []).some(function (l) { return want.indexOf(l) >= 0; }); };
-  var chans = (g === '__fav' ? S.live.filter(function (c) { return V.inList('favs', c.k); }) : g ? S.live.filter(function (c) { return c.g === g; }) : S.live).filter(function (c) { return (!onlyEpg || c.E) && langOk(c); });
+  var mine = g === '__fav' || g.indexOf('__my:') === 0;
+  var chans = (g ? V.channelsFor(g, 'live') : S.live).filter(function (c) { return (!onlyEpg || c.E) && (mine || langOk(c)); });
   var dayOpts = [];
   for (var d = -maxPast; d <= 7; d++) dayOpts.push('<option value="' + d + '"' + (d === dayOff ? ' selected' : '') + '>' + V.fmtDay(day0.getTime() + d * 86400e3 + 3600e3) + '</option>');
   view.innerHTML = V.pageHead('TV guide', '<div class="page-tools">' +
     '<select class="input" data-day aria-label="Day">' + dayOpts.join('') + '</select>' +
-    '<select class="input" data-grp aria-label="Group"><option value="">All channels</option><option value="__fav"' + (g === '__fav' ? ' selected' : '') + '>Favourites</option>' + groups.map(function (x) { return '<option' + (x.name === g ? ' selected' : '') + '>' + V.esc(x.name) + '</option>'; }).join('') + '</select>' +
+    '<select class="input" data-grp aria-label="Group">' + V.channelGroups('live', { recent: false, empty: true }).map(function (x) { return '<option value="' + V.esc(x.v) + '"' + (x.v === g ? ' selected' : '') + '>' + V.esc(x.l) + '</option>'; }).join('') + '</select>' +
     '<label class="check"><input type="checkbox" data-only' + (onlyEpg ? ' checked' : '') + '><span>Only with listings</span></label>' +
     '<button class="btn" data-now>' + V.icon('clock') + ' Now</button>' +
-    '<form class="inline" data-sf><input class="input" type="search" placeholder="Search listings" aria-label="Search listings" data-sq><button class="btn" aria-label="Search">' + V.icon('search') + '</button></form></div>') +
+    '<form class="inline" data-sf><input class="input" type="search" placeholder="Search listings" aria-label="Search listings" data-sq><button class="btn" aria-label="Search">' + V.icon('search') + '</button></form>' +
+    '<a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a></div>') + V.guideLegend(colours) +
     '<div class="guide" tabindex="-1"><div class="g-corner">' + V.esc(V.fmtDay(start + 3600e3)) + '</div><div class="g-times"></div><div class="g-chans"></div><div class="g-body"><div class="g-canvas"></div><div class="g-nowline"></div></div></div>';
   if (!chans.length) { V.$('.guide', view).outerHTML = V.empty('No guide listings', S.live.length ? 'None of these channels have TV listings. Untick “Only with listings” to see them anyway.' : 'There are no live channels.'); bindTools(); return; }
   var body = V.$('.g-body', view), canvas = V.$('.g-canvas', view), times = V.$('.g-times', view), side = V.$('.g-chans', view), nowline = V.$('.g-nowline', view);
@@ -51,11 +54,11 @@ V.route('guide', function (view, r) {
       need.forEach(function (i) {
         var c = chans[i];
         var list = res[c.k] || [];
-        if (!list.length) html += '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">No listings</span></div>';
+        if (!list.length) html += '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">' + (V.parental && !V.parental.open(c) ? V.icon('lock') + ' Locked' : 'No listings') + '</span></div>';
         list.forEach(function (p) {
           var l = Math.max(0, px(p.s)), rr = Math.min(width, px(p.e));
           if (rr - l < 2) return;
-          var cls = p.e <= now ? (V.catchup.canPlay(c, p) ? 'past arch' : 'past') : p.s <= now ? 'now' : '';
+          var cls = (p.e <= now ? (V.catchup.canPlay(c, p) ? 'past arch' : 'past') : p.s <= now ? 'now' : '') + (p.ph ? ' ph' : colours ? ' k-' + (V.progKind(p, c) || 'none') : '');
           var rem = V.hasReminder(c, p);
           html += '<button class="gp ' + cls + '" style="top:' + i * ROW + 'px;left:' + l + 'px;width:' + (rr - l - 2) + 'px" data-k="' + V.esc(c.k) + '" data-s="' + p.s + '" title="' + V.esc(p.t + ' · ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e)) + '"><b class="truncate">' + (rem ? V.icon('bellf', 'tiny') : '') + V.esc(p.t) + '</b><small class="truncate">' + V.fmtClock(p.s) + (p.st ? ' · ' + V.esc(p.st) : '') + '</small></button>';
         });
@@ -124,6 +127,8 @@ V.route('guide', function (view, r) {
     V.$('[data-grp]', view).onchange = function (e) { V.ls.set('guidegroup', e.target.value); go('g', e.target.value); };
     V.$('[data-only]', view).onchange = function (e) { V.ls.set('guideOnlyEpg', e.target.checked); V.router.refresh(); };
     V.$('[data-now]', view).onclick = function () { if (dayOff) go('d', ''); else scrollNow(); };
+    var lc = V.$('[data-colours]', view);
+    if (lc) lc.onchange = function () { V.setPref('guideColours', lc.checked); V.router.refresh(); };
     V.$('[data-sf]', view).onsubmit = function (e) { e.preventDefault(); var q = V.$('[data-sq]', view).value.trim(); if (q) V.programmeSearch(q); };
   }
   bindTools();

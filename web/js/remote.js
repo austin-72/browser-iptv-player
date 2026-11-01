@@ -74,14 +74,14 @@ function remotePad(view, conn) {
     '<div class="rm-now"><div class="rm-art"></div><div class="rm-info"><div class="rm-t">Connecting…</div><div class="rm-s dim"></div></div></div>' +
     '<div class="rm-seek" hidden><span class="num rm-t1"></span><input type="range" min="0" max="100" value="0" data-seek aria-label="Position"><span class="num rm-t2"></span></div>' +
     '<div class="rm-main">' +
-    '<button class="rm-b" data-c="skip" data-d="-10" aria-label="Back 10 seconds">' + V.icon('rw') + '</button>' +
+    '<button class="rm-b" data-c="skip" data-d="-' + V.skipLen('back') + '" aria-label="Back ' + V.skipLen('back') + ' seconds">' + V.skipIcon('back') + '</button>' +
     '<button class="rm-b big" data-c="toggle" aria-label="Play or pause">' + V.icon('play') + '</button>' +
-    '<button class="rm-b" data-c="skip" data-d="30" aria-label="Forward 30 seconds">' + V.icon('ff') + '</button></div>' +
+    '<button class="rm-b" data-c="skip" data-d="' + V.skipLen('fwd') + '" aria-label="Forward ' + V.skipLen('fwd') + ' seconds">' + V.skipIcon('fwd') + '</button></div>' +
     '<div class="rm-row rm-live" hidden><button class="btn" data-c="zap" data-dir="-1">' + V.icon('up') + ' Channel up</button><button class="btn" data-c="zap" data-dir="1">' + V.icon('down') + ' Channel down</button><button class="btn" data-c="live">Go live</button><button class="btn" data-c="restart">' + V.icon('restart') + ' Start over</button></div>' +
     '<div class="rm-row"><button class="btn" data-c="next" hidden>' + V.icon('skipnext') + ' Next episode</button><button class="btn" data-c="subs">' + V.icon('cc') + ' Subtitles</button><button class="btn" data-c="audio">Audio</button><button class="btn" data-sleep>' + V.icon('moon') + ' Sleep timer</button><button class="btn danger" data-c="stop">Stop</button></div>' +
     '<div class="rm-vol"><button class="icon-btn" data-c="mute" aria-label="Mute">' + V.icon('vol') + '</button><input type="range" min="0" max="100" value="100" data-vol aria-label="Volume"></div>' +
     '<div class="rm-msg" hidden></div>' +
-    '<section class="rm-ch"><div class="inline"><input class="input" type="search" data-chq placeholder="Find a channel or type its number"><button class="btn" data-go>Go</button></div><div class="rm-chl"></div></section></div>';
+    '<section class="rm-ch"><div class="inline"><input class="input" type="search" data-chq placeholder="Find a channel or type its number"><button class="btn" data-go>Go</button></div><div class="chips rm-grps" role="group" aria-label="Channel group"></div><div class="rm-chl"></div></section></div>';
   var $ = function (q) { return V.$(q, view); };
   var draw = function () {
     if (!st) return;
@@ -128,6 +128,8 @@ function remotePad(view, conn) {
       drawTarget();
       return;
     }
+    var rg = e.target.closest('[data-rmgrp]');
+    if (rg) { V.ls.set('rm.grp', rg.dataset.rmgrp); chList(''); return; }
     var ch = e.target.closest('[data-k]');
     if (ch) { cmd('play', { k: ch.dataset.k }); return; }
     if (e.target.closest('[data-go]')) goCh();
@@ -135,7 +137,11 @@ function remotePad(view, conn) {
   var goCh = function () { var q = $('[data-chq]').value.trim(); if (/^\d+$/.test(q)) cmd('channel', { n: +q }); };
   $('[data-chq]').addEventListener('keydown', function (e) { if (e.key === 'Enter') goCh(); });
   var chList = function (q) {
-    var items = q ? V.search.find(q, { types: ['live', 'radio'], limit: 60 }) : V.recentChannels().concat(S.data.favs.map(V.entry).filter(Boolean)).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).slice(0, 30);
+    var grp = V.ls.get('rm.grp', '');
+    var items = q ? V.search.find(q, { types: ['live', 'radio'], limit: 60 }) : grp ? V.channelsFor(grp, 'live').slice(0, 200) : V.recentChannels().concat(V.favChannels ? V.favChannels('any') : S.data.favs.map(V.entry).filter(Boolean)).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).slice(0, 30);
+    // Your groups as chips: recent & favourites, then your own lists.
+    var chips = V.$('.rm-grps');
+    if (chips && V.myLists) chips.innerHTML = [{ v: '', l: 'Recent & favourites' }, { v: '__fav', l: 'Favourites' }].concat(V.myLists().map(function (l) { return { v: '__my:' + l.id, l: l.name }; })).map(function (x) { return '<button class="chip sm' + (x.v === grp ? ' on' : '') + '" data-rmgrp="' + V.esc(x.v) + '" aria-pressed="' + (x.v === grp) + '">' + V.esc(x.l) + '</button>'; }).join('');
     $('.rm-chl').innerHTML = items.map(function (c) { var nn = V.epg.nowNext(c); return '<button class="side-ch" data-k="' + V.esc(c.k) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="sc-t"><span class="truncate">' + V.esc(c.n) + '</span><small class="truncate dim">' + V.esc(nn.now ? nn.now.t : c.ev || c.g) + '</small></span></button>'; }).join('') || '<p class="dim">Favourite and recently watched channels show up here.</p>';
   };
   chList('');

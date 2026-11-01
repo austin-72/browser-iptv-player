@@ -47,6 +47,7 @@ V.route('title', function (view, r) {
     if (isShow) {
       var rp = V.resumePoint(it, eps || []);
       html += '<button class="btn primary lg" data-a="play"' + (rp.ep ? '' : ' disabled') + '>' + V.icon('play') + ' ' + V.esc(rp.label) + '</button>';
+      if (V.shuffleShow && eps && eps.length > 1) html += '<button class="btn lg" data-a="shuffle">' + V.icon('shuffle') + ' Shuffle</button>';
     } else {
       var resume = p && !p.w && p.p > 20;
       html += '<button class="btn primary lg" data-a="play">' + V.icon('play') + ' ' + (resume ? 'Resume' : 'Play') + '</button>';
@@ -70,6 +71,7 @@ V.route('title', function (view, r) {
     var a = b.dataset.a;
     if (a === 'play') V.play(it);
     else if (a === 'restart') V.play(it, { startAt: 0 });
+    else if (a === 'shuffle') V.shuffleShow(it);
     else if (a === 'list') V.toggle('list', it.k).then(function (on) { b.innerHTML = V.icon(on ? 'check' : 'plus'); b.setAttribute('aria-pressed', on); V.toast(on ? 'Added to My List' : 'Removed from My List'); });
     else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var cur = V.ratingOf(it.k); V.rate(it.k, cur === v ? 0 : v); drawActs(it._eps); if (cur !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
     else if (a === 'share') V.shareDialog(it);

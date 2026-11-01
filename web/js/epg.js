@@ -24,15 +24,33 @@ V.epg = (function () {
   setInterval(function () { if (S.profile && !document.hidden && Date.now() - loadedAt > 20 * 60e3) load(); }, 60e3);
   document.addEventListener('visibilitychange', function () { if (!document.hidden && S.profile && Date.now() - loadedAt > 10 * 60e3) load(); });
 
+  /**
+   * Placeholder listings for a channel with no guide data (Admin → TV guides): hour-long blocks named after the
+   * channel (or its event), so the guide isn't blank. Made on the spot, never stored. Marked ph: 1.
+   */
+  var phOn = function (it) { return it && !it.E && !it.lk && (it.t === 'live' || it.t === 'radio') && !(S.settings && S.settings.epgPlaceholders === false); };
+  function placeholders(it, from, to) {
+    var out = [];
+    var t = Math.floor(from / 3600e3) * 3600e3;
+    var title = it.ev || it.n;
+    for (; t < to; t += 3600e3) out.push({ s: t, e: t + 3600e3, t: title, ph: 1 });
+    return out;
+  }
   function listFor(it) {
     if (!it) return null;
     var k = it.t === 'catchup' ? it.catchupOf : it.k;
-    return now[k] ? shift(V.entry(k) || it, now[k]) : null;
+    if (now[k]) return shift(V.entry(k) || it, now[k]);
+    var c = V.entry(k) || it;
+    if (phOn(c)) { var t = Date.now(); return placeholders(c, t - 3 * 3600e3, t + 8 * 3600e3); }
+    return null;
   }
 
   return {
     load: load,
     has: function (it) { return !!(it && (it.E || now[it.k])); },
+    placeholders: function (it, from, to) { return phOn(it) ? placeholders(it, from, to) : []; },
+    /** Listings sent separately (a locked channel's, once the parental PIN is entered). */
+    inject: function (map) { Object.keys(map || {}).forEach(function (k) { now[k] = map[k]; ranges.delete(k); }); },
     nowNext: function (it, t) {
       t = t || Date.now();
       var list = listFor(it);
@@ -57,10 +75,14 @@ V.epg = (function () {
     },
     /** Programmes for many channels between two times. Resolves to {key: [programmes]}. */
     range: function (keys, from, to) {
-      var need = keys.filter(function (k) { var r = ranges.get(k); return !(r && r.from <= from && r.to >= to); });
+      var need = keys.filter(function (k) { var r = ranges.get(k); var it = V.entry(k); return !(r && r.from <= from && r.to >= to) && !(it && !it.E && !now[k]); });
       var done = function () {
         var out = {};
-        keys.forEach(function (k) { var r = ranges.get(k); var it = V.entry(k); out[k] = r ? shift(it, r.list.filter(function (p) { return p.e > from && p.s < to; })) : (listFor(it) || []).filter(function (p) { return p.e > from && p.s < to; }); });
+        keys.forEach(function (k) {
+          var r = ranges.get(k); var it = V.entry(k);
+          var l = r ? shift(it, r.list.filter(function (p) { return p.e > from && p.s < to; })) : (listFor(it) || []).filter(function (p) { return p.e > from && p.s < to; });
+          out[k] = !l.length || (l[0] && l[0].ph) ? (phOn(it) ? placeholders(it, from, to) : []) : l;
+        });
         return out;
       };
       if (!need.length) return Promise.resolve(done());

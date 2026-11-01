@@ -27,6 +27,7 @@ const { Readable } = require('stream');
 const cfg = require('./lib/config');
 const { JsonFile } = require('./lib/store');
 const { Epg } = require('./lib/epg');
+const { Overrides } = require('./lib/overrides');
 const { Media } = require('./lib/media');
 const { Proxy } = require('./lib/proxy');
 const { Reach } = require('./lib/reach');
@@ -43,6 +44,7 @@ const { Tmdb } = require('./lib/tmdb');
 const { Recs } = require('./lib/recs');
 const { Markers } = require('./lib/markers');
 const { ConnTest } = require('./lib/conntest');
+const { listUsage: usageOf } = require('./lib/usage');
 const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
@@ -97,7 +99,9 @@ const accounts = new Accounts(D, { defaultPassword });
 const userdata = new UserData(path.join(D, 'users'));
 const hub = new Hub();
 const social = new Social(D, { hub, accounts });
-const epg = new Epg(path.join(D, 'epg'));
+// The admin's channel edits, guide offsets and parental locks (Admin → Channels).
+const overrides = new Overrides(D);
+const epg = new Epg(path.join(D, 'epg'), { offsets: overrides.d.guideOffsets });
 let catalog;
 let rebuildTimer = null;
 const scheduleRebuild = (ms = 1500) => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildCatalog, ms); };
@@ -112,6 +116,7 @@ const lists = new Lists({
   },
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
+catalog.overrides = overrides;
 
 // ---- outgoing proxies: a list's own choice, else the default (Admin → Network)
 function proxyById(id) { return (settings().proxies || []).find((x) => x.id === id) || null; }
@@ -239,6 +244,8 @@ function inputOf(it, alt = -1, overrideUrl = '') {
   }
   const a = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt] : { u: it.u, h: it.h };
   const u = overrideUrl || a.u;
+  // A Stalker portal's entry: this server's own address, which asks the portal for the stream just then.
+  if (/^\/api\/proxy\/stalker\//.test(u)) return { input: loopback(u), headers: {} };
   // Playlist entries can name files on the server itself (file:// or a plain path).
   if (/^file:/i.test(u)) {
     let file = null;
@@ -357,16 +364,22 @@ function item(ctx, k) {
   const p = requireProfile(ctx);
   const it = catalog.visible(p, k);
   if (!it) throw new HttpError(404, 'That isn’t available.');
+  // Behind the parental PIN (Admin → Channels): not until this device has entered it.
+  if (overrides.hasLocks && overrides.isLocked(it, (x) => catalog.get(x)) && !overrides.allowed(ctx)) throw new HttpError(423, p.kids ? 'This is locked.' : 'This is locked. Enter the parental PIN to watch it.');
   return it;
 }
+// (Integrations add their own flags: subtitles, Trakt — see lib/routes-p5.js.)
+let p5Public = () => ({});
 function publicSettings() {
   const s = settings();
   return {
+    ...p5Public(),
     brand: s.brand, routing: s.routing, allowDownloads: s.allowDownloads !== false, allowParties: s.allowParties !== false,
     ffmpeg: media.available, tmdb: !!s.tmdbKey, version: cfg.version, defaultLangs: s.defaultLangs, showUnknownLang: s.showUnknownLang !== false,
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
     features: ['browserRoute', 'copyCodecs'],
+    epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
   };
 }
 
@@ -413,6 +426,7 @@ route('POST', '/api/profiles', async (req, res, p, q, ctx) => {
 route('POST', '/api/profiles/:id/select', async (req, res, p, q, ctx) => {
   const { pin, remember } = await readJSON(req);
   const prof = accounts.select(ctx.sess, p.id, pin === undefined ? undefined : String(pin), remember !== false);
+  p5.onSignIn(prof, ctx.sess);
   return { ok: true, profile: accounts.view(prof) };
 }, 'site');
 route('POST', '/api/profiles/leave', async (req, res, p, q, ctx) => {
@@ -722,8 +736,11 @@ route('DELETE', '/api/new-episodes/:sk', (req, res, p, q, ctx) => { const prof =
 const nowCache = new Map();
 function epgVisible(prof) {
   const f = catalog.filterFor(prof);
-  return catalog.items.filter((it) => it.epg && (it.t === 'live' || it.t === 'radio') && f.test(it));
+  const locked = overrides.hasLocks ? (it) => overrides.isLocked(it) : () => false;
+  return catalog.items.filter((it) => it.epg && (it.t === 'live' || it.t === 'radio') && f.test(it) && !locked(it));
 }
+/** A channel's own guide shift in ms (tvg-shift plus the admin's offset): the device applies it to /api/epg data. */
+const chanShift = (it) => ((it.sh || 0) + (it.eoff || 0)) * 3600e3;
 const progOut = (x) => { const o = { s: x.s, e: x.e, t: x.t }; if (x.st) o.st = x.st; if (x.d) o.d = x.d.length > 320 ? x.d.slice(0, 320) + '…' : x.d; if (x.c) o.c = x.c; if (x.ep) o.ep = x.ep; if (x.ic) o.ic = x.ic; if (x.n) o.n = 1; if (x.r) o.r = x.r; return o; };
 route('GET', '/api/epg/now', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -749,7 +766,7 @@ route('GET', '/api/epg/range', (req, res, p, q, ctx) => {
   const out = {};
   for (const k of String(q.get('keys') || '').split(',').slice(0, 400)) {
     const it = catalog.visible(prof, k);
-    if (it && it.epg) out[k] = epg.range(it.epg, from, to).map(progOut);
+    if (it && it.epg && !(overrides.hasLocks && overrides.isLocked(it) && !overrides.allowed(ctx))) out[k] = epg.range(it.epg, from, to).map(progOut);
   }
   sendJsonGz(req, res, out);
 });
@@ -760,8 +777,9 @@ route('GET', '/api/epg/search', (req, res, p, q, ctx) => {
   const now = Date.now();
   const hits = [];
   for (const it of epgVisible(prof)) {
-    for (const x of epg.range(it.epg, now - 7 * 86400e3, now + 8 * 86400e3)) {
-      if (String(x.t).toLowerCase().includes(needle) || (x.st && x.st.toLowerCase().includes(needle))) hits.push({ k: it.k, ...progOut(x) });
+    const sh = chanShift(it);
+    for (const x of epg.range(it.epg, now - 7 * 86400e3 - sh, now + 8 * 86400e3 - sh)) {
+      if (String(x.t).toLowerCase().includes(needle) || (x.st && x.st.toLowerCase().includes(needle))) { const o = progOut(x); o.s += sh; o.e += sh; hits.push({ k: it.k, ...o }); }
     }
     if (hits.length > 600) break;
   }
@@ -817,6 +835,7 @@ route('DELETE', '/api/history', (req, res, p, q, ctx) => { const prof = requireP
 // ---- playback
 function relayable(it, url) {
   if (!url) return true;
+  if (p4.relayable(it, url)) return true;
   const hosts = new Set();
   const add = (u) => { try { hosts.add(new URL(u).host); } catch {} };
   add(it.u);
@@ -862,17 +881,10 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
 /** Streams the household is watching right now from each list (direct or through the server). */
 function listUsage() {
-  const use = new Map();
-  for (const c of hub.conns) {
-    if (!c.playing || !c.playing.k) continue;
-    const it = catalog.get(c.playing.k);
-    if (!it) continue;
-    const l = srcList(it, Number.isInteger(c.playing.alt) ? c.playing.alt : -1);
-    if (!l) continue;
-    (use.get(l) || use.set(l, []).get(l)).push(c);
-  }
-  return use;
+  return usageOf(hub.conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf });
 }
+/** Filled in by feature modules (lib/routes-p2.js): watch-party connection sharing. */
+const p2Hooks = { sharedPartyOf: null, partyShareDefault: null };
 /**
  * What's inside one copy of a film or episode — { v: 'h264', a: 'ac3', pix } — as its Xtream provider describes it
  * (episodes carry it from the series details; films ask get_vod_info once, cached for a week). null when unknown.
@@ -946,9 +958,9 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
     const l = lid && lists.all().find((x) => x.id === lid);
     const url = alt >= 0 ? it.alts[alt].u : it.u;
     const limit = connLimit(it, alt);
-    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn));
+    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn && !c.tile)); // (this device's multiview tiles do count)
     let busy = limit > 0 && users.length >= limit;
-    const who = (c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, mine: c.pid === prof.id, priority: isPri(c) });
+    const who = (c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, k: c.playing.k, tile: !!c.tile, mine: c.pid === prof.id, priority: isPri(c) });
     let bump = [], locked = false;
     if (busy) {
       const need = users.length - limit + 1;
@@ -1033,7 +1045,8 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const codecs = Array.isArray(b.codecs) ? b.codecs.map(String) : ['h264'];
   const height = clampInt(b.height, 0, 2160, 0);
   const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs) || !!(height && pr && pr.height && pr.height > height);
-  const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio';
+  // (b.audioOnly: the viewer chose "sound only" for a live channel — the player's listening mode.)
+  const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio' || b.audioOnly === true;
   const seek = finite ? Math.max(0, Number(b.seek) || 0) : 0;
   // The viewer's preferred audio language picks the track, unless they chose one.
   let audioTrack = clampInt(b.audio, 0, 64, 0);
@@ -1209,7 +1222,9 @@ route('POST', '/api/party', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   if (settings().allowParties === false) throw new HttpError(403, 'Watch parties are turned off.');
   const b = await readJSON(req);
-  item(ctx, String(b.k || ''));
+  const pit = item(ctx, String(b.k || ''));
+  // Share one provider connection (through the server) when the provider's connections are limited.
+  if (typeof b.share !== 'boolean') b.share = !!(p2Hooks.partyShareDefault && p2Hooks.partyShareDefault(pit));
   return social.createParty(prof.id, b);
 });
 route('GET', '/api/party/:id', (req, res, p, q, ctx) => { requireProfile(ctx); return social.partyView(social.party(p.id)); });
@@ -1231,6 +1246,12 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   if (c && c.pid === prof.id) {
     const was = c.playing;
     c.playing = b.playing && b.playing.k ? { k: String(b.playing.k), pos: Number(b.playing.pos) || 0, at: was && was.k === String(b.playing.k) ? was.at : Date.now(), n: String(b.playing.n || '').slice(0, 200), alt: Number.isInteger(b.playing.alt) ? b.playing.alt : -1, hidden: !!b.playing.hidden } : null;
+    // Multiview: every tile uses a provider connection of its own.
+    if ('multi' in b) {
+      const old = new Map((c.multi || []).map((t) => [t.k, t.at]));
+      c.multi = Array.isArray(b.multi) ? b.multi.filter((t) => t && t.k).slice(0, 9).map((t) => ({ k: String(t.k), n: String(t.n || '').slice(0, 200), alt: Number.isInteger(t.alt) ? t.alt : -1, hidden: !!t.hidden, at: old.get(String(t.k)) || Date.now(), tile: true })) : null;
+    }
+    p5.onPresence(c); // (webhooks: playback started / stopped)
   }
   return { ok: true };
 });
@@ -1248,7 +1269,7 @@ route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
   if (b.cmd === 'takeover' && c) {
     const them = accounts.profile(c.pid) || {};
     if (them.priority && !ctx.profile.priority && c.pid !== ctx.profile.id) throw new HttpError(403, `${them.name || 'That viewer'} has priority, so their connection can’t be taken over.`);
-    hub.send(c, 'command', { cmd: 'takeover', from: ctx.profile.name, device: ctx.sess.name, priority: !!ctx.profile.priority && !them.priority });
+    hub.send(c, 'command', { cmd: 'takeover', from: ctx.profile.name, device: ctx.sess.name, priority: !!ctx.profile.priority && !them.priority, k: b.k ? String(b.k) : undefined });
     return { ok: true };
   }
   if (!canControl(ctx, c)) throw new HttpError(404, 'That device isn’t connected any more.');
@@ -1827,22 +1848,47 @@ route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
   return { ok: true, restart: true };
 });
 
+// ---- feature modules: each registers its routes here (one line each, kept apart so parallel work merges cleanly)
+// [routes:p1]
+require('./lib/routes-p1')({ route, requireProfile, readJSON, HttpError, item, inputOf, isUrl, proxy, castSign, siteOrigin });
+
+// [routes:p2]
+require('./lib/routes-p2')({ route, requireProfile, readJSON, social, item, inputOf, isUrl, proxy, srcList, connLimit, fetchAny, hooks: p2Hooks, stats });
+
+// [routes:p3]
+require('./lib/routes-p3')({ route, requireProfile, requireAdmin, readJSON, HttpError, serveFile, catalog: () => catalog, epg, lists, overrides, hub, settings, progOut, chanShift, scheduleRebuild, nowCache });
+
+// [routes:p4]
+const p4 = require('./lib/routes-p4')({
+  route, requireProfile, requireAdmin, readJSON, HttpError, catalog, lists, accounts, epg, settings, tmdb, media, proxy, castSign, inputOf, videoViaProxy,
+  connLimit, listUsage, serveFile, clientIp, userdata, Catalog, dataDir: D, ready: () => catalogReady,
+});
+
+// [routes:p5]
+// Subtitles (OpenSubtitles), Trakt, the live viewing dashboard, the speed test, API keys and webhooks.
+const p5 = require('./lib/routes-p5')({
+  route, requireProfile, requireAdmin, readJSON, D, lists, accounts, userdata, hub, tmdb, item, clientIp, listUsage, srcList, connLimit, accountAlerts, COMMANDS,
+  catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }),
+});
+p5Public = p5.publicFlags;
+
 // ---- exports for other apps (VLC, Kodi, Plex…): /k/<exportKey>/playlist.m3u and /k/<exportKey>/epg.xml
 function exportM3U(req, res, key) {
   const b = `${req.headers['x-forwarded-proto'] && cfg.trustProxy ? req.headers['x-forwarded-proto'] : secureReq(req) ? 'https' : 'http'}://${req.headers.host}/k/${key}`;
-  const items = catalog.items.filter((it) => it.u && it.t !== 'show' && !it.adult).map((it) => ({
-    name: it.n, url: it.loc ? `${b}/file/${it.loc.list}/${it.loc.id}` : it.u, tvgId: it.epg ? it.k : '', tvgName: it.n, logo: it.logo, group: it.g, chno: it.num || '', headers: it.h || {}, type: it.t === 'episode' ? 'series' : it.t,
+  const items = catalog.items.filter((it) => it.u && it.t !== 'show' && !it.adult && p4.exportable(it)).map((it) => ({
+    name: it.n, url: it.loc ? `${b}/file/${it.loc.list}/${it.loc.id}` : it.u, tvgId: it.epg ? it.k : '', tvgName: it.n, logo: it.logo && it.logo.startsWith('/api/channel-logo/') ? `${b}/logo/${it.logo.slice(18)}` : it.logo, group: it.g, chno: it.num || '', headers: it.h || {}, type: it.t === 'episode' ? 'series' : it.t,
   }));
   sendText(res, 200, P.generate(items, `${b}/epg.xml`), 'audio/x-mpegurl; charset=utf-8', { 'Content-Disposition': 'inline; filename="playlist.m3u"' });
 }
 function exportXmltv(req, res) {
   const now = Date.now();
   const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="browser-iptv-player">'];
-  const live = catalog.items.filter((it) => it.epg && !it.adult);
+  const live = catalog.items.filter((it) => it.epg && !it.adult && p4.exportable(it));
   for (const it of live) out.push(`<channel id="${xmlEsc(it.k)}"><display-name>${xmlEsc(it.n)}</display-name>${it.logo ? `<icon src="${xmlEsc(it.logo)}"/>` : ''}</channel>`);
   for (const it of live) {
-    for (const x of epg.range(it.epg, now - 2 * 3600e3, now + settings().epgDays * 86400e3)) {
-      let s = `<programme start="${fmtTime(x.s)}" stop="${fmtTime(x.e)}" channel="${xmlEsc(it.k)}"><title>${xmlEsc(x.t)}</title>`;
+    const sh = chanShift(it);
+    for (const x of epg.range(it.epg, now - 2 * 3600e3 - sh, now + settings().epgDays * 86400e3 - sh)) {
+      let s = `<programme start="${fmtTime(x.s + sh)}" stop="${fmtTime(x.e + sh)}" channel="${xmlEsc(it.k)}"><title>${xmlEsc(x.t)}</title>`;
       if (x.st) s += `<sub-title>${xmlEsc(x.st)}</sub-title>`;
       if (x.d) s += `<desc>${xmlEsc(x.d)}</desc>`;
       out.push(s + '</programme>');
@@ -1930,18 +1976,25 @@ async function handle(req, res) {
     }
 
     // Exports with the access key.
-    const km = pathname.match(/^\/k\/([a-f0-9]+)\/(playlist\.m3u|epg\.xml|file\/([^/]+)\/([^/]+))$/);
+    const km = pathname.match(/^\/k\/([a-f0-9]+)\/(playlist\.m3u|epg\.xml|file\/([^/]+)\/([^/]+)|logo\/([a-f0-9]{20}\.(?:png|jpg|webp)))$/);
     if (km) {
       if (!crypto.timingSafeEqual(Buffer.from(km[1].padEnd(24).slice(0, 24)), Buffer.from(String(settings().exportKey).padEnd(24).slice(0, 24))) || km[1] !== settings().exportKey) throw new HttpError(401, 'Wrong access key');
       if (km[2] === 'playlist.m3u') return exportM3U(req, res, km[1]);
       if (km[2] === 'epg.xml') return exportXmltv(req, res);
+      if (km[5]) { const lf = overrides.logoPath(km[5]); if (!lf) throw new HttpError(404, 'Not found'); return serveFile(req, res, lf, { cache: 'max-age=86400' }); }
       const li = lists.libraryItem(km[3], km[4]);
       if (!li) throw new HttpError(404, 'Not found');
       return serveFile(req, res, li.path);
     }
 
+    // Other apps: Xtream Codes logins and the HDHomeRun tuner (off unless the admin turned them on).
+    if (await p4.handle(req, res, pathname, u.searchParams)) return;
+
     const hm = pathname.match(/^\/h\/([A-Za-z0-9_-]{20,})$/);
     if (hm && req.method === 'GET') return handoffLanding(req, res, hm[1]);
+
+    // The automation API (Home Assistant, scripts): API keys instead of cookies, so no CSRF header is needed.
+    if (pathname.startsWith('/api/v1/')) { await p5.handleApi(req, res, pathname, u.searchParams); return; }
 
     ctx.sess = accounts.session(req);
     if (ctx.sess && ctx.sess.profileId) ctx.profile = accounts.profile(ctx.sess.profileId);

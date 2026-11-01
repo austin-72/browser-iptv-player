@@ -26,12 +26,13 @@ You run one small server at home and add your playlists or provider accounts onc
 Most IPTV players are an app you install and set up again on every device. Media servers such as Jellyfin and Plex are built around your own files, with IPTV added on the side. This project is built for a household sharing one or more IPTV subscriptions:
 
 - **Nothing to install on any device.** Any modern browser works, including smart-TV browsers (2015 TVs onward) and phones. You can install it as an app from the browser if you like, and sign a TV in by scanning a code with your phone.
-- **Set it up once for everyone.** The admin adds the playlists (M3U links or files, Xtream Codes accounts, folders of your own videos) and the TV guides. Each person just picks their profile.
+- **Set it up once for everyone.** The admin adds the playlists (M3U links or files, Xtream Codes accounts, MAC portals, Jellyfin/Emby/Plex libraries, folders of your own videos) and the TV guides. Each person just picks their profile.
 - **Films and series that look like a streaming service.** Posters, plots, cast, seasons and episodes, Continue watching, My List, recommendations and "Because you watched…". The full Xtream Codes film and series catalogue is browsable, not just live channels.
 - **Several providers merged into one tidy catalogue.** Duplicates are combined, and the extra copies become automatic backups. Provider junk like `|EN| ★ Title (2023) [MULTI-SUB] 4K` is cleaned up to "Title (2023)", and a series spread across two providers gets every season from both.
 - **Video goes straight from the provider to the viewer whenever possible.** Your server doesn't carry the stream, so a small box can serve a whole house. When a browser can't play a stream as it is, the server (or the browser itself) converts it automatically.
 - **It knows your provider's connection limit.** It shows who's using each connection, picks a copy on a provider with a free one, lets you take a connection over, and gives **priority profiles** first claim when there aren't enough to go round.
-- **Made for households.** Profiles with optional PINs and age limits, Kids profiles, messages between profiles, watch parties, shared lists, and a phone that works as a remote for the TV.
+- **Made for households.** Profiles with optional PINs and age limits, Kids profiles, parental locks, messages between profiles, watch parties that share one provider connection, multiview, and a phone that works as a remote for the TV.
+- **Works with the apps you already have.** Each profile can get an Xtream Codes login for TiviMate or IPTV Smarters, and Plex, Jellyfin and Emby can add it as a TV tuner, all using the same cleaned-up, merged catalogue.
 - **Free and open source** (MIT). It needs no npm packages; you only need Node.js, plus ffmpeg for the conversion features.
 
 ### How it compares
@@ -45,7 +46,10 @@ Most IPTV players are an app you install and set up again on every device. Media
 | Video straight from provider to viewer | ✅ when possible | ✅ | ❌ (usually through the server) |
 | Knows provider connection limits, takeover, priority | ✅ | ❌ | ❌ |
 | Profiles, PINs, kids limits | ✅ | Varies | ✅ |
+| Multiview (several channels at once) | ✅ up to 9 | TiviMate Premium | ❌ |
 | Watch parties, messages, phone remote | ✅ | ❌ | Jellyfin: SyncPlay watch parties |
+| Use it from other apps (Xtream login, HDHomeRun tuner) | ✅ | — | — |
+| Recording (DVR) | ❌ not yet | TiviMate Premium, IPTV Smarters | ✅ |
 | Price | Free, open source | TiviMate: paid Premium for multiple playlists, catch-up and recording | Jellyfin free · Plex: free tier and paid Plex Pass; its Live TV is built around antenna tuners |
 
 <sub>Based on each project's own documentation as of late 2026. Other apps change, so check theirs if a feature matters to you.</sub>
@@ -64,12 +68,16 @@ Most IPTV players are an app you install and set up again on every device. Media
 <td width="50%"><img src="docs/screenshots/movies.jpg" alt="The Movies page with category, year, rating and length filters"><br><b>Browse and filter</b> by category, genre, decade, rating and length.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/screenshots/guide.jpg" alt="A TV guide grid with channels and programmes"><br><b>TV guide:</b> a grid with now and next, catch-up, reminders and guide search.</td>
+<td width="50%"><img src="docs/screenshots/guide.jpg" alt="A colour-coded TV guide grid with channels and programmes"><br><b>TV guide:</b> a colour-coded grid with now and next, catch-up, reminders and guide search.</td>
 <td width="50%"><img src="docs/screenshots/player-live.jpg" alt="A live channel playing with the channel list open beside it"><br><b>Live TV:</b> zap with arrow keys or the channel list, with what's on now.</td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/search.jpg" alt="Search results for harbor across titles, episodes and TV"><br><b>One search</b> across titles, episodes, channels and the guide. It's typo-tolerant and also understands people, genres and decades.</td>
 <td width="50%"><img src="docs/screenshots/messages.jpg" alt="Messages between profiles with a shared film card"><br><b>Messages</b> between profiles: share a title, react, or start a watch party.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/multiview.jpg" alt="Four live channels playing at once in a 2 by 2 grid"><br><b>Multiview:</b> up to 9 live channels at once; sound from the one you pick.</td>
+<td width="50%"><img src="docs/screenshots/onlater.jpg" alt="On later: upcoming sport grouped by competition, with reminder bells"><br><b>On later:</b> the films and sport coming up in the next two days, with one-tap reminders.</td>
 </tr>
 </table>
 
@@ -142,6 +150,11 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Subtitles and audio tracks:** built-in or from the file, with adjustable style. Subtitles can be set to "only when the audio isn't in my language".
 - Speed 0.25–3×, frame step, seek-bar thumbnails, picture-in-picture, a mini player while browsing, bookmarks with notes, a sleep timer and *Are you still watching?*.
 - **Live TV:** channel numbers, zapping with arrow keys or channel buttons, previous channel, a channel list, catch-up and timeshift.
+- **Rewind and pause live TV** from what your device has already loaded (up to 30 minutes, nothing stored on the server), with *Go live* to jump back.
+- **Multiview:** up to 9 live channels at once (2 on a phone) in a grid or "one big" layout, with sound from the one you pick. Each tile counts as a provider connection, so busy-provider and priority rules still apply.
+- **Audio sync** in either direction: when the sound is early it's held back; when it's late the *picture* is held back. Remembered per channel.
+- **Sound only** for live channels (radio-style, far less data), **Open in another app** (VLC, MX Player, Infuse, Outplayer and others, or a .m3u file), **Shuffle** for series, your own **skip lengths** (5–60 s), a bigger **buffer** for unreliable providers, opening on your **last channel**, and reminders that can **switch channel** by themselves.
+- **Subtitles from OpenSubtitles** when a film has none in your language (on demand or automatically).
 - **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay and the Remote Playback API.
 
 ### Finding something to watch
@@ -149,6 +162,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - A home page with Continue watching, Top picks, "Because you watched…", New episodes, trending in the household, On TV now, genre rows and mood buttons ("Something funny", "Edge of my seat"…). Every row can be hidden, pinned or reordered.
 - **Recommendations** blend what the profile watches and rates, what's related (from TMDB) and what the household likes. **Surprise me** picks one title, and **Pick for several of us** finds something everyone should like and nobody has seen.
 - **Search** is instant and typo-tolerant, with voice search where the browser supports it. It also understands people ("tom hanks"), genres and decades ("90s comedy").
+- **On later:** films and sport (by competition) coming up in the next two days, with one-tap reminders, plus an "On later today" row on the home page.
 - **Filters** by category, genre, decade, rating and length. A film page also shows its whole collection ("2 of 4 here") with *Watch in order*.
 - An optional free [TMDB](https://www.themoviedb.org/) key adds posters, plots, cast, certificates and similar titles. Without one it uses what your provider sends.
 
@@ -162,7 +176,10 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - Each profile keeps its own history, My List, favourites, ratings, hidden titles, home layout, theme, subtitle style and languages.
 - **Busy providers:** if someone is already using the provider's connection, it says who's watching what and offers *Take over*. Titles on several providers play from the one with a free connection.
 - **Priority viewers:** mark profiles as *Priority* in Admin → Profiles. When a provider has no free connection, a priority viewer automatically takes one from someone on a standard profile, and that person's screen says who needed it. Standard profiles can't take a connection from a priority viewer.
-- **Together:** messages with titles and reactions, shared watchlists, and **watch parties** that keep play, pause and seek in sync, with chat and emoji reactions.
+- **Together:** messages with titles and reactions, shared watchlists, and **watch parties** that keep play, pause and seek in sync, with chat and emoji reactions. A party **shares one provider connection**: the server fetches the stream once for everyone in it.
+- **Your channel lists:** each profile can put its favourites in its own order, make its own lists ("Football", "Kids' channels"), and choose which list Live TV and the guide open on.
+- **Parental locks:** lock channels or whole categories behind a PIN. The server enforces it, and Kids profiles can't unlock.
+- **Trakt:** each profile can connect its Trakt account to log what it watches and keep its watchlist and ratings in step.
 - **Play on another device:** send what you're watching to any signed-in screen, or use your phone as a remote. The remote has play/pause, seek, volume, subtitles, audio, channels and a sleep timer. You can also choose *Pick things to play here* on a phone so its Play buttons start on the TV.
 
 ### Phones, tablets and TVs
@@ -181,17 +198,23 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 
 ### For the admin
 
-![Admin → Lists with two provider accounts, their expiry dates and connection limits](docs/screenshots/admin-lists.jpg)
+![Admin → Channels: the channel editor with search, filters, and an Edit button on each channel](docs/screenshots/admin-channels.jpg)
 
 - **Lists:** M3U/M3U8 links or uploads (gzip, any text encoding), Xtream Codes (live, films and series, with an M3U fallback), and folders of video files on the server. Lists are merged in the order you choose and refresh automatically.
 - **Provider accounts:** expiry, connections allowed and in use, with a warning two weeks before an account runs out.
 - **How many streams at once?** The pulse button on a list tests the provider's real limit for live TV, series and films (up to 6 each). It finds where the provider refuses another connection or cuts an older one off, and uses that result from then on.
+- **More kinds of lists:** MAC portals (Stalker/Ministra), and Jellyfin, Emby or Plex libraries, whose films and series play straight from the media server.
+- **Channel editor** (Admin → Channels): rename, renumber, re-logo, recategorise, reorder, hide and lock channels, singly or in bulk; pick a channel's guide by hand and shift guide times; channels with no listings get placeholder blocks. Changes survive list refreshes.
+- **Your own 24/7 channels** (Admin → My channels) made from a category, genre, collection or titles you pick, with a guide. They play with the normal player, so there's no extra work for the server.
 - **Clean-up rules:** category rename, merge and hide rules, language detection from tags and prefixes (`EN|`, `[FR]`, `(DE)`), and fixes for wrong posters ("Wrong poster or details?" on any title fixes it for everyone).
-- **Overview and statistics:** who's watching what, server conversions, playback routes used, and time watched.
+- **Overview and statistics:** a live *Watching now* dashboard (what each device plays, how, bitrate, buffering and dropped frames, connections in use per provider), server conversions, playback routes used, and time watched. **Test my connection** checks each device's speed to the server and the provider.
 - **Playback settings:** routing (*direct first*, *always through the server*, *direct only*), transcoding limits, hardware acceleration (VAAPI, QSV, NVENC, VideoToolbox), and HTTP/SOCKS5 proxies per list.
-- **Other apps:** export the merged list and guide for VLC, TiviMate or Kodi through a secret link.
+- **Other apps:** an **Xtream Codes login per profile** for TiviMate, IPTV Smarters and other apps, an **HDHomeRun tuner** for Plex, Jellyfin and Emby, and the merged list and guide as M3U/XMLTV links.
+- **API & automations:** API keys with scopes, and signed webhooks, for Home Assistant and scripts (what's playing, play on a device, pause, change channel…).
 - **Backups:** nightly backups (kept in `data/backups`), plus one-click backup and restore of all settings and profiles.
 - **Updates without restarts:** with the app folder mounted (see `docker-compose.yml`), new web-app files are picked up and open pages reload. New server files wait until *you* restart; the server never restarts on its own unless you set `SELF_RESTART=1`.
+
+**More detail:** [Watching: player extras, multiview and watch parties](docs/watching.md) · [Channels, the guide, your lists and parental locks](docs/channels-and-guide.md) · [More lists, 24/7 channels and other apps (Xtream login, HDHomeRun)](docs/sources-and-other-apps.md) · [Subtitles, Trakt, dashboard, speed test and automations (Home Assistant)](docs/integrations.md)
 
 ---
 
@@ -282,7 +305,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 
 ## Data
 
-Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json` and `cache/`. Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
+Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json` and `cache/`. Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
 
 ## Limits
 
@@ -308,7 +331,10 @@ It's careful with them. It never opens a second connection while someone might b
 Current Chrome, Edge, Firefox and Safari on computers and phones, and smart-TV browsers (Samsung Tizen, LG webOS, Android TV, Fire TV) back to about 2015.
 
 **Can I use it with VLC, Kodi or TiviMate too?**
-Yes. Admin → Other apps gives you a secret link to the merged, cleaned-up playlist and guide.
+Yes. Turn on the Xtream Codes login in Admin → Other apps and sign TiviMate or IPTV Smarters in with a profile's login, or add it to Plex, Jellyfin or Emby as an HDHomeRun tuner. There are also plain M3U and XMLTV links for VLC and Kodi. See [using this with other apps](docs/sources-and-other-apps.md).
+
+**Can it record?**
+Not yet. You can rewind live TV on your device, use your provider's catch-up, or add it as a tuner to Plex, Jellyfin or Emby and record there.
 
 ---
 
@@ -320,8 +346,8 @@ Yes. Admin → Other apps gives you a secret link to the merged, cleaned-up play
 | Key | Action |
 |---|---|
 | Space / K | Play / pause |
-| ← / → | Back / forward 10 s (Shift: 60 s) |
-| J / L | Back / forward 10 s |
+| ← / → | Back / forward by your skip length (10 s unless you change it; Shift: 60 s) |
+| J / L | Back / forward by your skip length |
 | ↑ / ↓ | Volume (live TV: change channel) |
 | , / . | Frame step |
 | < / > | Speed |

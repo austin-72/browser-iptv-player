@@ -449,3 +449,25 @@ ol.steps code { background: var(--card2); padding: .1rem .35rem; border-radius: 
 
 /* "Wrong poster or details?" sits on the tinted hero: keep it readable there. */
 .tp-hero .linkish { color: #fff; opacity: .88; }
+
+/* Integrations (integrations.js): live viewing, speed test, Trakt code, subtitle search, API keys */
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.aw-list .aw-row { display: block; }
+.aw-stats { display: flex; flex-wrap: wrap; gap: .25rem .9rem; margin-top: .3rem; color: var(--dim); }
+.aw-h { font-weight: 700; }
+.aw-h.good { color: var(--ok); }
+.aw-h.fair { color: var(--warn); }
+.aw-h.poor { color: var(--danger); }
+.trakt-code { font: 700 2rem/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .2em; margin: .4rem 0; }
+.os-ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; max-height: 55vh; overflow: auto; }
+.os-pick { display: grid; grid-template-columns: auto 1fr; gap: .1rem .6rem; text-align: left; align-items: baseline; }
+.os-pick small { grid-column: 1 / -1; }
+.speedtest .st-res { margin: 1rem 0 .5rem; }
+.speedtest .st-verdict { font-size: 1.1rem; }
+.st-verdict .ok { color: var(--ok); } .st-verdict .warn { color: var(--warn); } .st-verdict .err { color: var(--danger); }
+.input.mono, code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.api-ref ul { padding-left: 1.1rem; }
+.api-ref code { white-space: normal; word-break: break-word; }
+.api-ref { margin-top: .8rem; }
+[data-a=newkey], [data-a=newhook] { margin: .6rem 0 1rem; }
+.int-fields { display: grid; gap: .2rem; max-width: 36rem; }

@@ -3,7 +3,7 @@ anything on the page the arrow keys can never get to. Usage: python3 test/ui/tvr
 import json, sys
 from playwright.sync_api import sync_playwright
 B = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8090'
-ROUTES = sys.argv[2:] or ['#/home', '#/live', '#/guide', '#/movies', '#/series', '#/radio', '#/mine', '#/search?q=a', '#/settings', '#/admin/overview', '#/admin/lists', '#/admin/profiles', '#/admin/security']
+ROUTES = sys.argv[2:] or ['#/home', '#/live', '#/guide', '#/movies', '#/series', '#/radio', '#/mine', '#/search?q=a', '#/settings', '#/admin/overview', '#/admin/lists', '#/admin/profiles', '#/admin/security', '#/admin/integrations', '#/admin/api']
 UA = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) Version/7.0 TV Safari/537.36 Chrome/94.0'
 GRAPH_JS = r"""
 (async (opts) => {

@@ -112,6 +112,7 @@ V.card = function (it, o) {
   if (it.cu) badges += '<span class="badge" title="Catch-up">' + V.icon('archive') + '</span>';
   if (it.cam) badges += '<span class="badge warn" title="Recorded in a cinema: poor picture and sound">CAM</span>';
   if (it.lo) badges += '<span class="badge" title="On the server">' + V.icon('server') + '</span>';
+  if (it.lk && V.parental && !V.parental.open(it)) badges += '<span class="badge" title="Locked: needs the parental PIN">' + V.icon('lock') + '</span>';
   var sub = o.sub;
   if (sub === undefined) {
     if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event on now' : it.g; }
@@ -184,6 +185,7 @@ V.itemMenu = function (anchor, it) {
       : { label: V.inList('list', u.k) ? 'Remove from My List' : 'Add to My List', icon: V.inList('list', u.k) ? 'check' : 'plus', fn: function () { V.toggle('list', u.k).then(function (on) { V.toast(on ? 'Added to My List' : 'Removed from My List'); }); } },
     { label: 'Send to someone…', icon: 'send', fn: function () { V.shareDialog(it); } },
     S.settings.allowParties ? { label: 'Watch together…', icon: 'party', fn: function () { V.party.startDialog(it); } } : null,
+    it.t === 'live' && V.multiview && S.live.length > 1 ? { label: 'Add to multiview', icon: 'grid', fn: function () { V.multiview.open(it); } } : null,
     !isCh && S.settings.allowDownloads && it.t !== 'show' ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(it); } } : null,
     V.sharedLists && V.sharedLists().length ? { label: 'Add to a shared list…', icon: 'stack', fn: function () { V.addToSharedList(u); } } : null,
     { sep: true },
@@ -197,6 +199,7 @@ V.itemMenu = function (anchor, it) {
     } } : null,
     { label: V.inList('hidden', u.k) ? 'Show it again' : 'Not interested', icon: 'eyeoff', fn: function () { V.toggle('hidden', u.k).then(function (on) { V.toast(on ? 'Hidden. You won’t be recommended this.' : 'It’ll show up again.'); V.router.refresh(); }); } },
   ];
+  if (V.itemMenuExtras) V.itemMenuExtras(items, it, isCh);
   V.menu(anchor, items, { align: 'left' });
 };
 

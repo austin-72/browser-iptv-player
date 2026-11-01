@@ -72,8 +72,9 @@ V.index = function (items) {
     var gm = groups[it.t];
     if (gm) { var g = gm.get(it.g); if (!g) gm.set(it.g, (g = [])); g.push(it); }
   }
-  S.live.sort(function (a, b) { return (a.no || 0) - (b.no || 0); });
-  S.radio.sort(function (a, b) { return (a.no || 0) - (b.no || 0); });
+  // (so: the admin's place for a channel in its category, Admin → Channels; otherwise the channel number.)
+  S.live.sort(function (a, b) { return (a.so || a.no || 0) - (b.so || b.no || 0); });
+  S.radio.sort(function (a, b) { return (a.so || a.no || 0) - (b.so || b.no || 0); });
   S.epsByShow.forEach(function (l) { l.sort(function (a, b) { return a.s - b.s || a.e - b.e; }); });
   S.groups = groups;
   S.genres = new Map();

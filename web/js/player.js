@@ -99,6 +99,7 @@ V.Player = function (host) {
     '    <button class="pbtn" data-a="next" aria-label="Next episode" title="Next episode" hidden>' + V.icon('skipnext') + '</button>' +
     '    <button class="pbtn" data-a="episodes" aria-label="Episodes" title="Episodes" hidden>' + V.icon('stack') + '</button>' +
     '    <button class="pbtn" data-a="channels" aria-label="Channels" title="Channels" hidden>' + V.icon('list') + '</button>' +
+    '    <button class="pbtn" data-a="audioonly" aria-label="Sound only" title="Sound only (picture off, less data)" hidden>' + V.icon('headphones') + '</button>' +
     '    <button class="pbtn" data-a="cc" aria-label="Subtitles and audio" title="Subtitles and audio">' + V.icon('cc') + '</button>' +
     '    <button class="pbtn" data-a="bookmark" aria-label="Bookmark this moment" title="Bookmark">' + V.icon('bookmark') + '</button>' +
     '    <button class="pbtn" data-a="gear" aria-label="Playback settings" title="Settings">' + V.icon('gear') + '</button>' +
@@ -156,10 +157,11 @@ PP.load = function (it, opts) {
   var art = V.$('.vp-art', this.host);
   art.hidden = it.t !== 'radio';
   art.innerHTML = it.t === 'radio' ? V.art(it.i, it.n, 'art-radio') + '<div class="radio-name">' + V.esc(it.n) + '</div>' : '';
+  if (V.audioOnly) V.audioOnly.onLoad(this, it, opts);
   this._msg({ spin: true, title: opts.quiet ? 'Reconnecting…' : '' });
   this._wake(true);
   // Which copy to play: one whose provider has a free connection and that this page can play directly.
-  var pickSource = !opts.quiet && opts.alt === undefined && !opts.only && !opts.force && !it.offlineUrl && it.t !== 'catchup' && S.conn !== undefined;
+  var pickSource = !opts.quiet && opts.alt === undefined && !opts.only && !opts.force && !opts.share && !it.offlineUrl && it.t !== 'catchup' && S.conn !== undefined;
   var plan, errs = [];
   // Each way of playing it in turn (direct → through the server → conversion), until one starts.
   var next = function (i) {
@@ -194,7 +196,8 @@ PP.load = function (it, opts) {
   return (pickSource ? this._sources(it, token, opts) : Promise.resolve(true)).then(function (go) {
     if (!go || token !== self.token) return;
     return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
-      plan = p;
+      // A watch party sharing one connection: the party's stream through the server first (see lib/fanout.js).
+      plan = opts.share && !opts.force && it.t !== 'catchup' ? [{ via: 'party', party: opts.share, kind: '?' }].concat(p) : p;
       return next(0);
     }, function (e) { if (token === self.token) self._failed(e); });
   });
@@ -236,7 +239,7 @@ PP._useSources = function (r, it, token, opts) {
         sub: (who.mine ? '“' + who.n + '” is playing there. ' : who.name + ' is watching “' + who.n + '” on ' + who.device + '. ') + where,
         actions: [
           { label: who.mine ? 'Move it here' : 'Take over', primary: true, fn: function () {
-            free.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover' } }).catch(function () {}); });
+            free.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover', k: b.k } }).catch(function () {}); });
             self._msg({ spin: true, title: 'Waiting for the connection…' });
             setTimeout(function () { if (token === self.token) self.load(it, Object.assign({}, opts, { busyOk: true })); }, 3500);
           } },
@@ -253,7 +256,7 @@ PP._useSources = function (r, it, token, opts) {
   if (srcs[0].bump && srcs[0].bump.length && !opts.busyOk) {
     var bump = srcs[0].bump;
     var names = bump.map(function (b) { return b.mine ? 'your ' + b.device : b.name; }).filter(function (n, i, a) { return a.indexOf(n) === i; });
-    bump.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover' } }).catch(function () {}); });
+    bump.forEach(function (b) { V.api('/api/devices/' + b.conn + '/command', { body: { cmd: 'takeover', k: b.k } }).catch(function () {}); });
     this._msg({ spin: true, title: 'Taking the connection from ' + names.join(' and ') + '…', sub: 'You have priority.' });
     return new Promise(function (res) { setTimeout(res, 3500); }).then(function () {
       if (token !== self.token) return false;
@@ -596,8 +599,15 @@ PP._attach = function (a, token, startAt) {
       if (go.kind === 'dash') go.url = self.url;
       return go;
     });
+  } else if (a.via === 'party') {
+    prep = V.api('/api/party/' + a.party + '/stream', { body: { k: it.k, alt: this.alt } }).then(function (r) {
+      if (token !== self.token) return null;
+      go.url = r.url; go.kind = r.kind;
+      return go;
+    });
   } else if (a.via === 'session') {
     var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
+    if (a.audioOnly) body.audioOnly = true;
     prep = V.api('/api/play/session', { body: body }).then(function (s) {
       if (token !== self.token) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
       self.sessionId = s.sessionId;
@@ -617,7 +627,7 @@ PP._attach = function (a, token, startAt) {
 PP._attachMedia = function (a, token, startAt, kind, url) {
   var self = this, v = this.video, it = this.it;
   var rel = Math.max(0, (startAt || 0) - this.offset - (it.startOffset || 0));
-  var bufGoal = V.pref('dataSaver') ? 15 : 30;
+  var bufGoal = V.tune ? V.tune.bufGoal(this) : V.pref('dataSaver') ? 15 : 30;
   if (kind === 'hls' && a.native) {
     v.src = url;
     if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
@@ -653,11 +663,14 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
   {
     if (window.Hls && Hls.isSupported()) {
       var q = this._quality();
-      var hls = new Hls({
+      var hcfg = {
         enableWorker: true, maxBufferLength: bufGoal, backBufferLength: 60, startPosition: this.vod && rel > 0 ? rel : -1,
         manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6, capLevelToPlayerSize: true,
         lowLatencyMode: false, abrEwmaDefaultEstimate: V.pref('dataSaver') ? 800000 : 3000000,
-      });
+      };
+      // (Buffer size and how much live TV to keep for rewinding: see tune.js.)
+      if (V.tune) V.tune.hls(hcfg, this);
+      var hls = new Hls(hcfg);
       this.hls = hls;
       var self = this;
       hls.on(Hls.Events.ERROR, function (_, d) { self._hlsError(d); });
@@ -682,10 +695,12 @@ PP._attachTs = function (url) {
   {
     if (!(window.mpegts && mpegts.getFeatureList().mseLivePlayback)) throw new Error('This browser can’t play MPEG-TS streams.');
     var self2 = this;
-    var p = mpegts.createPlayer({ type: 'mpegts', isLive: !this.vod, url: new URL(url, location.href).href }, {
+    var mcfg = {
       enableWorker: true, lazyLoad: false, autoCleanupSourceBuffer: true,
       liveBufferLatencyChasing: !this.vod, liveBufferLatencyMaxLatency: 12, liveBufferLatencyMinRemain: 3,
-    });
+    };
+    if (V.tune) V.tune.mts(mcfg, this);
+    var p = mpegts.createPlayer({ type: 'mpegts', isLive: !this.vod, url: new URL(url, location.href).href }, mcfg);
     p.on(mpegts.Events.ERROR, function (type, detail, info) { self2._fatal(new Error(self2._mtsErr(type, detail, info))); });
     p.on(mpegts.Events.LOADING_COMPLETE, function () { if (!self2.vod && self2.started) self2._fatal(new Error('The stream ended.')); });
     p.on(mpegts.Events.MEDIA_INFO, function (mi) {
@@ -719,6 +734,7 @@ PP._attachDash = function (url, rel, bufGoal, viaServer, token) {
 PP._shakaLoad = function (sp, url, rel, bufGoal, viaServer, token) {
   var it = this.it;
   var cfg = { streaming: { bufferingGoal: bufGoal, rebufferingGoal: 2, retryParameters: { maxAttempts: 4, timeout: 20000 } }, manifest: { retryParameters: { maxAttempts: 2, timeout: 20000 } } };
+  if (V.tune) V.tune.shaka(cfg, this);
   var q = this._quality();
   if (q) cfg.abr = { restrictions: { maxHeight: q } };
   if (it.dr) {
@@ -882,6 +898,7 @@ PP._afterStart = function () {
   this.el.classList.toggle('is-live', !vod);
   this._menuRefresh();
   if (this.boost !== 1) this.setBoost(this.boost, true);
+  V.emit('player-started', this);
   if (this.statsOn) this._statsTick();
   var sp = V.pref('speed');
   if (vod && sp && sp !== 1) this.video.playbackRate = sp;
@@ -922,7 +939,7 @@ PP._routeName = function (a) {
   if (!a) return '';
   if (a.via === 'direct') return a.helper ? 'helper' : (a.native || a.kind === 'native') ? 'native' : 'direct';
   if (a.via === 'browser') return S.settings && (S.settings.features || []).indexOf('browserRoute') >= 0 ? 'browser' : 'direct';
-  return { split: 'split', relay: 'relay', session: 'convert', local: 'local' }[a.via] || '';
+  return { split: 'split', relay: 'relay', party: 'relay', session: 'convert', local: 'local' }[a.via] || '';
 };
   /** Why a stream went through the server. */
 PP._routeReason = function (route) {
@@ -990,6 +1007,7 @@ PP._msg = function (m) {
 };
 
 PP._teardownMedia = function () {
+  V.emit('player-teardown', this);
   if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
   if (this.mts) { try { this.mts.pause(); this.mts.unload(); this.mts.detachMediaElement(); this.mts.destroy(); } catch (e) {} this.mts = null; }
   if (this.shaka) { var sp = this.shaka; this.shaka = null; this._shakaGone = sp.destroy().catch(function () {}); }
@@ -1040,13 +1058,22 @@ Object.defineProperty(PP, 'liveWindow', { configurable: true, get: function () {
   var s = this.video.seekable;
   if (!s.length) return null;
   var start = s.start(0), end = s.end(s.length - 1);
-  return end - start >= 60 ? { start: start, end: end } : null;
+  // A raw MPEG-TS channel can only go back as far as this browser still holds it (the seekable range starts at 0).
+  var b = this.video.buffered;
+  if (this.mts && b.length) start = Math.max(start, b.start(0));
+  // HLS: back to what the provider still lists, or what this browser still holds, whichever goes further.
+  else if (this.hls && b.length) {
+    var lv = this.hls.levels && this.hls.levels[this.hls.currentLevel >= 0 ? this.hls.currentLevel : 0];
+    var fr = lv && lv.details && lv.details.fragments;
+    start = Math.max(start, Math.min(fr && fr.length ? fr[0].start : start, b.start(0)));
+  }
+  return end - start >= (V.tune ? V.tune.minWindow : 60) ? { start: start, end: end } : null;
 } });
 
 PP.seek = function (t, fromRemote) {
   if (!this.started) return;
   var v = this.video;
-  if (!this.vod) { var w = this.liveWindow; if (w) v.currentTime = V.clamp(t, w.start, w.end - 2); return; }
+  if (!this.vod) { var w = this.liveWindow; if (w) { v.currentTime = V.clamp(t, w.start, w.end - 2); this._userBehind = w.end - v.currentTime > 15; } return; }
   var tot = this.duration;
   t = Math.max(0, tot ? Math.min(t, tot - 1) : t);
   var rel = t - this.base;
@@ -1067,12 +1094,13 @@ PP.seek = function (t, fromRemote) {
   if (!fromRemote && this.onUserAction) this.onUserAction('seek');
 };
 PP.skip = function (d) {
-  if (!this.vod && this.liveWindow) this.seek(this.video.currentTime + d);
+  if (!this.vod && this.liveWindow) { if (d < 0) this._userBehind = true; this.seek(this.video.currentTime + d); }
   else this.seek(this.position + d);
   this.osd((d > 0 ? '+' : '−') + Math.abs(d) + ' s', 900, 'skipfx');
 };
 PP.goLive = function () {
   if (this.it && this.it.t === 'catchup') { if (this.onBackToLive) this.onBackToLive(this.it); return; }
+  this._userBehind = false;
   var v = this.video;
   if (this.hls && this.hls.liveSyncPosition) v.currentTime = this.hls.liveSyncPosition;
   else if (this.shaka && this.shaka.isLive()) this.shaka.goToLive();
@@ -1147,7 +1175,8 @@ PP.setBoost = function (x, quietly) {
   this.boost = x;
   if (x === 1 && !this._audioSrc) return;
   try {
-    if (!this._audioSrc) {
+    if (V.audioGraph) V.audioGraph(this);
+    else if (!this._audioSrc) {
       this._ac = this._ac || new (window.AudioContext || window.webkitAudioContext)();
       this._audioSrc = this._ac.createMediaElementSource(this.video);
       this._gain = this._ac.createGain();
@@ -1340,6 +1369,7 @@ PP._tracks = function () {
   if (ft && ft.audio.length > 1 && !out.audio && (S.settings.ffmpeg || this.mb)) {
     out.audio = { value: (ft.audio[this.audioTrack || 0] || {}).title || V.langName((ft.audio[this.audioTrack || 0] || {}).lang) || 'Track ' + ((this.audioTrack || 0) + 1), items: ft.audio.map(function (a) { return { label: [a.title || V.langName(a.lang) || 'Track ' + (a.i + 1), a.codec ? a.codec.toUpperCase() : '', a.channels > 2 ? a.channels + 'ch' : ''].filter(Boolean).join(' · '), on: (self.audioTrack || 0) === a.i, fn: function () { self.fileAudio(a.i); } }; }) };
   }
+  if (V.extSubsInto) V.extSubsInto(this, out); // (subtitles fetched from OpenSubtitles)
   return out;
 };
 
@@ -1371,6 +1401,8 @@ PP._menuPages = function (kind) {
     if (tr.subs) { main.push({ label: 'Subtitles', value: tr.subs.value, page: 'subs' }); pages.subs = tr.subs.items; } else main.push({ label: 'Subtitles', value: 'None', fn: function () {} });
     if (tr.audio) { main.push({ label: 'Audio', value: tr.audio.value, page: 'audio' }); pages.audio = tr.audio.items; }
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
+    // Subtitles from OpenSubtitles (when the admin has set it up): see integrations.js.
+    if (S.settings.opensubtitles && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
     pages.main = main;
     return pages;
   }
@@ -1413,6 +1445,8 @@ PP._menuPages = function (kind) {
   main.push({ label: 'Screenshot', value: '', fn: function () { self.screenshot(); } });
   main.push({ label: 'Stream info', value: this.statsOn ? 'On' : 'Off', fn: function () { self.toggleStats(); } });
   if (this.it) main.push({ label: 'Reload', value: '', fn: function () { self.load(self.it, { startAt: self.vod ? self.position : 0, alt: self.alt }); } });
+  // (Audio sync, sound only, open in another app: avsync.js, audioonly.js, extplayer.js.)
+  if (V.playerMenuExtras) V.playerMenuExtras(this, main, pages);
   pages.main = main;
   return pages;
 };
@@ -1568,8 +1602,8 @@ PP._mediaSession = function () {
     navigator.mediaSession.metadata = new MediaMetadata({ title: it.t === 'episode' ? (it.et || it.n) : it.n, artist: it.t === 'episode' ? ((V.showOf(it) || {}).n || '') + ' ' + V.epLabel(it) : (S.settings.brand || {}).name || '', artwork: it.i ? [{ src: it.i, sizes: '512x512' }] : [] });
     navigator.mediaSession.setActionHandler('play', function () { self.video.play(); });
     navigator.mediaSession.setActionHandler('pause', function () { self.video.pause(); });
-    navigator.mediaSession.setActionHandler('seekbackward', function () { self.skip(-10); });
-    navigator.mediaSession.setActionHandler('seekforward', function () { self.skip(30); });
+    navigator.mediaSession.setActionHandler('seekbackward', function (d) { self.skip(-((d && d.seekOffset) || V.skipLen('back'))); });
+    navigator.mediaSession.setActionHandler('seekforward', function (d) { self.skip((d && d.seekOffset) || V.skipLen('fwd')); });
     navigator.mediaSession.setActionHandler('nexttrack', self.onNext ? function () { self.onNext(); } : null);
   } catch (e) {}
 };
@@ -1623,8 +1657,9 @@ PP._bind = function () {
     e.stopPropagation();
     var a = b.dataset.a;
     if (a === 'play') self.togglePlay();
-    else if (a === 'rw') self.skip(-10);
-    else if (a === 'ff') self.skip(30);
+    else if (a === 'rw') self.skip(-V.skipLen('back'));
+    else if (a === 'ff') self.skip(V.skipLen('fwd'));
+    else if (a === 'audioonly' && V.audioOnly) V.audioOnly.toggle(self);
     else if (a === 'mute') self.toggleMute();
     else if (a === 'fs') self.toggleFullscreen();
     else if (a === 'pip') self.togglePip();
@@ -1681,8 +1716,8 @@ PP._bind = function () {
   seek.addEventListener('pointerdown', function (e) { drag = true; seek.classList.add('drag'); seek.setPointerCapture(e.pointerId); });
   seek.addEventListener('pointerup', function (e) { if (drag) { drag = false; seek.classList.remove('drag'); tipImg.hidden = true; self.seek(at(e)); } });
   seek.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? -60 : -10); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? 60 : 10); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? -60 : -V.skipLen('back')); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? 60 : V.skipLen('fwd')); }
     else if (e.key === 'Home') { e.preventDefault(); self.seek(0); }
     else if (e.key === 'End' && self.vod) { e.preventDefault(); self.seek(self.duration - 5); }
   });
@@ -1699,9 +1734,9 @@ PP._bind = function () {
     sw = null;
     if (dt > 700) return;
     if (Math.abs(dy) > 60 && Math.abs(dx) < 50 && self.onSwipe) { self._swiped = true; self.onSwipe(dy < 0 ? 'up' : 'down'); return; }
-    if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && self.vod && self.started) {
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && (self.vod || self.liveWindow) && self.started) {
       var now = Date.now();
-      if (now - lastTap < 320) { var r = self.el.getBoundingClientRect(); var x = (e.clientX - r.left) / r.width; if (x < 0.35) { self._swiped = true; self.skip(-10); } else if (x > 0.65) { self._swiped = true; self.skip(10); } lastTap = 0; } else lastTap = now;
+      if (now - lastTap < 320) { var r = self.el.getBoundingClientRect(); var x = (e.clientX - r.left) / r.width; if (x < 0.35) { self._swiped = true; self.skip(-V.skipLen('back')); } else if (x > 0.65) { self._swiped = true; self.skip(V.skipLen('fwd')); } lastTap = 0; } else lastTap = now;
     }
   });
   var wake = function () { self._wake(); };

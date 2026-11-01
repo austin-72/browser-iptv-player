@@ -1,0 +1,453 @@
+/* Integrations: subtitles from OpenSubtitles, Trakt, playback health reports (for Admin → Overview),
+   the connection speed test, and the admin's Integrations and "API & automations" pages. */
+'use strict';
+(function () {
+  // ------------------------------------------------------------ subtitles from OpenSubtitles
+  var ext = function (p) { return p._extSubs || (p._extSubs = []); };
+  var subUrl = function (p, url) { return url + (p.sessionId && p.offset ? '?offset=' + p.offset : ''); };
+
+  /** Adds a fetched subtitle to the video and shows it. */
+  V.addExtSub = function (p, url, label, lang) {
+    var v = p.video;
+    var list = ext(p);
+    var have = list.filter(function (x) { return x.url === url; })[0];
+    if (!have) {
+      var tr = document.createElement('track');
+      tr.kind = 'subtitles';
+      tr.label = label;
+      tr.srclang = (lang || 'und').slice(0, 3);
+      tr.src = subUrl(p, url);
+      tr.setAttribute('data-ext', '1');
+      v.appendChild(tr);
+      have = { url: url, label: label, lang: lang, el: tr };
+      list.push(have);
+    }
+    if (p.hls && p.hls.subtitleTrack >= 0) p.hls.subtitleTrack = -1;
+    setTimeout(function () {
+      for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === have.label ? 'showing' : 'disabled';
+      p._extOn = have.url;
+      if (p._menuRefresh) p._menuRefresh();
+    }, 60);
+  };
+  /** Fetched subtitles in the player's Subtitles menu, next to whatever the stream or file has. */
+  V.extSubsInto = function (p, out) {
+    var list = (p._extSubs || []).filter(function (x) { return x.el && x.el.parentNode === p.video; });
+    p._extSubs = list;
+    if (!list.length) return;
+    var v = p.video;
+    var hideExt = function () { list.forEach(function (x) { if (x.el.track) x.el.track.mode = 'disabled'; }); p._extOn = null; };
+    var items = out.subs ? out.subs.items.filter(function (x) { return !list.some(function (e) { return e.label === x.label; }); }).map(function (x) { var fn = x.fn; return { label: x.label, on: x.on && !p._extOn, fn: function () { hideExt(); fn(); } }; }) : [{ label: 'Off', on: !p._extOn, fn: hideExt }];
+    list.forEach(function (e) {
+      items.push({ label: e.label, on: p._extOn === e.url, fn: function () { for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === e.label ? 'showing' : 'disabled'; p._extOn = e.url; } });
+    });
+    out.subs = { value: p._extOn ? (list.filter(function (e) { return e.url === p._extOn; })[0] || {}).label : out.subs ? out.subs.value : 'Off', items: items };
+  };
+
+  V.findSubtitles = function (p) {
+    var it = p.it;
+    if (!it) return;
+    var body = document.createElement('div');
+    body.innerHTML = '<p class="dim small">From OpenSubtitles.com, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div>';
+    V.dialog({ title: 'Find subtitles', body: body, wide: true, actions: [{ label: 'Close' }] });
+    V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k)).then(function (r) {
+      var box = V.$('.os-list', body);
+      if (!box) return;
+      if (!r.list.length) { box.innerHTML = '<p>Nothing found for “' + V.esc(it.n) + '” in your languages.</p>'; return; }
+      box.innerHTML = '<ul class="os-ul">' + r.list.map(function (x) {
+        return '<li><button class="btn ghost block os-pick" data-f="' + x.fileId + '" data-l="' + V.esc(x.lang) + '"><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="truncate">' + V.esc(x.name) + '</span><small class="dim">' +
+          [x.downloads ? V.plural(x.downloads, 'download') : '', x.hi ? 'for the hard of hearing' : '', x.machine ? 'machine translated' : '', x.fromTrusted ? 'trusted' : '', x.cached ? 'saved here' : ''].filter(Boolean).join(' · ') + '</small></button></li>';
+      }).join('') + '</ul>' + (r.quota && r.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(r.quota.remaining, 'download') + ' left today.</p>' : '');
+      box.onclick = function (e) {
+        var b = e.target.closest('.os-pick');
+        if (!b) return;
+        b.disabled = true;
+        V.api('/api/opensubs/get', { body: { fileId: b.dataset.f } }).then(function (g) {
+          V.addExtSub(p, g.url, (V.langName(b.dataset.l) || b.dataset.l) + ' (OpenSubtitles)', b.dataset.l);
+          var d = body.closest('dialog'); if (d && d._finish) d._finish(null);
+          p.osd && p.osd('Subtitles on', 1200);
+        }).catch(function (err) { b.disabled = false; V.fail(err); });
+      };
+      var first = V.$('.os-pick', box); if (first) first.focus();
+    }).catch(function (e) { var box = V.$('.os-list', body); if (box) box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+
+  /** Does the player already have subtitles in this language (from the stream, the file, or fetched)? */
+  var hasSubsIn = function (p, lang) {
+    lang = String(lang || '').slice(0, 2).toLowerCase();
+    var v = p.video, i;
+    for (i = 0; i < v.textTracks.length; i++) if (String(v.textTracks[i].language || '').slice(0, 2).toLowerCase() === lang) return true;
+    var hs = p.hls && p.hls.subtitleTracks ? p.hls.subtitleTracks : [];
+    for (i = 0; i < hs.length; i++) if (String(hs[i].lang || '').slice(0, 2).toLowerCase() === lang) return true;
+    var fs = (p._fileTracks && p._fileTracks.subs) || [];
+    for (i = 0; i < fs.length; i++) if (String(fs[i].lang || '').slice(0, 2).toLowerCase() === lang) return true;
+    return false;
+  };
+  V.on('playing', function (it) {
+    if (!it || (it.t !== 'movie' && it.t !== 'episode') || !S.settings.opensubtitles || !V.pref('autoFetchSubs')) return;
+    var p = V.player, tok = p.token;
+    setTimeout(function () {
+      if (p.token !== tok || V.watch.it !== it) return;
+      var lang = (V.pref('subLang') || ((S.profile && S.profile.langs) || S.settings.defaultLangs || ['en'])[0] || 'en').slice(0, 2);
+      var cur = p._fileTracks && (p._fileTracks.audio || [])[p.audioTrack || 0];
+      if (p._subsWanted && !p._subsWanted(cur && cur.lang)) return;
+      if (hasSubsIn(p, lang)) return;
+      V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang } }).then(function (r) {
+        if (r && r.url && p.token === tok) { V.addExtSub(p, r.url, (V.langName(r.lang) || r.lang) + ' (OpenSubtitles)', r.lang); p.osd && p.osd('Subtitles from OpenSubtitles', 2000); }
+      }).catch(function () {});
+    }, 9000);
+  });
+
+  // ------------------------------------------------------------ Trakt scrobbling
+  var trakt = { connected: false, at: 0 };
+  V.traktStatus = function (force) {
+    if (!S.settings.trakt) return Promise.resolve({ enabled: false });
+    if (!force && Date.now() - trakt.at < 5 * 60e3 && trakt.st) return Promise.resolve(trakt.st);
+    return V.api('/api/trakt/status').then(function (s) { trakt.st = s; trakt.at = Date.now(); trakt.connected = s.connected && (!s.opts || s.opts.scrobble !== false); return s; });
+  };
+  var scrob = { it: null, last: '' };
+  var progressOf = function () { var p = V.player; var d = p.duration || (scrob.it && scrob.it.d) || 0; return d ? Math.min(100, Math.round((p.position / d) * 1000) / 10) : 0; };
+  var send = function (action) {
+    if (!scrob.it || !trakt.connected) return;
+    var sig = action + scrob.it.k;
+    if (sig === scrob.last && action !== 'stop') return;
+    scrob.last = sig;
+    V.api('/api/trakt/scrobble', { body: { action: action, k: scrob.it.k, progress: progressOf() }, keepalive: action === 'stop' }).catch(function () {});
+  };
+  var bound = null;
+  V.on('playing', function (it) {
+    if (scrob.it && scrob.it !== it) send('stop');
+    scrob.it = it && (it.t === 'movie' || it.t === 'episode') ? it : null;
+    scrob.last = '';
+    if (!scrob.it || !S.settings.trakt) return;
+    V.traktStatus().then(function () {
+      var v = V.player.video;
+      if (bound === v) return;
+      bound = v;
+      v.addEventListener('playing', function () { if (scrob.it) send('start'); });
+      v.addEventListener('pause', function () { if (scrob.it && !v.ended) send('pause'); });
+      v.addEventListener('ended', function () { send('stop'); });
+      if (!v.paused) send('start');
+    }).catch(function () {});
+  });
+  V.on('stopped', function () { send('stop'); scrob.it = null; });
+  window.addEventListener('pagehide', function () { if (scrob.it && V.watch.it) send('stop'); });
+
+  // ------------------------------------------------------------ playback health → Admin → Overview
+  var health = { stalls: 0, stallMs: 0, since: 0, v: null };
+  var watchVideo = function (v) {
+    if (health.v === v) return;
+    health.v = v;
+    v.addEventListener('waiting', function () { if (V.watch.it && !v.seeking && v.currentTime > 0.5) { health.stalls++; health.since = Date.now(); } });
+    v.addEventListener('playing', function () { if (health.since) { health.stallMs += Date.now() - health.since; health.since = 0; } });
+  };
+  V.playbackStats = function () {
+    var p = V.player, v = p.video, a = p.attempt || {};
+    var out = { route: a.helper ? 'helper' : a.via === 'browser' || p.mb ? 'browser' : a.via === 'direct' || a.via === 'split' ? 'direct' : a.via === 'relay' ? 'relay' : a.via === 'local' ? 'local' : a.via ? 'convert' : '', w: v.videoWidth || 0, h: v.videoHeight || 0 };
+    var b = v.buffered, ahead = 0;
+    for (var i = 0; i < b.length; i++) if (b.start(i) <= v.currentTime + 0.5 && b.end(i) > v.currentTime) ahead = b.end(i) - v.currentTime;
+    out.buf = Math.round(ahead * 10) / 10;
+    if (p.hls) { var l = p.levels[p.hls.currentLevel] || p.levels[p.hls.loadLevel] || {}; out.br = Math.round((l.bitrate || 0) / 1000); out.bw = Math.round((p.hls.bandwidthEstimate || 0) / 1000); out.lvl = l.height ? l.height + 'p' : ''; }
+    else if (p.mts) { var st = p.mts.statisticsInfo || {}; out.bw = st.speed ? Math.round(st.speed * 8) : 0; }
+    else if (p.shaka) { try { var ss = p.shaka.getStats(); out.br = Math.round((ss.streamBandwidth || 0) / 1000); out.bw = Math.round((ss.estimatedBandwidth || 0) / 1000); } catch (e) {} }
+    if (v.getVideoPlaybackQuality) { var q = v.getVideoPlaybackQuality(); out.dropped = q.droppedVideoFrames || 0; out.frames = q.totalVideoFrames || 0; }
+    out.stalls = health.stalls; out.stallMs = health.stallMs + (health.since ? Date.now() - health.since : 0);
+    health.stalls = 0; health.stallMs = 0; if (health.since) health.since = Date.now();
+    return out;
+  };
+  setInterval(function () {
+    if (!V.watch || !V.watch.it || !V.player || !S.conn || document.hidden && V.player.video.paused) return;
+    watchVideo(V.player.video);
+    if (V.player.video.paused && !health.stalls) return;
+    V.api('/api/presence/stats', { body: { conn: S.conn, s: V.playbackStats() } }).catch(function () {});
+  }, 10000);
+  V.on('playing', function () { if (V.player) watchVideo(V.player.video); health.stalls = 0; health.stallMs = 0; health.since = 0; });
+
+  // ------------------------------------------------------------ speed test
+  var mbps = function (bytes, ms) { return Math.round(((bytes * 8) / Math.max(1, ms) / 1000) * 10) / 10; };
+  var verdict = function (m) {
+    if (!m) return { t: 'No result', c: 'err' };
+    if (m >= 25) return { t: 'Great — fine even for 4K', c: 'ok' };
+    if (m >= 12) return { t: 'Good for HD (1080p); may struggle with 4K', c: 'ok' };
+    if (m >= 6) return { t: 'Fine for HD 720p; 1080p may stutter', c: '' };
+    if (m >= 3) return { t: 'Enough for standard definition', c: 'warn' };
+    return { t: 'Too slow for smooth video', c: 'err' };
+  };
+  /** Reads a response for up to `ms` (or `max` bytes) → { bytes, ms, ttfb }. */
+  var readFor = function (url, opts, ms, max) {
+    var ac = window.AbortController ? new AbortController() : null;
+    var t0 = Date.now(), ttfb = 0, n = 0;
+    var timer = setTimeout(function () { if (ac) ac.abort(); }, ms + 4000);
+    return fetch(url, Object.assign({ cache: 'no-store', signal: ac ? ac.signal : undefined }, opts || {})).then(function (r) {
+      ttfb = Date.now() - t0;
+      if (!r.ok && r.status !== 206) throw new Error('HTTP ' + r.status);
+      if (!r.body || !r.body.getReader) return r.arrayBuffer().then(function (b) { n = b.byteLength; return { bytes: n, ms: Date.now() - t0 - ttfb, ttfb: ttfb, r: r }; });
+      var rd = r.body.getReader(), t1 = Date.now();
+      var step = function () {
+        return rd.read().then(function (x) {
+          if (!x.done) n += x.value.length;
+          if (x.done || Date.now() - t1 > ms || n >= max) { try { if (ac) ac.abort(); } catch (e) {} return { bytes: n, ms: Date.now() - t1, ttfb: ttfb, r: r }; }
+          return step();
+        });
+      };
+      return step();
+    }).then(function (x) { clearTimeout(timer); return x; }, function (e) { clearTimeout(timer); if (n && e && e.name === 'AbortError') return { bytes: n, ms: Date.now() - t0 - ttfb, ttfb: ttfb }; throw e; });
+  };
+  /** Straight from this device to the provider (works only when the provider lets web pages read it). */
+  var directProbe = function (t) {
+    var u = t.u;
+    if (t.headers || (location.protocol === 'https:' && /^http:/i.test(u))) return Promise.reject(new Error('blocked'));
+    if (/\.m3u8(\?|$)/i.test(u)) {
+      var t0 = Date.now();
+      var getText = function (url) { return fetch(url, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text().then(function (x) { return { text: x, url: r.url || url }; }); }); };
+      var pick = function (pl) { var lines = pl.text.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x && x.charAt(0) !== '#'; }); return lines.length ? new URL(lines[lines.length > 3 ? lines.length - 2 : 0], pl.url).href : ''; };
+      return getText(u).then(function (pl) {
+        var nx = pick(pl);
+        if (!nx) throw new Error('empty');
+        return /\.m3u8(\?|$)/i.test(nx) ? getText(nx).then(function (p2) { return pick(p2); }) : nx;
+      }).then(function (seg) { var ttfb0 = Date.now() - t0; return readFor(seg, {}, 5000, 16e6).then(function (x) { x.ttfb = ttfb0; return x; }); });
+    }
+    return readFor(u, t.kind === 'movie' ? { headers: { Range: 'bytes=0-16777215' } } : {}, 5000, 16e6);
+  };
+  V.speedTest = function (opts) {
+    opts = opts || {};
+    var body = document.createElement('div');
+    body.className = 'speedtest';
+    body.innerHTML = '<p class="dim">Checks how fast this device reaches this server, and how fast it reaches your provider. It takes about 20 seconds.</p>' +
+      '<label class="field"><span>Provider to test</span><select class="input" data-list><option value="">Loading…</option></select></label>' +
+      '<dl class="kv st-res"></dl><p class="st-verdict"></p>';
+    var res = function () { return V.$('.st-res', body); };
+    var row = function (k, label, val) { var dl = res(); var el = V.$('[data-k="' + k + '"]', dl); if (!el) { dl.insertAdjacentHTML('beforeend', '<dt>' + V.esc(label) + '</dt><dd data-k="' + k + '"></dd>'); el = V.$('[data-k="' + k + '"]', dl); } el.innerHTML = val; };
+    var targets = [];
+    V.api('/api/speedtest/targets').then(function (t) {
+      targets = t;
+      var sel = V.$('[data-list]', body);
+      sel.innerHTML = t.length ? t.map(function (x) { return '<option value="' + V.esc(x.id) + '">' + V.esc(x.name) + (x.busy ? ' (all connections in use)' : '') + '</option>'; }).join('') : '<option value="">No lists to test</option>';
+      var cur = V.watch && V.watch.it ? V.watch.it.src : '';
+      if (cur && t.some(function (x) { return x.id === cur; })) sel.value = cur;
+    }).catch(function () {});
+    var running = false;
+    var run = function () {
+      if (running) return false;
+      running = true;
+      res().innerHTML = '';
+      V.$('.st-verdict', body).textContent = '';
+      var out = {};
+      var spin = '<span class="spinner sm"></span>';
+      row('ping', 'Delay to this server', spin);
+      var pings = [], i = 0;
+      var ping = function () { var t0 = performance.now(); return V.api('/api/speedtest/ping').then(function () { pings.push(performance.now() - t0); i++; return i < 5 ? ping() : null; }); };
+      return ping().then(function () {
+        pings.sort(function (a, b) { return a - b; });
+        out.ping = Math.round(pings[Math.floor(pings.length / 2)]);
+        row('ping', 'Delay to this server', out.ping + ' ms');
+        row('down', 'Download from this server', spin);
+        return readFor('/api/speedtest/down?mb=2', {}, 3000, 2e6).then(function () { return readFor('/api/speedtest/down?mb=40', {}, 5000, 40e6); });
+      }).then(function (x) {
+        out.down = mbps(x.bytes, x.ms);
+        row('down', 'Download from this server', out.down + ' Mbit/s');
+        row('up', 'Upload to this server', spin);
+        var size = /Mobi|Android|iPhone/i.test(navigator.userAgent) ? 4 : 10;
+        var blob = new Blob([new Uint8Array(size * 1024 * 1024)]);
+        var t0 = Date.now();
+        return V.api('/api/speedtest/up', { body: blob, headers: { 'Content-Type': 'application/octet-stream' } }).then(function (r) { out.up = mbps(r.bytes, Date.now() - t0); row('up', 'Upload to this server', out.up + ' Mbit/s'); });
+      }).then(function () {
+        var id = V.$('[data-list]', body).value;
+        var t = targets.filter(function (x) { return x.id === id; })[0];
+        if (!t) return;
+        row('prov', 'From ' + t.name, spin);
+        if (t.busy) { row('prov', 'From ' + t.name, 'not tested — every connection is in use right now'); return; }
+        return directProbe(t).then(function (x) {
+          out.prov = mbps(x.bytes, x.ms);
+          row('prov', 'From ' + t.name + ' (straight to this device)', out.prov + ' Mbit/s · first byte after ' + x.ttfb + ' ms');
+        }, function () {
+          return V.api('/api/speedtest/provider', { body: { list: id } }).then(function (r) {
+            if (!r.ok) { row('prov', 'From ' + t.name, V.esc(r.error || 'failed')); return; }
+            out.prov = r.mbps;
+            out.provByServer = true;
+            row('prov', 'From ' + t.name + ' (measured by the server)', r.mbps + ' Mbit/s · first byte after ' + r.ttfb + ' ms');
+          });
+        });
+      }).then(function () {
+        var limit = Math.min(out.down || 0, out.prov === undefined ? Infinity : out.prov);
+        var vd = verdict(limit === Infinity ? out.down : limit);
+        V.$('.st-verdict', body).innerHTML = '<b class="' + vd.c + '">' + V.esc(vd.t) + '</b>' + (out.prov === undefined ? '<br><small class="dim">That’s from this server; the provider couldn’t be tested, so it may still be the slow part.</small>' : '') + (out.provByServer ? '<br><small class="dim">This provider doesn’t let web pages read its streams directly, so the server measured it. Streams from it may go through the server on this device.</small>' : '') +
+          (out.prov !== undefined && out.prov < out.down / 2 ? '<br><small class="dim">The provider is the slow part, not your network.</small>' : out.down < 8 && out.ping > 150 ? '<br><small class="dim">This device is a long way from the server (or on a slow network).</small>' : '');
+      }).catch(function (e) { V.$('.st-verdict', body).innerHTML = '<span class="err">' + V.esc(e.message) + '</span>'; }).then(function () { running = false; return false; });
+    };
+    V.dialog({ title: 'Test the connection', body: body, wide: true, actions: [{ label: 'Close' }, { label: 'Start', primary: true, fn: run }] });
+  };
+
+  // ------------------------------------------------------------ Settings: Trakt, subtitles, connection test
+  V.settingsExtra = function () {
+    var pf = S.data.prefs;
+    return (S.settings.trakt ? '<section class="card-sec" data-trakt><h2>Trakt</h2><div class="trakt-box"><div class="spinner"></div></div></section>' : '') +
+      (S.settings.opensubtitles ? '<section class="card-sec"><h2>Subtitles from OpenSubtitles</h2>' +
+        '<label class="switch"><input type="checkbox" data-pref="autoFetchSubs"' + (pf.autoFetchSubs ? ' checked' : '') + '><span class="sw"></span><span><b>Fetch subtitles automatically</b><small>When a film or episode has none in your language and you’d want them</small></span></label>' +
+        '<p class="dim small">You can also pick some yourself while watching: the subtitles button → Find subtitles.</p></section>' : '') +
+      '<section class="card-sec"><h2>Connection</h2><p class="dim">How fast this device reaches the server and your provider, and what that’s good for.</p><button class="btn" data-a="speedtest">' + V.icon('pulse') + ' Test my connection</button></section>';
+  };
+  V.settingsExtraBind = function (view) {
+    var st = V.$('[data-a=speedtest]', view);
+    if (st) st.addEventListener('click', function () { V.speedTest(); });
+    var box = V.$('.trakt-box', view);
+    if (box) drawTrakt(box);
+  };
+  var traktPoll = null;
+  var drawTrakt = function (box) {
+    clearTimeout(traktPoll);
+    V.traktStatus(true).then(function (s) {
+      if (!s.enabled) { box.innerHTML = '<p class="dim">Trakt isn’t set up on this server.</p>'; return; }
+      if (s.connected) {
+        var o = s.opts || {};
+        var sw = function (k, label, hint) { return '<label class="switch"><input type="checkbox" data-topt="' + k + '"' + (o[k] !== false ? ' checked' : '') + '><span class="sw"></span><span><b>' + label + '</b>' + (hint ? '<small>' + hint + '</small>' : '') + '</span></label>'; };
+        box.innerHTML = '<p>' + V.icon('check', 'tiny ok') + ' Connected' + (s.user ? ' as <b>' + V.esc(s.user) + '</b>' : '') + (s.lastSync ? ' <span class="dim">· synced ' + V.fmtAgo(s.lastSync) + '</span>' : '') + '</p>' +
+          (s.lastError ? '<p class="note warn">' + V.esc(s.lastError) + '</p>' : '') +
+          sw('scrobble', 'Log what I watch', 'Films and episodes appear in your Trakt history as you watch them') +
+          sw('watchlist', 'Keep My List and my Trakt watchlist the same') +
+          sw('ratings', 'Thumbs up / down ↔ Trakt ratings') +
+          '<div class="btn-row"><button class="btn" data-t="sync">' + V.icon('refresh') + ' Sync now</button><button class="btn" data-t="import">Copy Trakt history here</button><button class="btn" data-t="export">Copy my history to Trakt</button><button class="btn danger" data-t="disconnect">Disconnect</button></div>';
+      } else if (s.pending) {
+        showCode(box, s.pending);
+      } else {
+        box.innerHTML = '<p class="dim">Log what you watch on Trakt, and keep your watchlist and ratings in step with My List and your thumbs.</p><button class="btn primary" data-t="connect">Connect Trakt</button>';
+      }
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+    box.onchange = function (e) {
+      var k = e.target.dataset.topt; if (!k) return;
+      var o = {}; o[k] = e.target.checked;
+      V.put('/api/trakt/opts', o).then(function () { V.toast('Saved'); trakt.at = 0; V.traktStatus(true); }).catch(V.fail);
+    };
+    box.onclick = function (e) {
+      var b = e.target.closest('[data-t]'); if (!b) return;
+      var a = b.dataset.t;
+      if (a === 'connect') { b.disabled = true; V.api('/api/trakt/connect', { method: 'POST' }).then(function (p) { showCode(box, p); }).catch(function (err) { b.disabled = false; V.fail(err); }); }
+      else if (a === 'disconnect') V.confirm('Disconnect Trakt from this profile?', { ok: 'Disconnect', danger: true }).then(function (ok) { if (ok) V.api('/api/trakt/disconnect', { method: 'POST' }).then(function () { drawTrakt(box); }); });
+      else {
+        b.disabled = true;
+        var label = b.textContent;
+        b.innerHTML = '<span class="spinner sm"></span> Working…';
+        V.api('/api/trakt/' + a, { method: 'POST' }).then(function (r) {
+          b.disabled = false; b.textContent = label;
+          V.toast(a === 'sync' ? 'Synced: ' + [r.added ? r.added + ' added to My List' : '', r.removed ? r.removed + ' removed' : '', r.pushed ? r.pushed + ' sent to Trakt' : '', r.rated ? r.rated + ' ratings' : ''].filter(Boolean).join(', ') || 'Synced — nothing new'
+            : a === 'import' ? 'Marked as watched: ' + V.plural(r.movies, 'film') + ', ' + V.plural(r.episodes, 'episode')
+            : 'Sent to Trakt: ' + V.plural(r.movies, 'film') + ', ' + V.plural(r.episodes, 'episode'));
+          if (a !== 'export') V.refreshMe && V.refreshMe();
+        }).catch(function (err) { b.disabled = false; b.textContent = label; V.fail(err); });
+      }
+    };
+  };
+  var showCode = function (box, p) {
+    box.innerHTML = '<p>On your phone or computer, go to <b>' + V.esc(p.url.replace(/^https?:\/\//, '')) + '</b> and enter this code:</p><p class="trakt-code">' + V.esc(p.code) + '</p>' +
+      '<p class="dim small">Waiting for you to approve it… (the code works for ' + Math.max(1, Math.round((p.expires - Date.now()) / 60000)) + ' minutes)</p><button class="btn" data-t="cancel-code">Cancel</button>';
+    V.$('[data-t=cancel-code]', box).onclick = function (e) { e.stopPropagation(); clearTimeout(traktPoll); drawTrakt(box); };
+    var tick = function () {
+      if (!document.body.contains(box)) return;
+      V.api('/api/trakt/poll', { method: 'POST' }).then(function (r) {
+        if (r.state === 'connected') { V.toast('Trakt connected'); trakt.at = 0; drawTrakt(box); return; }
+        if (r.state === 'expired' || r.state === 'denied' || r.state === 'error') { box.innerHTML = '<p class="err">' + (r.state === 'denied' ? 'You said no on Trakt.' : r.state === 'expired' ? 'That code ran out.' : V.esc(r.error || 'Something went wrong.')) + '</p><button class="btn primary" data-t="connect">Try again</button>'; return; }
+        traktPoll = setTimeout(tick, Math.max(3000, p.interval || 5000));
+      }).catch(function () { traktPoll = setTimeout(tick, 8000); });
+    };
+    traktPoll = setTimeout(tick, Math.max(3000, p.interval || 5000));
+  };
+
+  // ------------------------------------------------------------ Admin → Overview: watching now, live
+  var fmtK = function (kbps) { return kbps >= 1000 ? (Math.round(kbps / 100) / 10) + ' Mbit/s' : kbps ? kbps + ' kbit/s' : '–'; };
+  var ROUTE = { local: 'Your own file (from this server)', direct: 'Direct', browser: 'Converted in the browser', relay: 'Through the server', convert: 'Converted on the server', helper: 'Direct (helper)' };
+  V.adminWatching = function (sec) {
+    if (!sec) return;
+    var draw = function () {
+      if (!document.body.contains(sec)) return;
+      V.api('/api/admin/watching').then(function (w) {
+        var rows = w.rows.map(function (r) {
+          var s = r.stats;
+          return '<li class="aw-row"><div><b>' + V.esc(r.profile) + '</b> · ' + (r.hidden ? '<span class="dim">(private)</span>' : V.esc(r.n)) + ' <span class="dim">on ' + V.esc(r.device) + (r.list ? ' · ' + V.esc(r.list) : '') + ' · ' + V.fmtAgo(r.at) + '</span></div>' +
+            (s ? '<div class="aw-stats small"><span class="aw-h ' + r.health + '">' + (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') + '</span>' +
+              [ROUTE[s.route] || s.route, s.h ? s.h + 'p' : '', s.bitrate ? 'stream ' + fmtK(s.bitrate) : '', s.bandwidth ? 'connection ' + fmtK(s.bandwidth) : '', 'buffer ' + s.buffer + ' s',
+                s.stalls ? V.plural(s.stalls, 'pause') + ' to load (' + s.stallSecs + ' s) in ' + V.plural(s.minutes, 'min') : 'no pauses to load', s.droppedPct ? s.droppedPct + '% frames dropped' : ''].filter(Boolean).map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</li>';
+        });
+        sec.innerHTML = '<div class="sec-h"><h2>Watching now</h2><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div>' +
+          (rows.length ? '<ul class="simple aw-list">' + rows.join('') + '</ul>' : '<p class="dim">Nobody is watching right now.</p>') +
+          (w.lists.length ? '<p class="small"><b>Provider connections in use:</b> ' + w.lists.map(function (l) { return V.esc(l.name) + ' ' + l.used + (l.limit ? ' of ' + l.limit : ''); }).join(' · ') + '</p>' : '');
+        V.$('[data-a=speedtest]', sec).onclick = function () { V.speedTest({ admin: true }); };
+        clearTimeout(sec._t);
+        sec._t = setTimeout(draw, 5000);
+      }).catch(function () { clearTimeout(sec._t); sec._t = setTimeout(draw, 15000); });
+    };
+    draw();
+  };
+
+  // ------------------------------------------------------------ Admin → Integrations
+  var secretField = function (name, label, val, hint) { return '<label class="field"><span>' + label + '</span><input class="input" data-f="' + name + '" value="' + V.esc(val || '') + '" autocomplete="off" spellcheck="false">' + (hint ? '<small class="dim">' + hint + '</small>' : '') + '</label>'; };
+  V.adminTabs.integrations = function (body) {
+    body.innerHTML = '<div class="spinner"></div>';
+    V.api('/api/admin/integrations').then(function (I) {
+      var o = I.opensubtitles, t = I.trakt;
+      body.innerHTML = '<section class="card-sec"><h2>Subtitles: OpenSubtitles.com</h2><p class="dim">Lets anyone find subtitles for a film or episode that has none in their language (the subtitles button → Find subtitles), or fetch them automatically. Get a free API key at opensubtitles.com → your profile → API consumers. An account (optional) gives more downloads a day.</p>' +
+        '<div class="int-fields">' + secretField('os.apiKey', 'API key', o.apiKey) + secretField('os.username', 'Account username (optional)', o.username) + '<label class="field"><span>Account password</span><input class="input" type="password" data-f="os.password" value="' + V.esc(o.password) + '" autocomplete="new-password"></label></div>' +
+        (o.quota && o.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(o.quota.remaining, 'download') + ' left today (checked ' + V.fmtAgo(o.quota.at) + ').</p>' : '') +
+        '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>' +
+        '<section class="card-sec"><h2>Trakt</h2><p class="dim">Each profile can then connect its Trakt account (Settings → Trakt) to log what it watches and keep its watchlist and ratings in step. Create an app at trakt.tv → Settings → Your API Apps (redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>) and paste its Client ID and Client Secret here.</p>' +
+        '<div class="int-fields">' + secretField('tr.clientId', 'Client ID', t.clientId) + '<label class="field"><span>Client Secret</span><input class="input" type="password" data-f="tr.clientSecret" value="' + V.esc(t.clientSecret) + '" autocomplete="new-password"></label></div>' +
+        '<p class="dim small">' + (t.profiles ? V.plural(t.profiles, 'profile') + ' connected.' : 'No profiles connected yet.') + '</p><button class="btn primary" data-save="tr">Save</button></section>';
+      body.onclick = function (e) {
+        var s = e.target.closest('[data-save]');
+        if (s) {
+          var val = function (k) { var el = V.$('[data-f="' + k + '"]', body); return el ? el.value : undefined; };
+          var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } } : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
+          V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body); }).catch(V.fail);
+        }
+        var tb = e.target.closest('[data-test]');
+        if (tb) {
+          var out = V.$('.os-test', body);
+          out.textContent = 'Testing…';
+          V.api('/api/admin/integrations/opensubtitles/test', { method: 'POST' }).then(function (r) { out.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' The API key works' + (r.account ? ', and the account signed in.' : r.error ? ', but the account didn’t sign in: ' + V.esc(r.error) : '.') : '<span class="err">' + V.esc(r.error) + '</span>'; });
+        }
+      };
+    }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+
+  // ------------------------------------------------------------ Admin → API & automations
+  var SCOPE = { read: 'Read only — what’s playing, devices, search, channels', control: 'Control devices — also play, pause, stop, change channel, volume', admin: 'Admin — everything, including list refreshes' };
+  V.adminTabs.api = function (body, A) {
+    body.innerHTML = '<div class="spinner"></div>';
+    V.api('/api/admin/integrations').then(function (I) {
+      var base = location.origin + '/api/v1';
+      var profOpts = '<option value="">Any profile (sees everything)</option>' + ((A && A.profiles) || []).map(function (p) { return '<option value="' + p.id + '">Only ' + V.esc(p.name) + '’s devices and titles</option>'; }).join('');
+      body.innerHTML = '<section class="card-sec"><h2>API keys</h2><p class="dim">For Home Assistant, scripts and other automations. Send the key as <code>Authorization: Bearer &lt;key&gt;</code> to <code>' + V.esc(base) + '</code>. A key is shown once, when it’s made.</p>' +
+        (I.apiKeys.length ? '<ul class="simple">' + I.apiKeys.map(function (k) { return '<li class="row-between"><span><b>' + V.esc(k.name) + '</b> <span class="dim">· ' + V.esc(k.scope) + ' · <code>' + V.esc(k.hint) + '</code> · ' + (k.lastUsed ? 'used ' + V.fmtAgo(k.lastUsed) : 'never used') + '</span></span><button class="btn sm danger" data-revoke="' + k.id + '">Revoke</button></li>'; }).join('') + '</ul>' : '<p class="dim">No keys yet.</p>') +
+        '<div class="grid2"><label class="field"><span>Name</span><input class="input" data-k="name" placeholder="Home Assistant" maxlength="60"></label><label class="field"><span>It may</span><select class="input" data-k="scope">' + I.scopes.map(function (s) { return '<option value="' + s + '"' + (s === 'control' ? ' selected' : '') + '>' + V.esc(SCOPE[s]) + '</option>'; }).join('') + '</select></label>' +
+        '<label class="field"><span>Profile</span><select class="input" data-k="profile">' + profOpts + '</select></label></div><button class="btn primary" data-a="newkey">' + V.icon('plus') + ' Make a key</button>' +
+        '<details class="api-ref"><summary>What the API can do</summary><ul class="small">' +
+        ['GET /now — what each device is playing', 'GET /devices — signed-in devices (the id is used below)', 'POST /devices/{id}/play — {"k": "…"} or {"channel": 101} or {"title": "…"}', 'POST /devices/{id}/command — {"cmd": "pause" | "resume" | "toggle" | "stop" | "zap" (+ "dir": 1 or -1) | "channel" (+ "n") | "volume" (+ "v": 0–1) | "mute" | "seek" (+ "pos") | "sleep" (+ "min")}', 'GET /search?q=… — titles and channels', 'GET /channels — every channel with its number', 'GET /items/{k} — one title', 'GET /status — lists, accounts (admin keys)', 'POST /lists/{id}/refresh — refresh a list (admin keys)'].map(function (x) { return '<li><code>' + V.esc(x) + '</code></li>'; }).join('') + '</ul></details></section>' +
+        '<section class="card-sec"><h2>Webhooks</h2><p class="dim">The server sends a short JSON message to these addresses when something happens. Each is signed: <code>X-Signature: sha256=…</code> (HMAC-SHA256 of the body with the webhook’s secret). Failed deliveries are tried again three times.</p>' +
+        (I.webhooks.length ? '<ul class="simple">' + I.webhooks.map(function (h) { return '<li><div class="row-between"><span><b>' + V.esc(h.name) + '</b> <span class="dim">· ' + V.esc(h.url) + '</span>' + (h.enabled ? '' : ' <span class="chip sm">off</span>') + '</span><span class="btn-row"><button class="btn sm" data-htest="' + h.id + '">Send a test</button><button class="btn sm" data-hsecret="' + h.id + '">Secret</button><button class="btn sm danger" data-hdel="' + h.id + '">Delete</button></span></div><div class="dim small">' + h.events.map(function (e) { return V.esc(I.events[e] || e); }).join(' · ') + '</div></li>'; }).join('') + '</ul>' : '<p class="dim">No webhooks yet.</p>') +
+        '<div class="grid2"><label class="field"><span>Address</span><input class="input" data-h="url" placeholder="http://homeassistant.local:8123/api/webhook/iptv" spellcheck="false"></label><label class="field"><span>Name</span><input class="input" data-h="name" placeholder="Home Assistant" maxlength="60"></label></div>' +
+        '<div class="chips">' + Object.keys(I.events).map(function (e) { return '<label class="chip-check"><input type="checkbox" data-ev="' + e + '"' + (/^playback/.test(e) ? ' checked' : '') + '><span>' + V.esc(I.events[e]) + '</span></label>'; }).join('') + '</div>' +
+        '<button class="btn primary" data-a="newhook">' + V.icon('plus') + ' Add webhook</button>' +
+        '<h3>Recent deliveries</h3>' + (I.deliveries.length ? '<ul class="simple small">' + I.deliveries.map(function (d) { return '<li>' + (d.ok ? V.icon('check', 'tiny ok') : V.icon('x', 'tiny err')) + ' <b>' + V.esc(d.event) + '</b> → ' + V.esc(d.name) + ' <span class="dim">· ' + V.fmtAgo(d.at) + ' · ' + (d.status ? 'HTTP ' + d.status : V.esc(d.error || 'no answer')) + (d.attempt > 1 ? ' · try ' + d.attempt : '') + '</span></li>'; }).join('') + '</ul>' : '<p class="dim small">None yet.</p>') + '</section>';
+      body.onclick = function (e) {
+        var b;
+        if ((b = e.target.closest('[data-a=newkey]'))) {
+          V.api('/api/admin/apikeys', { body: { name: V.$('[data-k=name]', body).value, scope: V.$('[data-k=scope]', body).value, profile: V.$('[data-k=profile]', body).value } }).then(function (r) {
+            V.dialog({ title: 'Your new API key', body: '<p>Copy it now — it won’t be shown again.</p><input class="input mono" readonly value="' + V.esc(r.key) + '" onfocus="this.select()">', actions: [{ label: 'Copy', fn: function () { try { navigator.clipboard.writeText(r.key); V.toast('Copied'); } catch (x) {} return false; } }, { label: 'Done', primary: true }] }).then(function () { V.adminTabs.api(body, A); });
+          }).catch(V.fail);
+        } else if ((b = e.target.closest('[data-revoke]'))) {
+          V.confirm('Revoke this key? Anything using it stops working.', { ok: 'Revoke', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/apikeys/' + b.dataset.revoke).then(function () { V.adminTabs.api(body, A); }).catch(V.fail); });
+        } else if ((b = e.target.closest('[data-a=newhook]'))) {
+          var evs = V.$$('[data-ev]', body).filter(function (x) { return x.checked; }).map(function (x) { return x.dataset.ev; });
+          V.api('/api/admin/webhooks', { body: { url: V.$('[data-h=url]', body).value, name: V.$('[data-h=name]', body).value, events: evs } }).then(function (h) {
+            V.dialog({ title: 'Webhook added', body: '<p>Its signing secret (also under “Secret” later):</p><input class="input mono" readonly value="' + V.esc(h.secret) + '" onfocus="this.select()">', actions: [{ label: 'Done', primary: true }] }).then(function () { V.adminTabs.api(body, A); });
+          }).catch(V.fail);
+        } else if ((b = e.target.closest('[data-hdel]'))) {
+          V.confirm('Delete this webhook?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/webhooks/' + b.dataset.hdel).then(function () { V.adminTabs.api(body, A); }); });
+        } else if ((b = e.target.closest('[data-htest]'))) {
+          b.disabled = true;
+          V.api('/api/admin/webhooks/' + b.dataset.htest + '/test', { method: 'POST' }).then(function (d) { b.disabled = false; V.toast(d.ok ? 'Delivered (HTTP ' + d.status + ')' : 'Not delivered: ' + (d.status ? 'HTTP ' + d.status : d.error)); setTimeout(function () { V.adminTabs.api(body, A); }, 300); }).catch(function (x) { b.disabled = false; V.fail(x); });
+        } else if ((b = e.target.closest('[data-hsecret]'))) {
+          V.api('/api/admin/webhooks/' + b.dataset.hsecret + '/secret').then(function (r) { V.dialog({ title: 'Signing secret', body: '<input class="input mono" readonly value="' + V.esc(r.secret) + '" onfocus="this.select()">', actions: [{ label: 'Done', primary: true }] }); });
+        }
+      };
+    }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+})();
