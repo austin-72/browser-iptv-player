@@ -216,6 +216,22 @@
 .al-h { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .al-type { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; background: var(--card2); padding: 2px 8px; border-radius: 6px; color: var(--dim); }
 .al-b { margin: .3rem 0; overflow-wrap: anywhere; }
+.ct-rows { display: grid; gap: .5rem; margin: 1rem 0 .4rem; }
+.ct-row { display: grid; grid-template-columns: 7.5rem auto 1fr; align-items: center; gap: .4rem 1rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: .7rem .9rem; }
+.ct-row.busy { border-color: var(--dim); }
+.ct-dots { display: flex; gap: 6px; }
+.ct-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; line-height: 1; color: #0b0d12; }
+.ct-dot.ok::after { content: '\2713'; }
+.ct-dot.fail::after { content: '\2715'; color: #fff; }
+.ct-dot.ok { background: var(--ok); border-color: var(--ok); }
+.ct-dot.fail { background: var(--danger); border-color: var(--danger); }
+.ct-dot.run { border-color: var(--text); animation: nbPulse 1s ease-in-out infinite; }
+.ct-res { min-width: 0; overflow-wrap: anywhere; }
+.ct-log { margin: 0 0 .9rem; }
+.ct-log summary { cursor: pointer; font-weight: 600; }
+.ct-log ol { margin: .4rem 0 0; padding: .5rem .8rem .5rem 2.1rem; max-height: 30vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.ct-log li { margin: .2rem 0; }
+@media (max-width: 600px) { .ct-row { grid-template-columns: 1fr auto; } .ct-res { grid-column: 1 / -1; } }
 .adm-profiles { list-style: none; padding: 0; margin: 0; }
 .adm-profiles > li { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; margin-bottom: .8rem; }
 .ap-h { display: flex; gap: 1rem; align-items: center; margin-bottom: .6rem; }

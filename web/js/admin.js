@@ -61,9 +61,10 @@ V.adminTabs.lists = function (body, A) {
         var info = (l.type === 'xtream' ? (l.account ? V.adminAccountLine(l) : '') : l.type === 'folder' ? V.esc((l.folders || []).join(', ')) : l.type === 'url' ? V.esc(l.url) : 'Uploaded file') + (px ? '<div>' + V.icon('globe', 'tiny') + ' Proxy: ' + V.esc(px) + '</div>' : '');
         return '<li class="' + (l.enabled ? '' : 'off') + '" data-id="' + l.id + '"><div class="al-h"><span class="al-type">' + ({ url: 'Playlist', file: 'File', xtream: 'Xtream', folder: 'Folder' }[l.type]) + '</span><b>' + V.esc(l.name) + '</b>' + (s.format ? '<span class="chip sm">' + V.esc(s.format) + '</span>' : '') + '<span class="sp"></span>' +
           '<button class="icon-btn" data-up aria-label="Move up"' + (i ? '' : ' disabled') + '>' + V.icon('up') + '</button><button class="icon-btn" data-down aria-label="Move down"' + (i < A.lists.length - 1 ? '' : ' disabled') + '>' + V.icon('down') + '</button>' +
-          '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label><button class="icon-btn" data-ref aria-label="Refresh now">' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
+          '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label>' + (l.type !== 'folder' ? '<button class="icon-btn" data-ct aria-label="Test how many streams play at once" title="Test how many streams play at once">' + V.icon('pulse') + '</button>' : '') + '<button class="icon-btn" data-ref aria-label="Refresh now">' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
           '<div class="al-b dim small">' + info + '</div><div class="al-s small">' + (l.refreshing ? '<span class="spinner sm"></span> Refreshing…' : s.ok ? V.icon('check', 'tiny ok') + ' ' + V.plural(s.count || 0, 'item') + ' · updated ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.icon('x', 'tiny') + ' ' + V.esc(s.error) + '</span>' + (s.count ? ' <span class="dim">(using the saved copy)</span>' : '') : '') +
-          (l.refreshHours ? ' · every ' + l.refreshHours + ' h' : ' · no automatic refresh') + (l.lang ? ' · language forced: ' + V.esc(V.langName(l.lang)) : '') + '</div></li>';
+          (l.refreshHours ? ' · every ' + l.refreshHours + ' h' : ' · no automatic refresh') + (l.lang ? ' · language forced: ' + V.esc(V.langName(l.lang)) : '') + '</div>' +
+          (l.testing ? '<div class="al-s small"><span class="spinner sm"></span> Testing how many streams play at once…</div>' : l.connTest ? '<div class="al-s small">' + V.icon('pulse', 'tiny') + ' ' + V.connTestLine(l.connTest) + ' <span class="dim">· tested ' + V.fmtAgo(l.connTest.at) + '</span></div>' : '') + '</li>';
       }).join('') + '</ul>' : V.empty('No lists yet', 'Add an M3U/M3U8 playlist (any format: PLS, XSPF, JSON…), an Xtream Codes account, an uploaded file, or a folder of your own videos on the server.'));
   };
   draw();
@@ -75,6 +76,7 @@ V.adminTabs.lists = function (body, A) {
     var id = li.dataset.id, l = A.lists.filter(function (x) { return x.id === id; })[0];
     var b = e.target.closest('button');
     if (!b) return;
+    if (b.hasAttribute('data-ct')) { V.connTestDialog(l).then(reload); return; }
     if (b.hasAttribute('data-ref')) { b.disabled = true; V.api('/api/admin/lists/' + id + '/refresh', { method: 'POST' }).then(function () { V.toast('Refreshed'); reload(); }).catch(function (x) { V.fail(x); reload(); }); }
     else if (b.hasAttribute('data-del')) V.confirm('Remove “' + l.name + '”? Its channels and videos disappear for everyone.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/lists/' + id).then(reload); });
     else if (b.hasAttribute('data-edit')) V.editListDialog(l).then(function (ok) { if (ok) reload(); });
@@ -86,8 +88,92 @@ V.adminTabs.lists = function (body, A) {
     }
   };
   body.onchange = function (e) { if (e.target.hasAttribute('data-en')) { var id = e.target.closest('[data-id]').dataset.id; V.put('/api/admin/lists/' + id, { enabled: e.target.checked }).then(reload).catch(V.fail); } };
-  var t = setInterval(function () { if (A.lists.some(function (l) { return l.refreshing; })) reload(); }, 4000);
+  var t = setInterval(function () { if (A.lists.some(function (l) { return l.refreshing || l.testing; }) && !V.$('dialog[open]')) reload(); }, 4000);
   V.pageCleanup = function () { clearInterval(t); };
+};
+
+var CT_KINDS = [['live', 'Live TV'], ['show', 'TV shows'], ['movie', 'Movies']];
+/** How many at once, in words: "3 at once", "6 or more", plus streams that were already playing. */
+V.connTestCount = function (r, already) {
+  if (!r || !(r.max >= 1)) return '—';
+  if (!r.limited) return r.max + ' or more';
+  return already ? r.max + ' more (' + (r.max + already) + ' in all)' : String(r.max);
+};
+/** "Plays at once: Live TV 2 · TV shows 2 · Movies 6 or more" */
+V.connTestLine = function (ct) {
+  var parts = CT_KINDS.filter(function (k) { return ct[k[0]]; }).map(function (k) { return k[1] + ' <b>' + V.esc(V.connTestCount(ct[k[0]], ct.already)) + '</b>'; });
+  return parts.length ? 'Streams at once: ' + parts.join(' · ') : 'Connection test didn’t finish';
+};
+
+/** Admin → Lists → (pulse): how many streams of each kind this list plays at once, tested live. */
+V.connTestDialog = function (l) {
+  var dots = function (n) { var h = ''; for (var i = 1; i <= 6; i++) h += '<span class="ct-dot" data-n="' + i + '"><span class="sr-only">' + i + '</span></span>'; return h; };
+  var timer = null, running = false;
+  return V.dialog({
+    title: 'How many at once? · ' + l.name, wide: true, cls: 'ct-dlg',
+    body: '<p class="dim">Opens streams from this list one after another without closing the earlier ones — live TV first, then TV shows, then movies, up to 6 of each — and finds where the provider refuses another or cuts one off. It takes a minute or three and uses about as much internet as 6 streams.</p>' +
+      ((l.inUse || []).length ? '<div class="note warn">' + V.icon('info') + ' <span>' + V.esc(l.inUse.map(function (u) { return u.name + ' (' + u.device + ')'; }).join(', ')) + ' ' + (l.inUse.length > 1 ? 'are' : 'is') + ' watching from this list now. The test can interrupt them, and what they’re playing counts toward the limit.</span></div>' : '') +
+      '<div class="ct-rows">' + CT_KINDS.map(function (k) { return '<div class="ct-row" data-k="' + k[0] + '"><b>' + k[1] + '</b><span class="ct-dots" aria-hidden="true">' + dots() + '</span><span class="ct-res dim">Not tested</span></div>'; }).join('') + '</div>' +
+      '<p class="ct-foot dim small" aria-live="polite"></p>' +
+      '<details class="ct-log"><summary>What happened</summary><ol class="small"></ol></details>' +
+      '<p class="dim small">The test runs from the server' + (l.proxy !== 'none' && (l.proxy || (S.admin && S.admin.settings.proxy)) ? ', through this list’s proxy' : '') + '. Once it’s done, the result is used to tell people who else is watching when every stream is in use — instead of what the provider says. Some providers also limit how many different places (internet connections) can watch at once; this can’t test that.</p>',
+    actions: [{ label: 'Close', value: true }, { label: 'Start test', primary: true, fn: function (d) {
+      var btn = V.$('.dlg-f .primary', d);
+      if (running) { V.del('/api/admin/lists/' + l.id + '/conntest').then(d._poll).catch(V.fail); return false; }
+      btn.disabled = true;
+      V.api('/api/admin/lists/' + l.id + '/conntest', { body: {} }).then(function () { d._poll(); }).catch(function (e) { btn.disabled = false; V.fail(e); });
+      return false;
+    } }],
+    onOpen: function (d) {
+      var draw = function (r) {
+        var job = r.job, saved = r.saved;
+        var btn = V.$('.dlg-f .primary', d);
+        running = !!(job && job.running);
+        if (btn) { btn.disabled = false; btn.textContent = running ? 'Stop' : (job || saved) ? 'Test again' : 'Start test'; btn.classList.toggle('danger', running); btn.classList.toggle('primary', true); }
+        var already = job ? job.already : saved ? saved.already : 0;
+        CT_KINDS.forEach(function (k) {
+          var row = V.$('.ct-row[data-k="' + k[0] + '"]', d);
+          var K = job && job.kinds.filter(function (x) { return x.k === k[0]; })[0];
+          var res = K ? (K.state === 'done' ? { max: K.max, limited: K.limited, why: K.why } : null) : saved && saved[k[0]];
+          var last = {}, top = 0;
+          (K ? K.steps : []).forEach(function (x) { last[x.n] = x; });
+          for (var i = 1; i <= 6; i++) if (last[i] && last[i].ok) top = i;
+          var next = Math.min(6, top + 1);
+          V.$$('.ct-dot', row).forEach(function (dot) {
+            var n = +dot.dataset.n, st = '';
+            if (res) st = n <= res.max ? 'ok' : res.limited && n === res.max + 1 ? 'fail' : '';
+            else if (K) st = last[n] && last[n].ok ? 'ok' : last[n] && (K.state === 'error' || K.limited) ? 'fail' : K.state === 'running' && n === next ? 'run' : '';
+            dot.className = 'ct-dot' + (st ? ' ' + st : '');
+          });
+          var txt, cls = 'dim';
+          if (K && K.state !== 'done') {
+            txt = { waiting: 'Waiting', pausing: 'Letting the provider close the last streams…', finding: 'Finding something to play…', running: 'Stream ' + next + '…', skipped: K.note || 'Nothing to test', error: K.why || 'Couldn’t test', stopped: 'Stopped' }[K.state] || K.state;
+            if (K.state === 'error') cls = 'err';
+          } else if (res) {
+            txt = '<b>' + V.esc(V.connTestCount(res, already)) + '</b> at once' + (res.why ? ' · <span class="dim">' + V.esc(res.why) + '</span>' : res.limited ? '' : ' · <span class="dim">no limit up to 6</span>');
+            cls = '';
+          } else txt = 'Not tested';
+          var el = V.$('.ct-res', row);
+          el.className = 'ct-res ' + cls;
+          el.innerHTML = K && K.state !== 'done' ? V.esc(txt) : txt;
+          row.classList.toggle('busy', !!(K && ['running', 'finding', 'pausing'].indexOf(K.state) >= 0));
+        });
+        V.$('.ct-foot', d).textContent = running ? 'Testing… you can close this; the test keeps going.' : job && job.endedAt ? 'Finished ' + V.fmtAgo(job.endedAt) + '.' + (job.error ? ' ' + job.error : '') : saved ? 'Last tested ' + V.fmtAgo(saved.at) + '.' : '';
+        var log = job ? job.log : [];
+        var ol = V.$('.ct-log ol', d);
+        if (ol.children.length !== log.length) ol.innerHTML = log.map(function (x) { return '<li><span class="dim">' + V.fmtClock(x.at) + '</span> ' + V.esc(x.text) + '</li>'; }).join('');
+        V.$('.ct-log', d).hidden = !log.length;
+      };
+      var poll = function () {
+        if (timer === -1) return;
+        clearTimeout(timer);
+        return V.api('/api/admin/lists/' + l.id + '/conntest').then(function (r) { if (timer === -1) return; draw(r); if (r.job && r.job.running) timer = setTimeout(poll, 1000); }).catch(function () { if (timer !== -1) timer = setTimeout(poll, 3000); });
+      };
+      d._poll = poll;
+      poll();
+    },
+    onClose: function () { clearTimeout(timer); timer = -1; },
+  });
 };
 
 V.langSelect = function (cur) { return '<select class="input" name="lang"><option value="">Detect automatically</option>' + (S.boot.languages || []).map(function (l) { return '<option value="' + l.code + '"' + (l.code === cur ? ' selected' : '') + '>' + V.esc(l.name) + '</option>'; }).join('') + '</select>'; };

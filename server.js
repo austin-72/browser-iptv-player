@@ -27,6 +27,7 @@ const { Hub, Social } = require('./lib/social');
 const { Tmdb } = require('./lib/tmdb');
 const { Recs } = require('./lib/recs');
 const { Markers } = require('./lib/markers');
+const { ConnTest } = require('./lib/conntest');
 const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
@@ -246,8 +247,17 @@ function loopback(pathq) { return `${tls ? 'https' : 'http'}://127.0.0.1:${cfg.p
 function connLimit(it, alt = -1) {
   const id = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src;
   const l = id && lists.store.data.lists.find((x) => x.id === id);
+  // What the admin's connection test measured for this kind beats what the provider claims.
+  const m = measuredLimit(l, it.t);
+  if (m !== null) return m;
   const n = parseInt(l && l.account && l.account.maxConnections, 10);
   return n > 0 ? n : 0;
+}
+/** The tested number of streams at once for a kind of item (0 = no limit found; null = not tested). */
+function measuredLimit(l, t) {
+  const r = l && l.connTest && l.connTest[t === 'movie' ? 'movie' : t === 'episode' || t === 'show' ? 'show' : 'live'];
+  if (!r || !(r.max >= 1)) return null;
+  return r.limited ? r.max + (l.connTest.already || 0) : 0;
 }
 const oneConnection = (it, alt = -1) => connLimit(it, alt) === 1;
 function listFormats(it, alt = -1) {
@@ -1286,7 +1296,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
   const use = listUsage();
   return {
     settings: adminSettingsView(),
-    lists: lists.all().map((l) => ({ ...lists.view(l), inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
+    lists: lists.all().map((l) => ({ ...lists.view(l), testing: !!(connTest.status(l.id) || {}).running, inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
     profiles: accounts.profiles.map((x) => ({ ...accounts.view(x), online: hub.online().includes(x.id) })),
     devices: accounts.sessionsList(),
     me: ctx.sess ? ctx.sess.id : null,
@@ -1398,6 +1408,11 @@ route('POST', '/api/admin/lists/upload', async (req, res, p, q, ctx) => {
 route('PUT', '/api/admin/lists/:id', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.update(p.id, await readJSON(req)); });
 route('PUT', '/api/admin/lists/:id/file', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.replaceFile(p.id, await readBody(req, 400 * 1024 * 1024)); });
 route('DELETE', '/api/admin/lists/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.remove(p.id); return { ok: true }; });
+// Connection test: how many streams of each kind the list plays at once (Admin → Lists).
+const connTest = new ConnTest({ lists, catalog, headers: (h) => proxy.headers({ h }), usage: (id) => listUsage().get(id) || [], log });
+route('POST', '/api/admin/lists/:id/conntest', async (req, res, p, q, ctx) => { requireAdmin(ctx); const b = await readJSON(req).catch(() => ({})); return connTest.start(p.id, { kinds: Array.isArray(b.kinds) ? b.kinds : null }); });
+route('GET', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.get(p.id); return { job: connTest.status(p.id), saved: lists.get(p.id).connTest || null }; });
+route('DELETE', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); return connTest.stop(p.id); });
 route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.refresh(p.id); });
 route('POST', '/api/admin/lists-order', async (req, res, p, q, ctx) => { requireAdmin(ctx); lists.reorder((await readJSON(req)).ids || []); return { ok: true }; });
 route('POST', '/api/admin/guides', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.addGuide(await readJSON(req)); });

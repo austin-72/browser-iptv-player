@@ -234,6 +234,7 @@ Notes:
 **Admin**
 - **Proxies** (HTTP or SOCKS5) for everything the server fetches, per list or as the default — optionally for video too.
 - **Provider accounts:** expiry, connections allowed and in use, with a warning two weeks before an account runs out.
+- **How many at once?** Admin → Lists → the pulse button on a list. The server opens live channels, then episodes, then movies from that list one after another, up to 6 of each, without closing the earlier ones. It finds where the provider refuses another (HTTP 403/509, a "max connections" message, nothing sent) or cuts an older one off. A refused stream is retried with one known to work, so a dead channel doesn't count as the limit. Movies are read slowly so whole films aren't downloaded. HLS channels are followed like a player would. The result replaces the provider's own figure for *Busy providers* (above). Test it yourself: `node --test test/conntest.test.js`.
 - **TMDB:** fetch everything not fetched yet, update everything, retry the ones not found, or fetch by category — with live progress.
 - **Nightly backups** kept in `data/backups` (download, restore or delete them in Admin).
 - **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new program files are picked up automatically — the web app reloads and the server restarts itself when nobody is watching through it. You can also upload the app's .zip in Admin; settings and data are never touched.
