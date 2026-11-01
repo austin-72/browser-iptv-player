@@ -2,15 +2,23 @@
 
 [← Back to the README](../README.md)
 
-## Subtitles from OpenSubtitles
+## Subtitles found online
 
-When a film or episode has no subtitles in your language, the player can find some on OpenSubtitles.com: **subtitles button → Find subtitles…**. Results are in your languages, best first: your first language, real translations before machine ones, then the most downloaded. Pick one and it shows straight away.
+When a film or episode has no subtitles in your language, the player can find some online: **subtitles button → Find subtitles…**. Every source is searched at once and the results are listed together, best first: your first language; then subtitles already saved here and the free sources; real translations before machine ones; single episodes before whole-season packs; then the most downloaded. Each result says where it's from. Pick one and it shows straight away.
 
-Each subtitle is downloaded once, converted to WebVTT and kept on the server (the oldest are dropped past 60 MB). It also works when the server converts a stream part-way through.
+| Source | Cost | Covers | Setup |
+| --- | --- | --- | --- |
+| **SubDL** (main) | Free: 2,000 searches a day, downloads not counted | Films and series | A free API key from subdl.com (your account → API key) |
+| **Podnapisi.net** | Free | Films and series | Nothing — on by default |
+| **Addic7ed** (through Gestdown) | Free | TV episodes only; often first after an episode airs | Nothing — on by default |
+| **OpenSubtitles.com** (backup) | 5 downloads a day on a free key, shared by everyone here; more only with VIP | The biggest library | A free API key (your profile → API consumers) |
 
-- **Fetch automatically:** Settings → *Subtitles from OpenSubtitles* → *Fetch subtitles automatically*. When you'd want subtitles and there are none in your language, the best match is fetched after a few seconds.
-- **Setup (admin):** Admin → **Integrations**. Enter a free API key from opensubtitles.com (your profile → API consumers). An OpenSubtitles account is optional and gives more downloads a day.
-- When the day's downloads are used up, the message says so and when more become available.
+Each subtitle is downloaded once, converted to WebVTT and kept on the server (up to 3,000 files / 300 MB; the least recently used go first), so watching it again — or someone else picking it — costs nothing. Season packs are opened and the right episode picked out. It also works when the server converts a stream part-way through.
+
+- **Fetch automatically:** Settings → *Subtitles found online* → *Fetch subtitles automatically*. When you'd want subtitles and there are none in your language, the free sources are tried about 15 seconds in. OpenSubtitles is only tried if they have nothing **and** you've watched for 3 minutes (so channel-surfing doesn't use up its downloads), and never when it would leave fewer than 2 of today's downloads for choosing by hand.
+- In **Find subtitles**, OpenSubtitles results say they use one of today's downloads, and how many are left.
+- **Setup (admin):** Admin → **Integrations** → *Subtitles found online*: the SubDL key, the Podnapisi and Addic7ed switches, and *Test all sources*. OpenSubtitles is the section below it; an account there only helps with a VIP subscription.
+- When OpenSubtitles' downloads are used up, the message says so; the other sources keep working.
 
 ## Trakt
 
@@ -126,4 +134,4 @@ automation:
 
 ### Environment variables (testing only)
 
-`OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`).
+`SUBDL_BASE`, `SUBDL_DL_BASE`, `PODNAPISI_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`).

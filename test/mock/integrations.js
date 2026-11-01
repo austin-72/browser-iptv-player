@@ -1,8 +1,13 @@
-// Stand-ins for the OpenSubtitles and Trakt APIs (tests only). start({ quota }) → { base, osBase, traktBase, state, close }.
+// Stand-ins for the subtitle sources (SubDL, Podnapisi, Gestdown, OpenSubtitles) and Trakt (tests only).
+// start({ quota }) → { base, osBase, traktBase, subdlBase, subdlDlBase, podnapisiBase, gestdownBase, state, close }.
 const http = require('http');
+const { zip } = require('../../lib/zip');
+
+const SRT = (text) => `1\n00:00:01,000 --> 00:00:02,000\n${text}\n`;
 
 function start(opts = {}) {
   const state = {
+    subs: { subdl: [], podnapisi: [], gestdown: [], subdlOff: !!opts.subdlOff, podnapisiDown: !!opts.podnapisiDown },
     osDownloads: 0, osSearches: 0, osQuota: opts.quota === undefined ? 5 : opts.quota, osLogins: 0,
     trakt: { approved: false, polls: 0, scrobbles: [], watchlist: { movies: [{ movie: { title: 'Remote Film', year: 2020, ids: { trakt: 9, tmdb: 777 } } }], shows: [] }, ratings: [], history: [], removed: [], refreshes: 0, token: 'tok1' },
     hooks: [], hookFailFirst: opts.hookFailFirst || 0,
@@ -12,6 +17,62 @@ function start(opts = {}) {
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const p = u.pathname;
+    // ---------------- SubDL
+    if (p === '/subdl/subtitles') {
+      const q = Object.fromEntries(u.searchParams);
+      state.subs.subdl.push(q);
+      if (q.api_key !== 'sdkey') return json(res, 200, { status: false, error: 'Invalid API key' });
+      if (state.subs.subdlOff) return json(res, 200, { status: false, error: "Can't find movie or tv" });
+      if (q.type === 'tv') return json(res, 200, { status: true, results: [{ name: 'Show' }], subtitles: [
+        { release_name: 'Show.S02E03.WEB', language: 'EN', url: '/subtitle/ep-2-3.zip', season: 2, episode: 3, hi: false },
+        { release_name: 'Show.S02.Complete', language: 'EN', url: '/subtitle/season-2.zip', season: 2, episode: null, full_season: true },
+      ] });
+      return json(res, 200, { status: true, results: [{ name: 'Film' }], subtitles: [
+        { release_name: 'Film.2020.1080p', lang: 'english', language: 'EN', url: '/subtitle/film-en.zip', hi: false },
+        { release_name: 'Film.2020.FR', language: 'FR', url: '/subtitle/film-fr.zip' },
+      ] });
+    }
+    if (p.startsWith('/subdl-dl/subtitle/')) {
+      const n = p.slice('/subdl-dl/subtitle/'.length);
+      state.subs.subdlDownloads = (state.subs.subdlDownloads || 0) + 1;
+      const files = n === 'season-2.zip' ? [{ name: 'Show.S02E02.srt', data: SRT('Episode two') }, { name: 'Show.S02E03.srt', data: SRT('Episode three') }, { name: 'readme.txt', data: 'x' }]
+        : [{ name: n.replace('.zip', '.srt'), data: SRT('SubDL ' + n) }];
+      res.writeHead(200, { 'Content-Type': 'application/zip' });
+      return res.end(zip(files));
+    }
+    // ---------------- Podnapisi
+    if (p === '/pn/subtitles/search/advanced') {
+      state.subs.podnapisi.push(u.search);
+      if (state.subs.podnapisiDown) { res.writeHead(503); return res.end(); }
+      if (req.headers.accept !== 'application/json') return json(res, 400, {});
+      const lang = u.searchParams.get('language');
+      const tv = u.searchParams.getAll('movie_type').includes('tv-series');
+      const data = tv ? [{ id: 'pnEp' + lang, language: lang, releases: ['Show.S02E03.HDTV'], flags: [], movie: { title: 'Show', year: 2019, episode_info: { season: 2, episode: 3 } } },
+        { id: 'pnOther', language: lang, releases: ['Show.S02E04'], movie: { title: 'Show', episode_info: { season: 2, episode: 4 } } }]
+        : [{ id: 'pnFilm' + lang, language: lang, releases: ['Film.2020.BluRay'], flags: ['hearing_impaired'], movie: { title: 'Film', year: 2020 } },
+          { id: 'pnWrong', language: lang, releases: ['Other'], movie: { title: 'A Different Film', year: 2020 } }];
+      return json(res, 200, { data, page: 1, all_pages: 1 });
+    }
+    let mm;
+    if ((mm = /^\/pn\/subtitles\/([\w-]+)\/download$/.exec(p))) {
+      res.writeHead(200, { 'Content-Type': 'application/zip' });
+      return res.end(zip([{ name: mm[1] + '.srt', data: SRT('Podnapisi ' + mm[1]) }]));
+    }
+    // ---------------- Gestdown (Addic7ed)
+    if ((mm = /^\/gd\/shows\/search\/(.+)$/.exec(p))) {
+      state.subs.gestdown.push(p);
+      return decodeURIComponent(mm[1]) === 'Show' ? json(res, 200, { shows: [{ id: 'show-uuid', name: 'Show', tmdbId: 4242 }] }) : json(res, 404, {});
+    }
+    if ((mm = /^\/gd\/subtitles\/get\/([\w-]+)\/(\d+)\/(\d+)\/(.+)$/.exec(p))) {
+      state.subs.gestdown.push(p);
+      if (decodeURIComponent(mm[4]) !== 'English') return json(res, 404, {});
+      return json(res, 200, { matchingSubtitles: [{ subtitleId: 'g1', version: 'KILLERS', completed: true, hearingImpaired: false, hd: true, downloadUri: '/subtitles/download/g1', language: 'English', downloadCount: 321 },
+        { subtitleId: 'g2', version: 'WIP', completed: false, downloadUri: '/subtitles/download/g2', language: 'English' }] });
+    }
+    if ((mm = /^\/gd\/subtitles\/download\/([\w-]+)$/.exec(p))) {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end(SRT('Addic7ed ' + mm[1]));
+    }
     // ---------------- OpenSubtitles
     if (p.startsWith('/os/')) {
       if (req.headers['api-key'] !== 'oskey') return json(res, 401, { message: 'bad key' });
@@ -78,7 +139,7 @@ function start(opts = {}) {
   });
   return new Promise((ok) => srv.listen(opts.port || 0, '127.0.0.1', () => {
     const base = `http://127.0.0.1:${srv.address().port}`;
-    ok({ base, osBase: base + '/os', traktBase: base + '/trakt', state, close: () => { srv.close(); srv.closeAllConnections(); } });
+    ok({ base, osBase: base + '/os', traktBase: base + '/trakt', subdlBase: base + '/subdl', subdlDlBase: base + '/subdl-dl', podnapisiBase: base + '/pn', gestdownBase: base + '/gd', state, close: () => { srv.close(); srv.closeAllConnections(); } });
   }));
 }
 

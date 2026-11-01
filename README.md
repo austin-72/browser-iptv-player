@@ -154,7 +154,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Multiview:** up to 9 live channels at once (2 on a phone) in a grid or "one big" layout, with sound from the one you pick. Each tile counts as a provider connection, so busy-provider and priority rules still apply.
 - **Audio sync** in either direction: when the sound is early it's held back; when it's late the *picture* is held back. Remembered per channel.
 - **Sound only** for live channels (radio-style, far less data), **Open in another app** (VLC, MX Player, Infuse, Outplayer and others, or a .m3u file), **Shuffle** for series, your own **skip lengths** (5–60 s), a bigger **buffer** for unreliable providers, opening on your **last channel**, and reminders that can **switch channel** by themselves.
-- **Subtitles from OpenSubtitles** when a film has none in your language (on demand or automatically).
+- **Subtitles found online** when a film or episode has none in your language (on demand or automatically): SubDL, Podnapisi and Addic7ed for free, with OpenSubtitles as the backup.
 - **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay and the Remote Playback API.
 
 ### Finding something to watch

@@ -1369,7 +1369,7 @@ PP._tracks = function () {
   if (ft && ft.audio.length > 1 && !out.audio && (S.settings.ffmpeg || this.mb)) {
     out.audio = { value: (ft.audio[this.audioTrack || 0] || {}).title || V.langName((ft.audio[this.audioTrack || 0] || {}).lang) || 'Track ' + ((this.audioTrack || 0) + 1), items: ft.audio.map(function (a) { return { label: [a.title || V.langName(a.lang) || 'Track ' + (a.i + 1), a.codec ? a.codec.toUpperCase() : '', a.channels > 2 ? a.channels + 'ch' : ''].filter(Boolean).join(' · '), on: (self.audioTrack || 0) === a.i, fn: function () { self.fileAudio(a.i); } }; }) };
   }
-  if (V.extSubsInto) V.extSubsInto(this, out); // (subtitles fetched from OpenSubtitles)
+  if (V.extSubsInto) V.extSubsInto(this, out); // (subtitles found online)
   return out;
 };
 
@@ -1401,8 +1401,8 @@ PP._menuPages = function (kind) {
     if (tr.subs) { main.push({ label: 'Subtitles', value: tr.subs.value, page: 'subs' }); pages.subs = tr.subs.items; } else main.push({ label: 'Subtitles', value: 'None', fn: function () {} });
     if (tr.audio) { main.push({ label: 'Audio', value: tr.audio.value, page: 'audio' }); pages.audio = tr.audio.items; }
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
-    // Subtitles from OpenSubtitles (when the admin has set it up): see integrations.js.
-    if (S.settings.opensubtitles && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
+    // Subtitles found online (SubDL, Podnapisi, Addic7ed, OpenSubtitles): see integrations.js.
+    if ((S.settings.subtitles || S.settings.opensubtitles) && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
     pages.main = main;
     return pages;
   }

@@ -17,7 +17,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
   const m = await mock.start();
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p5srv-'));
-  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, TRAKT_BASE: m.traktBase }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, TRAKT_BASE: m.traktBase, SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, PODNAPISI_BASE: m.podnapisiBase, GESTDOWN_BASE: m.gestdownBase }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   app.stdout.on('data', (d) => { out += d; });
   app.stderr.on('data', (d) => { out += d; });
@@ -107,6 +107,13 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
     await req('PUT', '/api/admin/integrations', { body: { opensubtitles: { apiKey: 'oskey' }, trakt: { clientId: 'cid', clientSecret: 'sec' } }, headers: X });
     const i2 = await req('GET', '/api/admin/integrations');
     assert.ok(!JSON.stringify(i2.json).includes('oskey') && !JSON.stringify(i2.json).includes('"sec"'));
+    await req('PUT', '/api/admin/integrations', { body: { subdl: { apiKey: 'sdkey' }, sources: { gestdown: false } }, headers: X });
+    const i3 = await req('GET', '/api/admin/integrations');
+    assert.ok(!JSON.stringify(i3.json).includes('sdkey'), 'the SubDL key isn’t sent back');
+    assert.deepStrictEqual(i3.json.sources, { podnapisi: true, gestdown: false });
+    assert.strictEqual(i3.json.opensubtitles.reserve, 2);
+    const st = await req('POST', '/api/admin/integrations/subtitles/test', { headers: X });
+    assert.deepStrictEqual([st.json.subdl.ok, st.json.podnapisi.ok, st.json.gestdown.on], [true, true, false]);
     const me = await req('GET', '/api/boot');
     assert.ok(me.status === 200);
     const t = await req('POST', '/api/trakt/connect', { headers: X });
@@ -114,7 +121,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
     for (let i = 0; i < 30 && !fs.existsSync(path.join(dir, 'integrations.json')); i++) await wait(100);
     const secretsOnDisk = fs.readFileSync(path.join(dir, 'integrations.json'), 'utf8');
     assert.ok(secretsOnDisk.includes('oskey'));
-    assert.doesNotMatch(out, /oskey|iptv_[A-Za-z0-9_-]{20}/, 'never logged');
+    assert.doesNotMatch(out, /oskey|sdkey|iptv_[A-Za-z0-9_-]{20}/, 'never logged');
   } finally {
     app.kill();
     m.close();

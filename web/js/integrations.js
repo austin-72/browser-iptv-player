@@ -1,8 +1,8 @@
-/* Integrations: subtitles from OpenSubtitles, Trakt, playback health reports (for Admin → Overview),
+/* Integrations: subtitles found online (SubDL, Podnapisi, Addic7ed, OpenSubtitles), Trakt, playback health reports (for Admin → Overview),
    the connection speed test, and the admin's Integrations and "API & automations" pages. */
 'use strict';
 (function () {
-  // ------------------------------------------------------------ subtitles from OpenSubtitles
+  // ------------------------------------------------------------ subtitles found online
   var ext = function (p) { return p._extSubs || (p._extSubs = []); };
   var subUrl = function (p, url) { return url + (p.sessionId && p.offset ? '?offset=' + p.offset : ''); };
 
@@ -43,31 +43,35 @@
     out.subs = { value: p._extOn ? (list.filter(function (e) { return e.url === p._extOn; })[0] || {}).label : out.subs ? out.subs.value : 'Off', items: items };
   };
 
+  var subLabel = function (lang, from) { return (V.langName(lang) || lang) + (from ? ' (' + from + ')' : ''); };
+  var osLeft = function (q) { return q && q.remaining !== undefined && Date.now() - (q.at || 0) < 24 * 3600e3 ? q.remaining : null; };
   V.findSubtitles = function (p) {
     var it = p.it;
     if (!it) return;
     var body = document.createElement('div');
-    body.innerHTML = '<p class="dim small">From OpenSubtitles.com, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div>';
+    body.innerHTML = '<p class="dim small">Found online, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div>';
     V.dialog({ title: 'Find subtitles', body: body, wide: true, actions: [{ label: 'Close' }] });
     V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k)).then(function (r) {
       var box = V.$('.os-list', body);
       if (!box) return;
       if (!r.list.length) { box.innerHTML = '<p>Nothing found for “' + V.esc(it.n) + '” in your languages.</p>'; return; }
+      var left = osLeft(r.quota);
+      var anyCostly = r.list.some(function (x) { return x.costly; });
       box.innerHTML = '<ul class="os-ul">' + r.list.map(function (x) {
-        return '<li><button class="btn ghost block os-pick" data-f="' + x.fileId + '" data-l="' + V.esc(x.lang) + '"><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="truncate">' + V.esc(x.name) + '</span><small class="dim">' +
-          [x.downloads ? V.plural(x.downloads, 'download') : '', x.hi ? 'for the hard of hearing' : '', x.machine ? 'machine translated' : '', x.fromTrusted ? 'trusted' : '', x.cached ? 'saved here' : ''].filter(Boolean).join(' · ') + '</small></button></li>';
-      }).join('') + '</ul>' + (r.quota && r.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(r.quota.remaining, 'download') + ' left today.</p>' : '');
+        return '<li><button class="btn ghost block os-pick" data-f="' + V.esc(x.id || x.fileId) + '" data-l="' + V.esc(x.lang) + '" data-s="' + V.esc(x.from || '') + '"' + (x.costly && left === 0 ? ' disabled' : '') + '><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="truncate">' + V.esc(x.name) + '</span><small class="dim">' +
+          [x.from, x.pack ? 'whole season' : '', x.downloads ? V.plural(x.downloads, 'download') : '', x.hi ? 'for the hard of hearing' : '', x.machine ? 'machine translated' : '', x.fromTrusted ? 'trusted' : '', x.cached ? 'saved here' : x.costly ? 'uses 1 of today’s OpenSubtitles downloads' : ''].filter(Boolean).join(' · ') + '</small></button></li>';
+      }).join('') + '</ul>' + (anyCostly ? '<p class="dim small">' + (left !== null ? 'OpenSubtitles: ' + V.plural(left, 'download') + ' left today.' : 'OpenSubtitles allows only a few downloads a day.') + ' The others are free.</p>' : '');
       box.onclick = function (e) {
         var b = e.target.closest('.os-pick');
-        if (!b) return;
+        if (!b || b.disabled) return;
         b.disabled = true;
-        V.api('/api/opensubs/get', { body: { fileId: b.dataset.f } }).then(function (g) {
-          V.addExtSub(p, g.url, (V.langName(b.dataset.l) || b.dataset.l) + ' (OpenSubtitles)', b.dataset.l);
+        V.api('/api/opensubs/get', { body: { id: b.dataset.f, fileId: b.dataset.f } }).then(function (g) {
+          V.addExtSub(p, g.url, subLabel(b.dataset.l, b.dataset.s), b.dataset.l);
           var d = body.closest('dialog'); if (d && d._finish) d._finish(null);
           p.osd && p.osd('Subtitles on', 1200);
         }).catch(function (err) { b.disabled = false; V.fail(err); });
       };
-      var first = V.$('.os-pick', box); if (first) first.focus();
+      var first = V.$('.os-pick:not([disabled])', box); if (first) first.focus();
     }).catch(function (e) { var box = V.$('.os-list', body); if (box) box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
   };
 
@@ -82,19 +86,41 @@
     for (i = 0; i < fs.length; i++) if (String(fs[i].lang || '').slice(0, 2).toLowerCase() === lang) return true;
     return false;
   };
+  /*
+   * Fetching automatically: the free sources ~15 seconds in; if they have nothing, OpenSubtitles (which allows only a few
+   * downloads a day) once it's been watched for 3 minutes — so channel-surfing and quick peeks don't use them up.
+   */
   V.on('playing', function (it) {
-    if (!it || (it.t !== 'movie' && it.t !== 'episode') || !S.settings.opensubtitles || !V.pref('autoFetchSubs')) return;
+    if (!it || (it.t !== 'movie' && it.t !== 'episode') || !(S.settings.subtitles || S.settings.opensubtitles) || !V.pref('autoFetchSubs')) return;
     var p = V.player, tok = p.token;
-    setTimeout(function () {
-      if (p.token !== tok || V.watch.it !== it) return;
-      var lang = (V.pref('subLang') || ((S.profile && S.profile.langs) || S.settings.defaultLangs || ['en'])[0] || 'en').slice(0, 2);
+    var still = function () { return p.token === tok && V.watch.it === it; };
+    var lang = function () { return (V.pref('subLang') || ((S.profile && S.profile.langs) || S.settings.defaultLangs || ['en'])[0] || 'en').slice(0, 2); };
+    var wanted = function () {
       var cur = p._fileTracks && (p._fileTracks.audio || [])[p.audioTrack || 0];
-      if (p._subsWanted && !p._subsWanted(cur && cur.lang)) return;
-      if (hasSubsIn(p, lang)) return;
-      V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang } }).then(function (r) {
-        if (r && r.url && p.token === tok) { V.addExtSub(p, r.url, (V.langName(r.lang) || r.lang) + ' (OpenSubtitles)', r.lang); p.osd && p.osd('Subtitles from OpenSubtitles', 2000); }
-      }).catch(function () {});
-    }, 9000);
+      if (p._subsWanted && !p._subsWanted(cur && cur.lang)) return false;
+      return !hasSubsIn(p, lang());
+    };
+    var tryFetch = function (costly) {
+      return V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang(), costly: costly } }).then(function (r) {
+        if (r && r.url && still() && wanted()) { V.addExtSub(p, r.url, subLabel(r.lang, r.from), r.lang); p.osd && p.osd('Subtitles from ' + (r.from || 'online'), 2000); return true; }
+        return false;
+      }).catch(function () { return false; });
+    };
+    setTimeout(function () {
+      if (!still() || !wanted()) return;
+      tryFetch(false).then(function (got) {
+        if (got) return;
+        var waited = 0;
+        var tick = setInterval(function () {
+          if (!still()) { clearInterval(tick); return; }
+          if (!p.video || p.video.paused) return; // counts time actually watched
+          waited += 5;
+          if (waited < 165) return;
+          clearInterval(tick);
+          if (wanted()) tryFetch(true);
+        }, 5000);
+      });
+    }, 15000);
   });
 
   // ------------------------------------------------------------ Trakt scrobbling
@@ -281,7 +307,7 @@
   V.settingsExtra = function () {
     var pf = S.data.prefs;
     return (S.settings.trakt ? '<section class="card-sec" data-trakt><h2>Trakt</h2><div class="trakt-box"><div class="spinner"></div></div></section>' : '') +
-      (S.settings.opensubtitles ? '<section class="card-sec"><h2>Subtitles from OpenSubtitles</h2>' +
+      ((S.settings.subtitles || S.settings.opensubtitles) ? '<section class="card-sec"><h2>Subtitles found online</h2>' +
         '<label class="switch"><input type="checkbox" data-pref="autoFetchSubs"' + (pf.autoFetchSubs ? ' checked' : '') + '><span class="sw"></span><span><b>Fetch subtitles automatically</b><small>When a film or episode has none in your language and you’d want them</small></span></label>' +
         '<p class="dim small">You can also pick some yourself while watching: the subtitles button → Find subtitles.</p></section>' : '') +
       '<section class="card-sec"><h2>Connection</h2><p class="dim">How fast this device reaches the server and your provider, and what that’s good for.</p><button class="btn" data-a="speedtest">' + V.icon('pulse') + ' Test my connection</button></section>';
@@ -382,10 +408,17 @@
   V.adminTabs.integrations = function (body) {
     body.innerHTML = '<div class="spinner"></div>';
     V.api('/api/admin/integrations').then(function (I) {
-      var o = I.opensubtitles, t = I.trakt;
-      body.innerHTML = '<section class="card-sec"><h2>Subtitles: OpenSubtitles.com</h2><p class="dim">Lets anyone find subtitles for a film or episode that has none in their language (the subtitles button → Find subtitles), or fetch them automatically. Get a free API key at opensubtitles.com → your profile → API consumers. An account (optional) gives more downloads a day.</p>' +
+      var o = I.opensubtitles, t = I.trakt, sd = I.subdl || {}, src = I.sources || {};
+      var left = o.quota && o.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(o.quota.remaining, 'download') + ' left today (checked ' + V.fmtAgo(o.quota.at) + '). Fetching automatically leaves the last ' + (o.reserve || 2) + ' for choosing by hand.</p>' : '';
+      body.innerHTML = '<section class="card-sec"><h2>Subtitles found online</h2><p class="dim">Lets anyone find subtitles for a film or episode that has none in their language (the subtitles button → Find subtitles), or fetch them automatically. Sources are searched together; the free ones are used first.</p>' +
+        '<h3>SubDL <span class="dim small">· main source</span></h3><p class="dim small">Free: sign up at subdl.com, then your account → API key. 2,000 searches a day; downloads aren’t counted.</p>' +
+        '<div class="int-fields">' + secretField('sd.apiKey', 'API key', sd.apiKey) + '</div>' +
+        '<label class="switch"><input type="checkbox" data-src="podnapisi"' + (src.podnapisi !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Podnapisi.net</b><small>Free, no key needed. Films and series.</small></span></label>' +
+        '<label class="switch"><input type="checkbox" data-src="gestdown"' + (src.gestdown !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Addic7ed (through Gestdown)</b><small>Free, no key needed. TV episodes only — often the quickest after an episode airs.</small></span></label>' +
+        '<div class="btn-row"><button class="btn primary" data-save="sd">Save</button><button class="btn" data-test="all">Test all sources</button></div><div class="all-test small"></div></section>' +
+        '<section class="card-sec"><h2>Backup: OpenSubtitles.com</h2><p class="dim">The biggest library, used when the free sources have nothing. A free API key (opensubtitles.com → your profile → API consumers) allows 5 downloads a day, shared by everyone here; subtitles already saved here don’t count again. Signing in with an account only raises that with a VIP subscription.</p>' +
         '<div class="int-fields">' + secretField('os.apiKey', 'API key', o.apiKey) + secretField('os.username', 'Account username (optional)', o.username) + '<label class="field"><span>Account password</span><input class="input" type="password" data-f="os.password" value="' + V.esc(o.password) + '" autocomplete="new-password"></label></div>' +
-        (o.quota && o.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(o.quota.remaining, 'download') + ' left today (checked ' + V.fmtAgo(o.quota.at) + ').</p>' : '') +
+        left +
         '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>' +
         '<section class="card-sec"><h2>Trakt</h2><p class="dim">Each profile can then connect its Trakt account (Settings → Trakt) to log what it watches and keep its watchlist and ratings in step. Create an app at trakt.tv → Settings → Your API Apps (redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>) and paste its Client ID and Client Secret here.</p>' +
         '<div class="int-fields">' + secretField('tr.clientId', 'Client ID', t.clientId) + '<label class="field"><span>Client Secret</span><input class="input" type="password" data-f="tr.clientSecret" value="' + V.esc(t.clientSecret) + '" autocomplete="new-password"></label></div>' +
@@ -394,10 +427,27 @@
         var s = e.target.closest('[data-save]');
         if (s) {
           var val = function (k) { var el = V.$('[data-f="' + k + '"]', body); return el ? el.value : undefined; };
-          var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } } : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
+          var on = function (k) { var el = V.$('[data-src="' + k + '"]', body); return !!(el && el.checked); };
+          var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } }
+            : s.dataset.save === 'sd' ? { subdl: { apiKey: val('sd.apiKey') }, sources: { podnapisi: on('podnapisi'), gestdown: on('gestdown') } }
+            : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
           V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body); }).catch(V.fail);
         }
         var tb = e.target.closest('[data-test]');
+        if (tb && tb.dataset.test === 'all') {
+          var box = V.$('.all-test', body);
+          box.textContent = 'Testing…';
+          var NAMES = { subdl: 'SubDL', podnapisi: 'Podnapisi', gestdown: 'Addic7ed (Gestdown)', opensubtitles: 'OpenSubtitles' };
+          V.api('/api/admin/integrations/subtitles/test', { method: 'POST' }).then(function (r) {
+            box.innerHTML = '<ul class="simple">' + Object.keys(NAMES).map(function (k) {
+              var x = r[k] || {};
+              var msg = !x.on ? '<span class="dim">off</span>' : !x.ok ? '<span class="err">' + V.esc(x.error || 'failed') + '</span>' :
+                V.icon('check', 'tiny ok') + ' works' + (k === 'gestdown' ? ' (episodes only)' : x.found !== undefined ? ' — ' + V.plural(x.found, 'result') + ' for The Matrix' : '');
+              return '<li><b>' + NAMES[k] + '</b>: ' + msg + '</li>';
+            }).join('') + '</ul>';
+          }).catch(function (e) { box.innerHTML = '<span class="err">' + V.esc(e.message) + '</span>'; });
+          return;
+        }
         if (tb) {
           var out = V.$('.os-test', body);
           out.textContent = 'Testing…';

@@ -1,4 +1,4 @@
-// Subtitles (OpenSubtitles), Trakt, API keys and webhooks — against local stand-ins (test/mock/integrations.js).
+// Subtitles (SubDL, Podnapisi, Gestdown, OpenSubtitles), Trakt, API keys and webhooks — against local stand-ins (test/mock/integrations.js).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -6,7 +6,9 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const mock = require('./mock/integrations');
-const { OpenSubtitles, srtToVtt } = require('../lib/subtitles');
+const { OpenSubtitles, Subtitles, srtToVtt, RESERVE } = require('../lib/subtitles');
+const { langCode, pickFromDownload } = require('../lib/subsources');
+const { zip } = require('../lib/zip');
 const { Trakt } = require('../lib/trakt');
 const { ApiKeys } = require('../lib/apikeys');
 const { Webhooks, sign } = require('../lib/webhooks');
@@ -57,6 +59,91 @@ test('OpenSubtitles: search order, one download per file, quota message', async 
     os1.prune(3, 1e9);
     assert.strictEqual(fs.readdirSync(os1.dir).filter((x) => x.endsWith('.vtt')).length, 3);
   } finally { m.close(); }
+});
+
+const SRT2 = (t) => `1\n00:00:01,000 --> 00:00:02,000\n${t}\n`;
+test('Subtitle sources: languages, season packs', () => {
+  assert.deepStrictEqual(['EN', 'english', 'BR_PT', 'pt-br', 'Portuguese', 'fr', 'French', 'Farsi/Persian', 'Chinese BG code', 'Klingon'].map(langCode), ['en', 'en', 'pt', 'pt', 'pt', 'fr', 'fr', 'fa', 'zh', '']);
+  const pack = zip([{ name: 'Show.S02E02.srt', data: SRT2('two') }, { name: 'sub/Show.2x03.srt', data: SRT2('three') }, { name: 'nfo.txt', data: 'x'.repeat(500) }]);
+  assert.strictEqual(pickFromDownload(pack, { season: 2, episode: 3 }).toString(), SRT2('three'));
+  assert.strictEqual(pickFromDownload(Buffer.from('plain srt'), {}).toString(), 'plain srt', 'not a zip: as it is');
+});
+
+test('Subtitles from every source: free ones first, OpenSubtitles kept back', async () => {
+  const m = await mock.start({ quota: 3 });
+  const env = { SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, PODNAPISI_BASE: m.podnapisiBase, GESTDOWN_BASE: m.gestdownBase };
+  const saved = {}; for (const k in env) { saved[k] = process.env[k]; process.env[k] = env[k]; }
+  const dir = tmp();
+  const conf = { subdl: { apiKey: 'sdkey' }, sources: { podnapisi: true, gestdown: true }, opensubtitles: { apiKey: 'oskey' } };
+  const subs = new Subtitles({ dataDir: dir, getConf: () => conf, fetch, osBase: m.osBase });
+  try {
+    assert.deepStrictEqual(subs.active(), ['subdl', 'podnapisi', 'gestdown', 'opensubtitles']);
+    // A film: SubDL, Podnapisi (only the right title) and OpenSubtitles; English first, free before OpenSubtitles.
+    const film = await subs.search({ tmdb: 603, query: 'Film', year: 2020, langs: ['en', 'fr'] });
+    assert.deepStrictEqual(film.filter((x) => x.lang === 'en').map((x) => x.source), ['subdl', 'podnapisi', 'opensubtitles', 'opensubtitles', 'opensubtitles']);
+    assert.ok(!film.some((x) => /Different/.test(x.name) || x.id === 'pn:0:0:pnWrong'), 'other titles left out');
+    assert.ok(film.filter((x) => x.source === 'opensubtitles').every((x) => x.costly && x.from === 'OpenSubtitles'));
+    assert.ok(film.filter((x) => x.source !== 'opensubtitles').every((x) => !x.costly));
+    assert.strictEqual(m.state.subs.subdl[0].tmdb_id, '603');
+    assert.strictEqual(m.state.subs.subdl[0].languages, 'EN,FR');
+    assert.strictEqual(m.state.subs.gestdown.length, 0, 'Gestdown is for episodes only');
+
+    // Fetching from SubDL: the zip is opened and turned into WebVTT, and only fetched once.
+    const tok = await subs.get(film[0].id);
+    assert.match(tok, /^[0-9a-f]{24}$/);
+    assert.match(fs.readFileSync(subs.file(tok), 'utf8'), /^WEBVTT[\s\S]*SubDL film-en/);
+    await subs.get(film[0].id);
+    assert.strictEqual(m.state.subs.subdlDownloads, 1);
+    const again = await subs.search({ tmdb: 603, query: 'Film', year: 2020, langs: ['en', 'fr'] });
+    assert.ok(again.find((x) => x.id === film[0].id).cached, 'shown as saved here');
+    assert.match(fs.readFileSync(subs.file(await subs.get(film.find((x) => x.source === 'podnapisi').id)), 'utf8'), /Podnapisi pnFilmen/);
+
+    // An episode: all four; the single episode before the season pack; Addic7ed's unfinished one left out.
+    const ep = await subs.search({ parentTmdb: 4242, query: 'Show', season: 2, episode: 3, langs: ['en'] });
+    const srcs = ep.map((x) => x.source);
+    assert.ok(srcs.includes('subdl') && srcs.includes('podnapisi') && srcs.includes('gestdown') && srcs.includes('opensubtitles'));
+    assert.ok(!ep.some((x) => /WIP|S02E04/.test(x.name)));
+    const sd = ep.filter((x) => x.source === 'subdl');
+    assert.deepStrictEqual(sd.map((x) => x.pack), [false, true]);
+    assert.ok(srcs.indexOf('opensubtitles') > srcs.lastIndexOf('gestdown'));
+    assert.match(m.state.subs.gestdown.find((p) => /subtitles\/get/.test(p)), /show-uuid\/2\/3\/English$/);
+    // A season pack picks the right episode out of the zip.
+    assert.match(fs.readFileSync(subs.file(await subs.get(sd[1].id)), 'utf8'), /Episode three/);
+    assert.match(fs.readFileSync(subs.file(await subs.get(ep.find((x) => x.source === 'gestdown').id)), 'utf8'), /Addic7ed g1/);
+
+    // Fetching automatically: a free one, never OpenSubtitles unless allowed.
+    conf.subdl.apiKey = ''; conf.sources = { podnapisi: false, gestdown: false }; subs.clear();
+    const before = m.state.osDownloads;
+    assert.strictEqual(await subs.auto({ tmdb: 1, query: 'Film', year: 2020 }, 'en'), null, 'only OpenSubtitles has it: not used yet');
+    assert.strictEqual(m.state.osDownloads, before);
+    const got = await subs.auto({ tmdb: 1, query: 'Film', year: 2020 }, 'en', { allowCostly: true });
+    assert.strictEqual(got.source, 'opensubtitles');
+    assert.strictEqual(subs.quota.remaining, RESERVE, 'down to the reserve');
+    // With only the reserve left, automatic fetching leaves it for choosing by hand (what's already saved still works).
+    const saved1 = got.id;
+    const r2 = await subs.auto({ tmdb: 1, query: 'Film', year: 2020 }, 'en', { allowCostly: true });
+    assert.strictEqual(r2.id, saved1, 'the saved one is reused, free');
+    fs.unlinkSync(subs.file(got.token));
+    assert.strictEqual(await subs.auto({ tmdb: 1, query: 'Film', year: 2020 }, 'en', { allowCostly: true }), null);
+    assert.strictEqual(m.state.osDownloads, before + 1);
+    // …but can still be picked by hand.
+    await subs.get(saved1);
+    assert.strictEqual(m.state.osDownloads, before + 2);
+
+    // A bad SubDL key is reported; a source that's down doesn't stop the others.
+    conf.subdl.apiKey = 'wrong'; conf.sources = { podnapisi: true, gestdown: false }; conf.opensubtitles.apiKey = ''; subs.clear();
+    m.state.subs.podnapisiDown = true;
+    await assert.rejects(subs.search({ tmdb: 2, query: 'Film', langs: ['en'] }), /SubDL: Invalid API key/);
+    const t = await subs.test();
+    assert.deepStrictEqual([t.subdl.ok, t.podnapisi.on, t.gestdown.on, t.opensubtitles.on], [false, true, false, false]);
+    m.state.subs.podnapisiDown = false; conf.subdl.apiKey = 'sdkey'; subs.clear();
+    assert.ok((await subs.search({ tmdb: 2, query: 'Film', langs: ['en'] })).length >= 2);
+    await assert.rejects(subs.get('zz:1'), /Bad subtitle/);
+    await assert.rejects(subs.get('sd:0:0:../../etc/passwd'), /Bad subtitle/);
+  } finally {
+    for (const k in saved) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    m.close();
+  }
 });
 
 test('Trakt: connect with a code, refresh, scrobble films and episodes, sync both ways', async () => {
