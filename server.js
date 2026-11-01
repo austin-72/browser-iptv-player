@@ -1306,7 +1306,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
       dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()), mem: process.memoryUsage().rss, items: catalog.items.length,
-      defaultPassword: accounts.d.site.isDefault, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(),
+      defaultPassword: accounts.d.site.isDefault, needsRestart: !!update.needsRestart, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(),
     },
     watching: [...hub.conns].filter((c) => c.playing).map((c) => ({ pid: c.pid, device: c.deviceName, k: c.playing.k, n: c.playing.n, at: c.playing.at })),
   };
@@ -1688,8 +1688,9 @@ setInterval(() => {
     let serverChanged = true;
     try { serverChanged = update.serverSig !== serverSignature(); } catch {}
     if (!serverChanged) { const v = webSignature(); if (v && v !== old) { log('Update: the web app changed — devices will reload.'); hub.toAll('app-updated', { v }); } return; }
-    if (inDocker || process.env.SELF_RESTART === '1') restartWhenIdle('new server code');
-    else { update.needsRestart = true; log('Update: new server code — restart the server to use it.'); }
+    // The admin restarts the server when it suits them (it's never restarted for them, unless SELF_RESTART=1).
+    if (process.env.SELF_RESTART === '1') restartWhenIdle('new server code');
+    else { update.needsRestart = true; log('Update: new server code is on disk — it takes effect when you restart the server.'); }
   }, 10e3);
 }, 60e3).unref();
 function serverSignature() {
@@ -1700,7 +1701,7 @@ function serverSignature() {
 update.serverSig = serverSignature();
 route('GET', '/api/admin/update', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
-  return { version: cfg.version, onDisk: update.version, needsRestart: !!update.needsRestart, pending: update.pending, docker: inDocker, autoRestart: inDocker || process.env.SELF_RESTART === '1', started: update.started, writable: (() => { try { fs.accessSync(cfg.root, fs.constants.W_OK); return true; } catch { return false; } })() };
+  return { version: cfg.version, onDisk: update.version, needsRestart: !!update.needsRestart, pending: update.pending, docker: inDocker, autoRestart: process.env.SELF_RESTART === '1', started: update.started, writable: (() => { try { fs.accessSync(cfg.root, fs.constants.W_OK); return true; } catch { return false; } })() };
 });
 route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -1722,7 +1723,7 @@ route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
   log(`Update: ${picked.length} files from an uploaded zip (version ${version || '?'}) — your settings and data were left alone.`);
   update.sig = codeSignature();
   update.version = version || update.version;
-  const auto = inDocker || process.env.SELF_RESTART === '1';
+  const auto = process.env.SELF_RESTART === '1';
   if (auto) restartWhenIdle('update uploaded'); else update.needsRestart = true;
   return { ok: true, files: picked.length, version, restart: auto };
 });
@@ -1938,14 +1939,23 @@ process.on('uncaughtException', (e) => { console.error('Unexpected error (the se
 process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejection (the server keeps running):', e && e.stack || e); });
 
 (async () => {
+  const T = { modules: process.uptime() };
+  let t = Date.now();
   const ff = await media.detect();
-  lists.loadSaved();
+  T.ffmpeg = (Date.now() - t) / 1000; t = Date.now();
   for (const g of lists.guides()) if (!g.enabled) epg.removeSource(g.id);
   epg.setOrder(lists.guides().filter((g) => g.enabled).map((g) => g.id));
-  // Built in slices while the server already answers (a big catalogue takes a while).
-  catalogReady = Promise.resolve(rebuildCatalog()).then(() => { catalogReady = null; });
   buildBundle();
+  T.bundle = (Date.now() - t) / 1000; t = Date.now();
+  // Answer straight away ("getting ready…"); the saved lists are read and the catalogue built in the background,
+  // and anything that needs them waits for it.
+  catalogReady = lists.loadSavedAsync()
+    .then(() => { T.lists = (Date.now() - t) / 1000; t = Date.now(); return rebuildCatalog(); })
+    .then(() => { T.catalog = (Date.now() - t) / 1000; log(`Ready ${process.uptime().toFixed(1)} s after starting (${Object.entries(T).map(([k, v]) => `${k} ${v.toFixed(1)} s`).join(', ')})`); })
+    .catch((e) => log('Start-up:', e && e.stack || e))
+    .then(() => { catalogReady = null; lists.startScheduler(); });
   server.listen(cfg.port, cfg.host, () => {
+    log(`Answering ${process.uptime().toFixed(1)} s after starting`);
     const shown = ['0.0.0.0', '::'].includes(cfg.host) ? 'localhost' : cfg.host;
     const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
     console.log('');
@@ -1963,5 +1973,4 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
     else console.error(e);
     process.exit(1);
   });
-  lists.startScheduler();
 })();

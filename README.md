@@ -133,6 +133,11 @@ Notes:
   - Xtream Codes (live, films and series via the API, with an M3U fallback);
   - folders of video files on the server.
 - Lists are merged and deduplicated across sources. Duplicates become backup sources.
+  - Names are compared after the providers' end tags come off ("Preacher-eng", "Parish_eng", "Evil Dead Burn - 2026 CAM", "(HDAM)") and "&" is read as "and".
+  - Films also match when one copy has no year, or when the years are one apart and a TMDB id supports it. A TMDB id that differs keeps them apart ("Ghostbusters" 1984 / 2016), and so does anything that happens yearly ("… Race 2024" / "2025").
+  - A series listed under two names with the same TMDB id and year is one series ("Lioness" / "Special Ops: Lioness").
+  - A series on several providers (or listed twice by one) gets its episodes from all of them. Seasons they share appear once, with the other copies as backups, and seasons only one has are added.
+  - Watch history, My List and favourites move to the combined entry.
 - Automatic refresh.
 - Episodes are grouped into shows and seasons by name patterns, tags or folder structure.
 - Languages are detected from tags, group names, country codes and name prefixes such as `EN|`, `[FR]` or `(DE)`. The admin sets the defaults; each profile can choose any combination.
@@ -237,7 +242,7 @@ Notes:
 - **How many at once?** Admin → Lists → the pulse button on a list. The server opens live channels, then episodes, then movies from that list one after another, up to 6 of each, without closing the earlier ones. It finds where the provider refuses another (HTTP 403/509, a "max connections" message, nothing sent) or cuts an older one off. A refused stream is retried with one known to work, so a dead channel doesn't count as the limit. Movies are read slowly so whole films aren't downloaded. HLS channels are followed like a player would. The result replaces the provider's own figure for *Busy providers* (above). Test it yourself: `node --test test/conntest.test.js`.
 - **TMDB:** fetch everything not fetched yet, update everything, retry the ones not found, or fetch by category — with live progress.
 - **Nightly backups** kept in `data/backups` (download, restore or delete them in Admin).
-- **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new program files are picked up automatically — the web app reloads and the server restarts itself when nobody is watching through it. You can also upload the app's .zip in Admin; settings and data are never touched.
+- **Updates without rebuilding:** with the app folder mounted (see docker-compose.yml), new web-app files are picked up automatically and open pages reload. New server files wait until you restart the server yourself (Admin shows when an update is waiting); it never restarts on its own unless you set `SELF_RESTART=1`. You can also upload the app's .zip in Admin; settings and data are never touched.
 - **Your week** (My stuff): time watched per day and what you watched most.
 
 **Speed and reliability**

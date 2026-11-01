@@ -28,6 +28,7 @@ V.adminTabs.overview = function (body, A) {
   var pname = function (id) { var p = A.profiles.filter(function (x) { return x.id === id; })[0]; return p ? p.name : '?'; };
   var xt = A.lists.filter(function (l) { return l.type === 'xtream' && l.account; });
   body.innerHTML = (st.alerts || []).map(function (a) { return '<div class="note warn">' + V.icon('bell') + ' <span>' + (a.kind === 'expiry' ? '<b>' + V.esc(a.list) + '</b> ' + (a.days < 0 ? 'has expired.' : a.days === 0 ? 'expires today.' : 'expires in ' + V.plural(a.days, 'day') + '.') : '<b>' + V.esc(a.list) + '</b>: the provider says the account is “' + V.esc(a.status) + '”.') + '</span></div>'; }).join('') +
+    (st.needsRestart ? '<div class="note">' + V.icon('refresh') + ' <span>An update to the server is on disk. It takes effect the next time you restart the server. <a href="#/admin/apps">Details</a></span></div>' : '') +
     (st.defaultPassword ? '<div class="note warn">' + V.icon('shield') + ' <span>The site password is still the default. <a href="#/admin/security">Change it</a>.</span></div>' : '') +
     (st.epg && st.epg.programmes && st.epg.until && st.epg.until < Date.now() + 3 * 3600e3 ? '<div class="note warn">' + V.icon('clock') + ' <span>TV guide listings ' + (st.epg.until < Date.now() ? 'ran out ' + V.fmtAgo(st.epg.until) : 'run out at ' + V.fmtClock(st.epg.until)) + ' for most channels — the guide source may have stopped updating. <a href="#/admin/guides">Check the TV guides</a>.</span></div>' : '') +
     (!st.ffmpeg ? '<div class="note warn">' + V.icon('info') + ' ffmpeg isn’t installed, so MKV/AVI/HEVC/RTMP etc. can’t be converted and downloads can’t be converted to MP4. The Docker image includes it.</div>' : '') +
@@ -560,8 +561,8 @@ V.adminTabs.apps = function (body, A) {
   var loadUpdate = function () {
     V.api('/api/admin/update').then(function (u) {
       V.$('.upd', body).innerHTML = '<p>Running version <b>' + V.esc(u.version) + '</b>' + (u.onDisk && u.onDisk !== u.version ? ' · version <b>' + V.esc(u.onDisk) + '</b> is on disk' : '') + ' · started ' + V.fmtAgo(u.started) + '.</p>' +
-        (u.pending ? '<p class="note">' + V.icon('refresh') + ' New code found — restarting as soon as nobody is watching through the server.</p>' : u.needsRestart ? '<p class="note warn">' + V.icon('refresh') + ' New code is on disk. Restart the server to use it.</p>' : '') +
-        '<p class="small">' + (u.autoRestart ? 'New program files dropped into the app folder are picked up automatically: the web app reloads on its own, and the server restarts itself when nobody is watching through it.' : 'New web-app files are picked up automatically; new server files need a restart.') + '</p>';
+        (u.pending ? '<p class="note">' + V.icon('refresh') + ' New code found — restarting as soon as nobody is watching through the server.</p>' : u.needsRestart ? '<p class="note warn">' + V.icon('refresh') + ' New server code is on disk. It takes effect when you restart the server' + (u.docker ? ' (<code>docker compose restart</code>)' : '') + '.</p>' : '') +
+        '<p class="small">' + (u.autoRestart ? 'New program files dropped into the app folder are picked up automatically: the web app reloads on its own, and the server restarts itself when nobody is watching through it.' : 'New web-app files are picked up automatically. New server files wait until you restart the server — it never restarts on its own.') + '</p>';
     }).catch(function () {});
   };
   loadBackups(); loadUpdate();

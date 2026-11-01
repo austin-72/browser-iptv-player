@@ -21,7 +21,7 @@ services:
     volumes:
       - ./data:/data
       # The app's own files, so updates (copied into this folder, or uploaded in Admin → Backups, updates & apps)
-      # take effect without rebuilding: the server notices and restarts itself when nobody is watching.
+      # take effect without rebuilding: web pages at once, server code the next time you restart it.
       - ./:/app
       # Folders of your own videos, read-only. Add them in Admin → Lists → "Folder on the server" as /media/…
       # - /path/to/your/movies:/media/movies:ro
