@@ -14,7 +14,7 @@ V.pairDialog = function (code) {
       var c = V.$('[data-code]', d).value.trim();
       if (c.replace(/[^a-z0-9]/gi, '').length < 6) { V.$('.err', d).textContent = 'The code has 6 letters and numbers.'; return false; }
       return V.api('/api/pair/approve', { body: { code: c, as: V.$('[name=as]:checked', d).value } }).then(function (r) {
-        V.toast('Signed in ' + r.device + '. You can control it from Settings → Use this as a remote.', { ms: 8000, action: { label: 'Remote', fn: function () { V.router.go('#/remote'); } } });
+        V.toast('Signed in ' + r.device + '. Control it with the remote button at the top.', { ms: 8000, action: { label: 'Remote', fn: function () { V.router.go('#/remote'); } } });
       }, function (e) { V.$('.err', d).textContent = e.message; return false; });
     } }],
     onOpen: function (d) { var i = V.$('[data-code]', d); i.addEventListener('input', function () { var v = i.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); i.value = v.length > 3 ? v.slice(0, 3) + '-' + v.slice(3) : v; }); },
@@ -57,7 +57,7 @@ function remoteList(view) {
       if (!box) return;
       box.innerHTML = others.length ? others.map(function (d) {
         return '<a class="remote-dev" href="#/remote/' + encodeURIComponent(d.conn) + '">' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.playing ? 'Playing ' + V.esc(d.playing.n || '') : 'Nothing playing') + '</small></span>' + V.icon('next') + '</a>';
-      }).join('') : V.empty('No other screens', 'Open the app on the TV (or sign it in with a code), and it appears here.');
+      }).join('') : V.empty('No other screens open', 'Open the app on your TV or computer and pick ' + V.esc(S.profile.name) + ' there: it shows up here within a few seconds. A TV that isn’t signed in yet: choose “Sign in with your phone” on it, then “Sign in a TV” below. On the TV, Profile menu → “Control from your phone” shows a code your phone’s camera can open.');
     }).catch(V.fail);
   };
   draw();

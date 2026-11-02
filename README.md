@@ -193,7 +193,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Trakt:** each profile can connect its Trakt account to log what it watches and keep its watchlist and ratings in step.
 - **Alerts** for new episodes of series you watch (or follow with the bell on the series page) and for wishlist arrivals: one per title, grouped when several arrive at once. They wait in Messages → *New for you* when no device is open. Each kind can be turned off.
 - **Your viewing:** time watched by week, month and year, by type, top series, films, channels and genres, streaks and when you watch, compared with the period before, plus a **Year in review**. The admin sees household totals.
-- **Play on another device:** send what you're watching to any signed-in screen, or use your phone as a remote. The remote has play/pause, seek, volume, subtitles, audio, channels and a sleep timer. You can also choose *Pick things to play here* on a phone so its Play buttons start on the TV.
+- **Play on another device:** send what you're watching to any signed-in screen, or use your phone as a remote. The remote has play/pause, seek, volume, subtitles, audio, channels and a sleep timer. You can also choose *Pick things to play here* on a phone so its Play buttons start on the TV. While another of your screens has the app open, a remote button appears at the top of the app on your phone (with a dot while it plays). On a TV, Profile menu → *Control from your phone* shows a QR code that opens that TV's remote on your phone.
 
 ### Phones, tablets and TVs
 

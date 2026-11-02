@@ -71,11 +71,11 @@ function channelsPage(view, r, type) {
   var showEmpty = !hideByAdmin || V.ls.get('showEmptyEvents', false);
   var emptyN = hideByAdmin ? list.filter(V.eventEmpty).length : 0;
   if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !V.eventEmpty(c) || V.inList('favs', c.k); });
-  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' + (V.dvr && V.dvr.visible() ? '<a class="btn" href="#/recordings">' + V.icon('rec') + ' Recordings</a>' : '') : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
+  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel"><span class="pt-links">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' + (V.dvr && V.dvr.visible() ? '<a class="btn" href="#/recordings">' + V.icon('rec') + ' Recordings</a>' : '') : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
     (type === 'live' && V.multiview && all.length > 1 ? '<a class="btn" href="#/multiview">' + V.icon('grid') + ' Multiview</a>' : '') +
     // Radio and live TV link to each other (on phones the tab bar has one Live TV tab for both).
     (type === 'live' && S.radio.length ? '<a class="btn" href="#/radio">' + V.icon('radio') + ' Radio</a>' : '') +
-    (type === 'radio' && S.live.length ? '<a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</div>') +
+    (type === 'radio' && S.live.length ? '<a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</span></div>') +
     '<div class="live-layout"><nav class="groups" aria-label="Channel groups">' +
     V.channelGroups(type)
       .map(function (x) { return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +

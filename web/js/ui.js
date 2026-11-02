@@ -40,6 +40,7 @@ V.router = {
     view = fresh;
     view.className = 'view view-' + r.name + (keepScroll ? '' : ' enter');
     try { fn(view, r); } catch (e) { console.error(e); view.innerHTML = '<div class="empty"><h2>Something went wrong</h2><p>' + V.esc(e.message) + '</p></div>'; }
+    V.emit('route', r); // (easy.js: the section links on Settings)
     var y = keepScroll ? window.scrollY : V.router.scroll[r.hash] || 0;
     window.scrollTo(0, y);
     // A row of tabs wider than the screen (Admin on a phone): bring the current one into view.

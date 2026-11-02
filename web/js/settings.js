@@ -34,7 +34,9 @@ V.route('settings', function (view) {
     '<button class="btn" data-a="substyle">' + V.icon('cc') + ' Subtitle style…</button></section>' +
     (V.playerPrefsHtml ? V.playerPrefsHtml() : '') +
 
-    '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Sign a TV in by typing the code it shows (no password typing with the remote), and control what’s playing on it from here.</p><div class="btn-row"><button class="btn" data-a="pair">' + V.icon('tv') + ' Sign in a TV</button><a class="btn" href="#/remote">' + V.icon('remote') + ' Use this as a remote</a></div></section>' +
+    (V.tvMode
+      ? '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Control this TV from your phone: play, pause, skip, channels, subtitles and volume, and pick things on the phone to play here.</p><div class="btn-row"><button class="btn primary" data-a="phoneremote">' + V.icon('remote') + ' Use your phone as a remote</button></div></section>'
+      : '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Use this device as the remote for a TV or computer that has the app open: play, pause, skip, channels, subtitles and volume. Sign a TV in by typing the code it shows (no typing passwords with the TV remote).</p><div class="btn-row"><a class="btn primary" href="#/remote">' + V.icon('remote') + ' Use this as a remote</a><button class="btn" data-a="pair">' + V.icon('tv') + ' Sign in a TV</button></div></section>') +
     '<section class="card-sec"><h2>Notifications</h2>' + sw('newEpisodeAlerts', 'New episodes', 'Of series in My List, that you’ve been watching, or that you follow with the bell on their page') + sw('wishlistAlerts', 'Wishlist arrivals', 'When something on your wishlist arrives') +
     '<p class="dim small">Alerts also wait in Messages → New for you.</p>' +
     (window.Notification ? '<button class="btn" data-a="notif">' + V.icon('bell') + ' ' + (Notification.permission === 'granted' ? 'Notifications on this device are on' : Notification.permission === 'denied' ? 'Notifications are blocked in this browser' : 'Also notify me when the app isn’t open') + '</button>' : '') + '</section>' +
@@ -98,6 +100,7 @@ V.route('settings', function (view) {
     else if (a === 'install' && V.installPrompt) { V.installPrompt.prompt(); V.installPrompt = null; }
     else if (a === 'keys') V.shortcutsHelp();
     else if (a === 'pair') V.pairDialog();
+    else if (a === 'phoneremote' && V.phoneRemoteDialog) V.phoneRemoteDialog();
     else if (a === 'mixedhelp') V.mixedHelp();
     else if (a === 'delete') V.prompt('Remove your profile? Enter your PIN (or leave empty if you have none) to confirm.', { type: 'password', ok: 'Remove' }).then(function (pin) { if (pin === null) return; V.del('/api/me', { pin: pin }).then(function () { V.leaveProfile(); }).catch(V.fail); });
   });

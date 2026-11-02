@@ -64,6 +64,9 @@ V.route('title', function (view, r) {
       (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
       '<button class="icon-btn lg" data-a="more" title="More" aria-label="More">' + V.icon('dots') + '</button>';
     V.$('.tp-acts', view).innerHTML = html;
+    // Short names under the round buttons (shown on touch screens and TVs, where there's no hover to explain them).
+    var names = { list: 'My List', queue: 'Queue', up: 'Like', down: 'Not for me', share: 'Send', party: 'Together', dl: 'Download', bell: 'Alerts', more: 'More' };
+    V.$$('.tp-acts .icon-btn', view).forEach(function (b) { var n = names[b.dataset.a] || b.getAttribute('aria-label') || ''; if (n) b.setAttribute('data-l', n); });
   };
   drawActs(S.epsByShow.get(it.k));
 

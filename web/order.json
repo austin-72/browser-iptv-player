@@ -58,6 +58,7 @@
     "keymap.js",
     "palette.js",
     "dvr.js",
+    "easy.js",
     "main.js"
   ],
   "css": [
@@ -75,6 +76,7 @@
     "p9.css",
     "p8.css",
     "p6.css",
-    "p12.css"
+    "p12.css",
+    "p13.css"
   ]
 }

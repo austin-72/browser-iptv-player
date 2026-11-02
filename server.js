@@ -1426,6 +1426,14 @@ route('POST', '/api/pair/approve', async (req, res, p, q, ctx) => {
 });
 const { deviceName: deviceNameOf } = require('./lib/accounts');
 const { qrSvg } = require('./lib/qr');
+// A QR code (SVG) for an address of this app, e.g. the TV's "Control from your phone" (opens its remote on the phone).
+route('GET', '/api/qr', (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const text = String(q.get('text') || '').slice(0, 400);
+  if (!/^https?:\/\/[^\s]+$/i.test(text)) throw new HttpError(400, 'A web address is needed');
+  res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'private, max-age=3600' });
+  res.end(qrSvg(text, { size: 240 }));
+});
 
 // ---- the plain-http "direct address": an https page hands this device over so http-only providers play directly
 const handoffs = new Map(); // token → { sess, to, exp }

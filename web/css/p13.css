@@ -1,0 +1,47 @@
+/* Easier to find: the Remote button in the top bar, the TV's "use your phone as a remote" dialog, Settings' section
+   links, and Live TV's shortcuts on one scrolling row on phones. */
+
+/* ---- the Remote button (shown while another of your screens is open) */
+.remote-btn { position: relative; }
+.remote-btn .rb-dot { position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+.remote-btn .rb-dot[hidden] { display: none; }
+
+/* ---- "Use your phone as a remote" (on the TV) */
+.pr-dlg { display: flex; gap: 1.4rem; align-items: center; }
+.pr-qr { width: 200px; height: 200px; flex: none; background: #fff; border-radius: 12px; padding: 10px; box-sizing: content-box; }
+.pr-txt { min-width: 0; max-width: 26rem; }
+.pr-txt > p { margin: .9rem 0 0; }
+.pr-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: .6rem; line-height: 1.45; }
+.pr-ic .i { width: 1.05em; height: 1.05em; vertical-align: -.15em; }
+@media (max-width: 560px) { .pr-dlg { flex-direction: column; align-items: stretch; } .pr-qr { align-self: center; width: 170px; height: 170px; } }
+
+/* ---- Settings: links to each section, kept in reach while scrolling */
+.st-jump { position: sticky; top: var(--top, 64px); z-index: 5; display: flex; flex-wrap: nowrap; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: -.25rem 0 1rem; padding: .5rem 0; background: var(--bg); max-width: 980px; }
+.st-jump::-webkit-scrollbar { display: none; }
+.st-jump .chip { flex: none; text-decoration: none; }
+.settings > .card-sec { scroll-margin-top: calc(var(--top, 64px) + 4rem); }
+.card-sec.st-flash { animation: stFlash 1.2s ease-out; }
+@keyframes stFlash { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.reduce-motion .card-sec.st-flash { animation: none; }
+@media (min-width: 900px) { .st-jump { flex-wrap: wrap; overflow: visible; } }
+
+/* ---- Live TV / Radio: the shortcuts (guide, on later, recordings, lists, multiview) */
+.pt-links { display: contents; }
+@media (max-width: 700px) {
+  .view-live .page-tools, .view-radio .page-tools { flex: 1 1 100%; min-width: 0; }
+  .view-live .page-tools .input, .view-radio .page-tools .input { flex: 1 1 100%; width: 100%; min-width: 0; }
+  .view-live .pt-links, .view-radio .pt-links { display: flex; gap: .45rem; flex: 1 1 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 2px; }
+  .view-live .pt-links::-webkit-scrollbar, .view-radio .pt-links::-webkit-scrollbar { display: none; }
+  .view-live .pt-links .btn, .view-radio .pt-links .btn { flex: none; padding: .45rem .8rem; font-size: .92rem; }
+}
+
+/* ---- A title's round buttons get short names underneath on touch screens and TVs (no hover to explain them) */
+@media (hover: none) {
+  .tp-acts { row-gap: 1.7rem; margin-bottom: 2rem; }
+  .tp-acts .icon-btn[data-l]::after { content: attr(data-l); position: absolute; top: calc(100% + .3rem); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .72rem; line-height: 1; color: rgba(255,255,255,.85); pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+}
+.tv .tp-acts { row-gap: 1.9rem; margin-bottom: 2.2rem; }
+.tv .tp-acts .icon-btn[data-l]::after { content: attr(data-l); position: absolute; top: calc(100% + .35rem); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .8rem; line-height: 1; color: rgba(255,255,255,.85); pointer-events: none; }
+
+/* ---- Narrow phones: when the Remote button shows, the Admin shortcut makes room (Admin is in the profile menu too) */
+@media (max-width: 420px) { #topbar .remote-btn:not([hidden]) ~ [data-nav=admin] { display: none; } }
