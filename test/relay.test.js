@@ -282,6 +282,109 @@ test('the relay: odd read sizes don’t fetch parts twice, two readers don’t f
   } finally { relay.p.kill(); prov.close(); }
 });
 
+test('the relay reaches providers through a proxy: HTTP (plain and CONNECT) and SOCKS5, playlists and whole films too', { timeout: 60000 }, async () => {
+  const { makeRelay } = require('../lib/streamrelay');
+  const tls = require('tls');
+  const FILM2 = Buffer.alloc(3 * 1048576, 7);
+  const seen = []; // what the provider saw: [path, from the proxy?]
+  const prov = http.createServer((req, res) => {
+    seen.push(req.url);
+    if (req.url === '/live.m3u8') { res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' }); return res.end('#EXTM3U\n#EXTINF:6,\nseg1.ts\n'); }
+    if (req.url === '/seg1.ts') { res.writeHead(200, { 'Content-Type': 'video/mp2t' }); return res.end(Buffer.alloc(1880, 1)); }
+    if (req.url === '/trace') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('h=x\nip=' + (req.headers['x-via'] || '203.0.113.9') + '\n'); }
+    if (req.url === '/film.mp4') {
+      const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const a = m ? +m[1] : 0;
+      res.writeHead(m ? 206 : 200, { 'Content-Type': 'video/mp4', 'Content-Length': FILM2.length - a, ...(m ? { 'Content-Range': `bytes ${a}-${FILM2.length - 1}/${FILM2.length}` } : {}) });
+      return res.end(FILM2.subarray(a));
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((ok) => prov.listen(0, '127.0.0.1', ok));
+  const P = prov.address().port;
+  // An HTTP proxy with a sign-in: plain requests with the full address, and CONNECT tunnels.
+  let httpUses = 0;
+  const hp = http.createServer((req, res) => {
+    if (req.headers['proxy-authorization'] !== 'Basic ' + Buffer.from('u:p w').toString('base64')) { res.writeHead(407); return res.end(); }
+    httpUses++;
+    const u = new URL(req.url);
+    const h = { ...req.headers, 'x-via': '198.51.100.7' }; delete h['proxy-authorization'];
+    const up = http.request(u, { method: req.method, headers: h }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+    up.on('error', () => { res.writeHead(502); res.end(); });
+    req.pipe(up);
+  });
+  hp.on('connect', (req, sock, head) => {
+    if (req.headers['proxy-authorization'] !== 'Basic ' + Buffer.from('u:p w').toString('base64')) return sock.end('HTTP/1.1 407 Proxy Authentication Required\r\n\r\n');
+    httpUses++;
+    const [h, port] = req.url.split(':');
+    const up = net.connect(+port, h, () => { sock.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) up.write(head); up.pipe(sock); sock.pipe(up); });
+    up.on('error', () => sock.destroy());
+  });
+  await new Promise((ok) => hp.listen(0, '127.0.0.1', ok));
+  // A SOCKS5 proxy (no sign-in).
+  let socksUses = 0;
+  const sp = net.createServer((c) => {
+    c.once('data', () => {
+      c.write(Buffer.from([5, 0]));
+      c.once('data', (d) => {
+        const len = d[4]; const host = d.subarray(5, 5 + len).toString(); const port = d.readUInt16BE(5 + len);
+        socksUses++;
+        const up = net.connect(port, host, () => { c.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])); up.pipe(c); c.pipe(up); });
+        up.on('error', () => c.destroy());
+      });
+    });
+  });
+  await new Promise((ok) => sp.listen(0, '127.0.0.1', ok));
+  const HP = `http://u:${encodeURIComponent('p w')}@127.0.0.1:${hp.address().port}`;
+  const SP = `socks5://127.0.0.1:${sp.address().port}`;
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-px-'));
+  const relay = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_CACHE_DIR: cache });
+  // The server side: the proxy goes inside the sealed address (devices never see it).
+  let mode = 'list';
+  const rel = makeRelay({ getSettings: () => ({ relay: { url: relay.base, secret: SECRET, all: true } }), listOf: () => ({}), proxyOf: () => (mode === 'list' ? HP : '') });
+  try {
+    const sealedUrl = rel.wrap(`http://127.0.0.1:${P}/live.m3u8`, {});
+    assert.ok(!sealedUrl.includes('127.0.0.1:' + hp.address().port) && !sealedUrl.includes('p%20w'), 'the proxy isn’t readable in the address');
+    assert.strictEqual(unseal(sealedUrl, SECRET).p, HP);
+    mode = '';
+    assert.strictEqual(unseal(rel.wrap(`http://127.0.0.1:${P}/x.ts`, {}), SECRET).p, undefined, 'no proxy: straight from the relay');
+    // A playlist through the HTTP proxy (plain http: the full address), and its segment through it too.
+    let r = await fetch(sealedUrl);
+    const text = await r.text();
+    assert.strictEqual(r.status, 200);
+    const seg = new URL(relayLinks(text)[0], relay.base).href;
+    assert.strictEqual(unseal(seg, SECRET).p, HP, 'segments keep the proxy');
+    r = await fetch(seg);
+    assert.strictEqual((await r.arrayBuffer()).byteLength, 1880);
+    assert.strictEqual(httpUses, 2);
+    // The same through SOCKS5, and a film fetched whole through it.
+    const viaSocks = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/film.mp4`, {}, 3600, { w: 1, i: 'f', p: SP });
+    r = await fetch(viaSocks, { headers: { Range: 'bytes=1048576-' } });
+    assert.strictEqual(r.status, 206);
+    assert.strictEqual((await r.arrayBuffer()).byteLength, FILM2.length - 1048576);
+    assert.ok(socksUses >= 1);
+    // A wrong sign-in or a proxy that isn't there: a clear error, not a hang.
+    r = await fetch(relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/seg1.ts`, {}, 60, { p: HP.replace('p%20w', 'nope') }));
+    assert.strictEqual(r.status, 502);
+    assert.match(await r.text(), /username or password/);
+    r = await fetch(relayUrl(relay.base, SECRET, `https://127.0.0.1:${P}/seg1.ts`, {}, 60, { p: 'socks5://127.0.0.1:1' }));
+    assert.strictEqual(r.status, 502);
+    assert.match(await r.text(), /Proxy/);
+    // CONNECT for https addresses: the tunnel is made with the sign-in (the TLS on top fails here: no https provider).
+    const before = httpUses;
+    r = await fetch(relayUrl(relay.base, SECRET, `https://127.0.0.1:${P}/seg1.ts`, {}, 60, { p: HP }));
+    assert.strictEqual(httpUses, before + 1, 'a CONNECT tunnel through the proxy');
+    assert.strictEqual(r.status, 502);
+    // Admin → Stream relay → Test: what address providers see, straight from the relay and through the proxy.
+    const { testRelayProxy } = require('../lib/streamrelay');
+    const own = await testRelayProxy(relay.base, SECRET, '', fetch, `http://127.0.0.1:${P}/trace`);
+    const via = await testRelayProxy(relay.base, SECRET, HP, fetch, `http://127.0.0.1:${P}/trace`);
+    assert.deepStrictEqual([own.ok, own.ip, via.ok, via.ip], [true, '203.0.113.9', true, '198.51.100.7']);
+    const bad = await testRelayProxy(relay.base, SECRET, 'socks5://127.0.0.1:1', fetch, `http://127.0.0.1:${P}/trace`);
+    assert.strictEqual(bad.ok, false);
+    assert.match(bad.error, /Proxy/);
+  } finally { relay.p.kill(); prov.close(); hp.close(); sp.close(); }
+});
+
 test('the relay updates itself only with a valid signature and a working file', { timeout: 20000 }, async () => {
   const crypto = require('crypto');
   const copy = relayCopy();
@@ -338,7 +441,7 @@ test('the real server: relay addresses for direct streams, per list, for other a
     assert.ok(!reach.relay && reach.url.includes('s3cret'));
     // With it (for every list): sealed relay addresses that play.
     let s = (await api('PUT', '/api/admin/settings', { relay: { url: r.base + '/' } })).body;
-    assert.deepStrictEqual(s.relay, { url: r.base, all: true, hasSecret: true }, 'the secret is never shown here');
+    assert.deepStrictEqual(s.relay, { url: r.base, all: true, hasSecret: true, proxy: '' }, 'the secret is never shown here');
     const secret = (await api('GET', '/api/admin/relay/secret')).body.secret;
     assert.ok(secret.length >= 30);
     // (The relay was started with another secret: the test says so.)

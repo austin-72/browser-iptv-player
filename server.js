@@ -34,7 +34,7 @@ const { Reach, kindOfUrl, xtreamHls } = require('./lib/reach');
 const { zipFolder, unzip } = require('./lib/zip');
 const { Stats } = require('./lib/stats');
 const { Concurrency } = require('./lib/concurrency');
-const { fetchAny, setProxyResolver, testProxy } = require('./lib/net');
+const { fetchAny, setProxyResolver, testProxy, proxyFor } = require('./lib/net');
 const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
 const { cssFallbacks } = require('./lib/cssfallbacks');
@@ -50,7 +50,7 @@ const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
-const { makeRelay, testRelay, newSecret, relayDownloads, updateRelay, bundledRelay, playId } = require('./lib/streamrelay');
+const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId } = require('./lib/streamrelay');
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
@@ -141,7 +141,17 @@ setProxyResolver((url) => {
   return p ? p.url : '';
 });
 /** Viewers' direct streams through the stream relay (lib/streamrelay.js): which lists, and their signed addresses. */
-const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().find((x) => x.id === id) });
+// The relay reaches providers straight, through each list's own proxy (the same one this server uses), or through
+// one chosen proxy (Admin → Network & proxies → Stream relay).
+const relayProxyMode = () => (settings().relay || {}).proxy || '';
+const relayProxyOf = (url) => {
+  const m = relayProxyMode();
+  if (!m) return '';
+  if (m === 'list') return proxyFor(url);
+  const px = proxyById(m);
+  return px ? px.url : '';
+};
+const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().find((x) => x.id === id), proxyOf: relayProxyOf });
 /** Does video from this list have to go through the server (its proxy is set to carry video)? */
 const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
 const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase });
@@ -1592,6 +1602,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     }
     if (b.relay.newSecret || (r.url && !r.secret)) r.secret = newSecret();
     if ('all' in b.relay) r.all = !!b.relay.all;
+    if ('proxy' in b.relay) { const v = String(b.relay.proxy || ''); r.proxy = v === 'list' || (s.proxies || []).some((x) => x.id === v) ? v : ''; }
     s.relay = r;
   }
   if (typeof b.directAddress === 'string') {
@@ -1637,6 +1648,23 @@ route('POST', '/api/admin/relay/test', async (req, res, p, q, ctx) => {
   // Is the relay running the relay.js that comes with this server? (Older ones can't fetch films whole.)
   const mine = bundledRelay();
   if (out.ok && mine) { out.latest = mine.version; out.outdated = String(out.version) !== mine.version; }
+  // Its proxies: what address the internet sees from the relay itself, and through each proxy it would use.
+  if (out.ok && relayProxyMode()) {
+    const used = new Map();
+    if (relayProxyMode() === 'list') {
+      for (const l of lists.all()) { if (!relayOf.uses(l.id)) continue; const px = listProxy(l.id); if (px) used.set(px.url, px.name || 'Proxy'); }
+    } else { const px = proxyById(relayProxyMode()); if (px) used.set(px.url, px.name || 'Proxy'); }
+    const own = await testRelayProxy(r.url, r.secret, '', fetch);
+    out.ownIp = own.ok ? own.ip : '';
+    out.proxies = [];
+    for (const [url, name] of [...used].slice(0, 5)) {
+      const t = await testRelayProxy(r.url, r.secret, url, fetch);
+      // (A relay older than version 4 ignores proxies: the address seen is its own.)
+      if (t.ok && own.ok && t.ip && t.ip === own.ip) { t.ok = false; t.error = 'The relay isn’t using the proxy — update the relay (version 4 or later uses proxies).'; }
+      out.proxies.push({ name, ...t });
+    }
+    if (!used.size) out.proxyNote = relayProxyMode() === 'list' ? 'None of the lists that use the relay has a proxy, so it connects to providers itself.' : 'That proxy isn’t there any more.';
+  }
   return out;
 });
 // Sends this server's relay.js to the relay, which swaps it in and restarts (a few seconds without the relay).
@@ -1657,7 +1685,7 @@ route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
 /** Settings as the admin page sees them (secrets masked). */
 function adminSettingsView() {
   const s = settings();
-  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })), relay: { url: (s.relay || {}).url || '', all: (s.relay || {}).all !== false, hasSecret: !!(s.relay || {}).secret } };
+  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })), relay: { url: (s.relay || {}).url || '', all: (s.relay || {}).all !== false, hasSecret: !!(s.relay || {}).secret, proxy: (s.relay || {}).proxy || '' } };
 }
 route('POST', '/api/admin/password', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);

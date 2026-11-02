@@ -27,6 +27,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const tls = require('tls');
 const dns = require('dns');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -34,7 +35,7 @@ const os = require('os');
 const pathMod = require('path');
 const vm = require('vm');
 
-const VERSION = '3';
+const VERSION = '4';
 const SECRET = process.env.RELAY_SECRET || '';
 const PORT = Number(process.env.PORT) || 8090;
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 0;
@@ -92,26 +93,130 @@ async function publicHost(host) {
   try { const all = await dns.promises.lookup(host, { all: true }); return all.length > 0 && all.every((r) => !isPrivate(r.address)); } catch { return false; }
 }
 
+// ---------------------------------------------------------------- through a proxy (when the server asks for one)
+// The server can send each address with a proxy (Admin → Network & proxies → Stream relay): the relay then connects
+// to the provider through it, so the provider sees the proxy's address instead of this machine's. HTTP and HTTPS
+// proxies (CONNECT, or the full address for plain http) and SOCKS5 (the proxy looks the name up), with a sign-in.
+function tunnel(proxyUrl, host, port, timeout = 20000) {
+  return new Promise((resolve, reject) => {
+    let p;
+    try { p = new URL(proxyUrl); } catch { return reject(new Error('Bad proxy address')); }
+    const user = decodeURIComponent(p.username || ''), pass = decodeURIComponent(p.password || '');
+    const isSocks = /^socks/i.test(p.protocol);
+    const pport = Number(p.port) || (isSocks ? 1080 : p.protocol === 'https:' ? 443 : 8080);
+    const sock = p.protocol === 'https:' ? tls.connect({ host: p.hostname, port: pport, servername: p.hostname }) : net.connect(pport, p.hostname);
+    let done = false;
+    const fail = (e) => { if (done) return; done = true; clearTimeout(timer); sock.destroy(); reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { status: 502 })); };
+    const timer = setTimeout(() => fail(new Error('The proxy didn’t answer')), timeout);
+    sock.on('error', (e) => fail(new Error(`Proxy: ${e.message}`)));
+    const ok = () => { if (done) return; done = true; clearTimeout(timer); sock.removeAllListeners('data'); resolve(sock); };
+    let buf = Buffer.alloc(0);
+    if (!isSocks) {
+      sock.once(p.protocol === 'https:' ? 'secureConnect' : 'connect', () => {
+        const auth = user ? `Proxy-Authorization: Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}\r\n` : '';
+        sock.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n${auth}\r\n`);
+      });
+      sock.on('data', (c) => {
+        buf = Buffer.concat([buf, c]);
+        const end = buf.indexOf('\r\n\r\n');
+        if (end < 0) { if (buf.length > 16384) fail(new Error('Proxy: bad answer')); return; }
+        const code = parseInt(buf.slice(0, end).toString('latin1').split(' ')[1], 10);
+        if (code !== 200) return fail(new Error(code === 407 ? 'The proxy wants a different username or password' : `The proxy refused (HTTP ${code})`));
+        const rest = buf.slice(end + 4);
+        ok();
+        if (rest.length) sock.unshift(rest);
+      });
+      return;
+    }
+    let stage = 0;
+    sock.once('connect', () => sock.write(Buffer.from(user ? [5, 2, 0, 2] : [5, 1, 0])));
+    const connectReq = () => {
+      const h = Buffer.from(host);
+      sock.write(Buffer.concat([Buffer.from([5, 1, 0, 3, h.length]), h, Buffer.from([port >> 8, port & 255])]));
+      stage = 2;
+    };
+    sock.on('data', (c) => {
+      buf = Buffer.concat([buf, c]);
+      if (stage === 0) {
+        if (buf.length < 2) return;
+        const m = buf[1]; buf = buf.slice(2);
+        if (m === 0xff) return fail(new Error('The proxy wants a username and password'));
+        if (m === 2) { const u = Buffer.from(user), pw = Buffer.from(pass); sock.write(Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([pw.length]), pw])); stage = 1; return; }
+        connectReq();
+      } else if (stage === 1) {
+        if (buf.length < 2) return;
+        if (buf[1] !== 0) return fail(new Error('The proxy rejected the username or password'));
+        buf = buf.slice(2);
+        connectReq();
+      } else if (stage === 2) {
+        if (buf.length < 5) return;
+        if (buf[1] !== 0) return fail(new Error(`The proxy couldn’t connect (SOCKS error ${buf[1]})`));
+        const len = buf[3] === 1 ? 10 : buf[3] === 4 ? 22 : 7 + buf[4];
+        if (buf.length < len) return;
+        const rest = buf.slice(len);
+        ok();
+        if (rest.length) sock.unshift(rest);
+      }
+    });
+  });
+}
+/** The proxy's own address must be on the public internet too (unless RELAY_ALLOW_PRIVATE). */
+async function proxyOk(proxyUrl) {
+  try { const p = new URL(proxyUrl); return /^(https?|socks5h?):$/i.test(p.protocol) && (await publicHost(p.hostname)); } catch { return false; }
+}
+
 // ---------------------------------------------------------------- fetching from the provider
-function get(url, { method = 'GET', headers = {}, hops = 0 } = {}) {
+function get(url, { method = 'GET', headers = {}, hops = 0, proxy = '' } = {}) {
   return new Promise((resolve, reject) => {
     let u;
     try { u = new URL(url); } catch { return reject(new Error('bad address')); }
-    publicHost(u.hostname).then((ok) => {
-      if (!ok) return reject(Object.assign(new Error('Only public internet addresses can be relayed'), { status: 403 }));
+    // (Through a proxy the provider is looked up and reached by the proxy, so only a literal private address is refused.)
+    const check = proxy ? proxyOk(proxy).then((ok) => ok && (ALLOW_PRIVATE || !net.isIP(u.hostname.replace(/^\[|\]$/g, '')) || !isPrivate(u.hostname.replace(/^\[|\]$/g, '')))) : publicHost(u.hostname);
+    check.then(async (ok) => {
+      if (!ok) return reject(Object.assign(new Error(proxy ? 'That proxy (or address) can’t be used' : 'Only public internet addresses can be relayed'), { status: 403 }));
       const mod = u.protocol === 'https:' ? https : http;
-      const req = mod.request(u, { method, headers, timeout: 20000 }, (res) => {
+      let opts = { method, headers, timeout: 20000 };
+      let target = u;
+      if (proxy) {
+        const p = new URL(proxy);
+        if (u.protocol === 'http:' && /^https?:$/i.test(p.protocol)) {
+          // Plain http through an HTTP proxy: ask the proxy for the full address.
+          const auth = p.username ? { 'Proxy-Authorization': `Basic ${Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString('base64')}` } : {};
+          const pmod = p.protocol === 'https:' ? https : http;
+          target = null;
+          opts = { method, host: p.hostname, port: Number(p.port) || (p.protocol === 'https:' ? 443 : 8080), path: u.href, headers: { Host: u.host, ...headers, ...auth }, timeout: 20000, agent: false };
+          return finish(pmod.request(opts, onRes));
+        }
+        let sock, conn;
+        try {
+          sock = await tunnel(proxy, u.hostname, Number(u.port) || (u.protocol === 'https:' ? 443 : 80));
+          // (TLS to the provider inside the tunnel; its errors before the request starts are handled here.)
+          conn = u.protocol !== 'https:' ? sock : await new Promise((ok, no) => {
+            const c = tls.connect({ socket: sock, servername: net.isIP(u.hostname) ? undefined : u.hostname });
+            c.once('secureConnect', () => { c.removeListener('error', no); c.setTimeout(0); ok(c); });
+            c.once('error', no);
+            c.setTimeout(20000, () => c.destroy(new Error('The provider didn’t answer in time')));
+          });
+        } catch (e) { if (sock) sock.destroy(); return reject(Object.assign(new Error((e && e.message) || 'The proxy failed'), { status: 502 })); }
+        opts = { ...opts, agent: false, createConnection: () => conn };
+      }
+      finish(mod.request(target, opts, onRes));
+      function onRes(res) {
+        // (The proxy itself said no to the sign-in: a 407 would confuse players, which treat it as their own proxy's.)
+        if (proxy && res.statusCode === 407) { res.resume(); return reject(Object.assign(new Error('Proxy: it wants a different username or password'), { status: 502 })); }
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 6) {
           res.resume();
           const next = new URL(res.headers.location, u).href;
-          return get(next, { method, headers, hops: hops + 1 }).then(resolve, reject);
+          return get(next, { method, headers, hops: hops + 1, proxy }).then(resolve, reject);
         }
         res.finalUrl = u.href;
         resolve(res);
-      });
-      req.on('timeout', () => req.destroy(new Error('The provider didn’t answer in time')));
-      req.on('error', reject);
-      req.end();
+      }
+      function finish(req) {
+        req.on('timeout', () => req.destroy(new Error('The provider didn’t answer in time')));
+        req.on('error', (e) => reject(proxy ? Object.assign(new Error((e && e.message) || 'The proxy failed'), { status: 502 }) : e));
+        req.end();
+      }
     }, reject);
   });
 }
@@ -120,7 +225,7 @@ const isPlaylist = (res, url, head) => /mpegurl/i.test(res.headers['content-type
 
 /** Every address in an HLS playlist → a signed relay address (relative ones resolved first). */
 function rewrite(text, base, o) {
-  const sign = (ref) => { try { return signPath({ u: new URL(ref, base).href, h: o.h, e: o.e }); } catch { return ref; } };
+  const sign = (ref) => { try { return signPath({ u: new URL(ref, base).href, h: o.h, e: o.e, ...(o.p ? { p: o.p } : {}) }); } catch { return ref; } };
   return text.split(/\r?\n/).map((line) => {
     const t = line.trim();
     if (!t) return line;
@@ -141,7 +246,7 @@ async function relay(req, res, o) {
   const headers = { 'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21', Accept: '*/*', ...(o.h || {}) };
   if (req.headers.range) headers.Range = req.headers.range;
   let up;
-  try { up = await get(o.u, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers }); } catch (e) {
+  try { up = await get(o.u, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers, proxy: o.p || '' }); } catch (e) {
     if (res.destroyed || res.writableEnded) return;
     res.writeHead(e.status || 502, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(e.message || 'The provider couldn’t be reached');
@@ -234,7 +339,7 @@ class Whole {
   /** Starts the first run at `from`; resolves once the size and type are known (or this film can't be done whole). */
   async begin(from) {
     from = Math.floor(from / CHUNK) * CHUNK;
-    const up = await get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` } });
+    const up = await get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` }, proxy: this.o.p || '' });
     const ct = up.headers['content-type'] || '';
     let total = 0;
     if (up.statusCode === 206) { const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || ''); total = m ? Number(m[1]) : 0; }
@@ -321,7 +426,7 @@ class Whole {
     const r = { stop: false };
     this.run = { from, at: from, written: from, t0: Date.now(), up: { destroy() { r.stop = true; } } }; // a placeholder while connecting
     const ph = this.run;
-    get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` } }).then((up) => {
+    get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` }, proxy: this.o.p || '' }).then((up) => {
       if (this.run !== ph) return up.destroy();
       // The same film, or nothing: a "too many connections" page or a placeholder video must not land in the file.
       const ct = up.headers['content-type'] || '';
@@ -542,6 +647,8 @@ function startProxy() {
 if (require.main === module) {
   if (!SECRET || SECRET.length < 16) { console.error('Set RELAY_SECRET to the secret shown in Admin → Network & proxies → Stream relay (at least 16 characters).'); process.exit(1); }
   if (PROXY_PORT && (!PROXY_USER || !PROXY_PASS)) { console.error('PROXY_PORT needs PROXY_USER and PROXY_PASS.'); process.exit(1); }
+  // One bad connection must not stop everyone's streams: note it and carry on.
+  process.on('uncaughtException', (e) => log('error: ' + ((e && e.stack) || e)));
   // Films left over from before a restart: their bookkeeping is gone, so start afresh.
   try { for (const f of fs.readdirSync(CACHE_DIR)) if (/^[0-9a-f]{32}\.bin(\.\w+)?$/.test(f)) fs.unlinkSync(pathMod.join(CACHE_DIR, f)); } catch {}
   server.listen(PORT, () => log(`Stream relay ${VERSION} on port ${PORT} (whole films kept in ${CACHE_DIR}, ${(diskFree() / 1e9).toFixed(0)} GB free)`));

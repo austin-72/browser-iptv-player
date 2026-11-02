@@ -68,6 +68,19 @@ Admin → Network & proxies → Stream relay → **Test** says when the relay ru
 
 A relay set up before version 2 can't update itself: copy the new `relay.js` and `docker-compose.yml` onto it once by hand and run `docker compose up -d`.
 
+## The relay through a proxy (optional)
+
+The relay can reach providers through a proxy instead of connecting itself. Providers then see the proxy's address, not the relay's. This helps when a provider only accepts one address (the same one this server's proxy uses), or blocks data-centre addresses like a VPS's.
+
+Admin → Network & proxies → Stream relay → **How the relay connects to providers**:
+- **Directly**: the relay connects itself (the default).
+- **Through each list's proxy**: the same proxy this server uses for that list (its own choice in Admin → Lists, or the default). Lists without a proxy are fetched directly.
+- **Through** one of your proxies: everything the relay fetches goes through that one.
+
+HTTP, HTTPS and SOCKS5 proxies work, with a username and password. The proxy travels inside the sealed stream address, so devices never see it, and the proxy's address must be on the public internet. Press **Test** after saving: it shows the address providers see from the relay itself and through each proxy. If a proxy shows the relay's own address, the relay is older than version 4 and needs updating (**Update the relay**).
+
+All the video then goes through the proxy too (films fetched whole as well), so check the proxy's data allowance. Residential proxies are often paid per GB.
+
 ## Your server's own traffic through the same machine (optional)
 
 Some things still go from this server to the provider:
