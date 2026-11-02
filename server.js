@@ -49,7 +49,7 @@ const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
-const { makeRelay, testRelay, newSecret } = require('./lib/streamrelay');
+const { makeRelay, testRelay, newSecret, relayDownloads, updateRelay, bundledRelay, playId } = require('./lib/streamrelay');
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
@@ -892,7 +892,10 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
     let info = null;
     if (!kind) { info = await reach.check(raw, { h: a.h || {} }, origin, '', { limit: connLimit(it, alt), formats: listFormats(it, alt), mixedOk: true }).catch(() => null); kind = (info && info.kind) || 'ts'; }
     const finite = it.t === 'movie' || it.t === 'episode' || it.t === 'catchup' || !!(info && info.finite);
-    const out = { kind, finite, mse: true, url: relayOf.wrap(raw, headers), blocked: '', split: false, splitUrl: '', relay: true, alt: null };
+    // Films and episodes (one file, not HLS): the relay fetches them whole onto its disk and plays them from there, so
+    // seeking is instant and the provider connection is free again once it's all there (see relayFinished below).
+    const whole = (it.t === 'movie' || it.t === 'episode') && kind !== 'hls' ? { whole: true, k: it.k, alt } : null;
+    const out = { kind, finite, mse: true, url: relayOf.wrap(raw, headers, whole), blocked: '', split: false, splitUrl: '', relay: true, alt: null };
     // Xtream live channels in MPEG-TS are also served as HLS (better on phones and TVs): that through the relay too.
     const xh = it.t === 'live' && kind === 'ts' ? xtreamHls(raw) : '';
     if (xh) out.alt = { url: relayOf.wrap(xh, headers), mse: true, split: false };
@@ -912,8 +915,49 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
 /** Streams the household is watching right now from each list (direct or through the server). */
 function listUsage() {
-  return usageOf(hub.conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf });
+  return usageOf(hub.conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed });
 }
+/**
+ * Films and episodes the stream relay already has whole on its disk: their viewers no longer use a provider connection,
+ * so those don't count towards the list's limit. Every 10 s while anything plays through the relay, the server asks the
+ * relay which are finished — and tells it what's still being played, so it stops fetching films nobody watches.
+ */
+const relayFinished = (() => {
+  let done = new Set(), busy = false, downloading = false;
+  const playingIds = () => {
+    const ids = new Set();
+    const add = (pl) => {
+      if (!pl || !pl.k) return;
+      const it = catalog.get(pl.k);
+      const alt = Number.isInteger(pl.alt) ? pl.alt : -1;
+      if (it && (it.t === 'movie' || it.t === 'episode') && relayOf.uses(srcList(it, alt))) ids.add(playId(pl.k, alt));
+    };
+    for (const c of hub.conns) { add(c.playing); for (const t of c.multi || []) add(t); }
+    return ids;
+  };
+  const poll = async () => {
+    const r = relayOf.conf();
+    if (busy || !r) { if (!r) done = new Set(); return; }
+    const ids = playingIds();
+    if (!ids.size && !downloading) { done = new Set(); return; }
+    busy = true;
+    try {
+      const films = await relayDownloads(r.url, r.secret, [...ids], fetch);
+      if (!films) return;
+      const next = new Set();
+      for (const f of films) if (f.done) for (const i of f.ids || []) next.add(i);
+      done = next;
+      downloading = films.some((f) => f.downloading);
+    } finally { busy = false; }
+  };
+  setInterval(() => { poll().catch(() => {}); }, 10000).unref();
+  return {
+    freed: (pl) => {
+      if (!done.size || !pl || !pl.k) return false;
+      return done.has(playId(pl.k, Number.isInteger(pl.alt) ? pl.alt : -1));
+    },
+  };
+})();
 /** Filled in by feature modules (lib/routes-p2.js): watch-party connection sharing. */
 const p2Hooks = { sharedPartyOf: null, partyShareDefault: null };
 /** Filled in by lib/routes-p9.js (channel health): each play's outcome, and which copy of a channel to try first. */
@@ -1545,7 +1589,18 @@ route('POST', '/api/admin/relay/test', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const r = settings().relay || {};
   if (!r.url || !r.secret) return { ok: false, error: 'Save the relay’s address first.' };
-  return testRelay(r.url, r.secret, fetch);
+  const out = await testRelay(r.url, r.secret, fetch);
+  // Is the relay running the relay.js that comes with this server? (Older ones can't fetch films whole.)
+  const mine = bundledRelay();
+  if (out.ok && mine) { out.latest = mine.version; out.outdated = String(out.version) !== mine.version; }
+  return out;
+});
+// Sends this server's relay.js to the relay, which swaps it in and restarts (a few seconds without the relay).
+route('POST', '/api/admin/relay/update', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const r = settings().relay || {};
+  if (!r.url || !r.secret) return { ok: false, error: 'Save the relay’s address first.' };
+  return updateRelay(r.url, r.secret, fetch);
 });
 route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);

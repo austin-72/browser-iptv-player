@@ -51,6 +51,23 @@ RELAY_SECRET=<the secret> PORT=8090 node relay.js
 
 You then need to put https in front of it yourself (Caddy, nginx, a tunnel). A plain-http relay only works while the app is opened on a plain-http address.
 
+## Films and episodes: fetched whole
+
+When someone plays a film or an episode through the relay, the relay fetches **the whole file** from the provider as fast as the provider sends it, onto the relay machine's disk, and plays it from there:
+
+- **Seeking is instant** for every part that's already on the relay. Jumping ahead of the download makes the relay fetch from there first, then fill in the rest.
+- **The provider connection is free again** as soon as the whole file is on the relay. This server checks with the relay every 10 seconds, and a finished film stops counting towards the list's connection limit, so someone else can watch live TV on it.
+- **One provider connection per film** while it downloads, as before. The relay stops downloading a film when nobody is playing it any more.
+- Live channels and HLS streams are relayed as they come, as before.
+
+The films are kept in `RELAY_CACHE_DIR` (with Docker, a volume called `cache`) and use at most `RELAY_CACHE_GB`, or all the free disk space but 5 GB. Films nobody is watching are deleted when room is needed, and after 6 hours unused. A bigger disk keeps more films around. If a film is bigger than the free space, it's simply relayed as it comes.
+
+## Updating the relay
+
+Admin → Network & proxies → Stream relay → **Test** says when the relay runs an older version than the one that comes with this server, with an **Update the relay** button. This server then sends its `relay.js` to the relay, which swaps it in and restarts within a few seconds. With Docker the relay's folder must be mounted writable (as in `docker-compose.yml`: `./:/relay`). Without Docker, run it under something that restarts it when it exits (systemd, pm2).
+
+A relay set up before version 2 can't update itself: copy the new `relay.js` and `docker-compose.yml` onto it once by hand and run `docker compose up -d`.
+
 ## Your server's own traffic through the same machine (optional)
 
 Some things still go from this server to the provider:
@@ -67,7 +84,8 @@ To hide your home address from those too, let the relay be this server's proxy:
 
 | | Without the relay | With the relay |
 | --- | --- | --- |
-| Streams a browser can play as they are (most live channels, MP4 films) | Device ↔ provider | Device ↔ relay ↔ provider |
+| Streams a browser can play as they are (most live channels) | Device ↔ provider | Device ↔ relay ↔ provider |
+| Films and episodes the browser can play as they are | Device ↔ provider | Device ↔ relay (from its disk) ↔ provider, the whole file at once |
 | Streams that need converting (some MKV/AC-3 films, MPEG-2) | Device ↔ this server ↔ provider (through this server's proxy, if set) | the same |
 | "Open in another app" (VLC, Infuse…) | Device ↔ provider | Device ↔ relay ↔ provider |
 | Downloads | Device ↔ provider, or through this server | Through this server (and its proxy) |
@@ -76,7 +94,7 @@ To hide your home address from those too, let the relay be this server's proxy:
 
 ## Good to know
 
-- **Connection limits are unchanged.** A stream through the relay is still one connection to the provider, and busy-provider and priority rules work as before.
+- **Connection limits:** a stream through the relay is still one connection to the provider, and busy-provider and priority rules work as before. A film that's fully on the relay no longer uses one.
 - **The relay only fetches public internet addresses.** It refuses its own network, so it can't be used to reach anything else on the VPS's network. Set `RELAY_ALLOW_PRIVATE=1` only if a provider is on the same private network as the relay.
 - **Make a new secret** (Admin → Network & proxies) if you think it has leaked, then put the new one in the relay's `.env` and restart it.
 - **Checking the relay:** `docker compose logs relay` on the relay machine shows it starting. Admin → Network & proxies → Test shows how many streams are playing through it.

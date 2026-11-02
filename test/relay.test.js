@@ -39,15 +39,30 @@ function provider() {
   });
   return new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok({ srv, seen, base: `http://127.0.0.1:${srv.address().port}` })));
 }
-async function startRelay(env) {
+async function startRelay(env, script) {
   const port = await freePort();
-  const p = spawn(process.execPath, [path.join(__dirname, '..', 'relay', 'relay.js')], { env: { ...process.env, RELAY_SECRET: SECRET, PORT: String(port), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [script || path.join(__dirname, '..', 'relay', 'relay.js')], { env: { ...process.env, RELAY_SECRET: SECRET, PORT: String(port), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
   p.stderr.on('data', (d) => { out += d; });
   for (let i = 0; i < 50 && !/Stream relay/.test(out); i++) await wait(50);
   assert.match(out, /Stream relay/, out);
   return { p, base: `http://127.0.0.1:${port}`, out: () => out };
+}
+/** What a sealed relay address carries (the test knows the secret). */
+function unseal(url, secret) {
+  const tok = /\/e\/([A-Za-z0-9_-]+)/.exec(url)[1];
+  const b = Buffer.from(tok, 'base64url');
+  const d = require('crypto').createDecipheriv('aes-256-gcm', require('crypto').createHash('sha256').update('relay-key:' + secret).digest(), b.subarray(0, 12));
+  d.setAuthTag(b.subarray(b.length - 16));
+  return JSON.parse(Buffer.concat([d.update(b.subarray(12, b.length - 16)), d.final()]).toString('utf8'));
+}
+/** A copy of relay.js in a folder of its own (for the tests that let it replace its own file). */
+function relayCopy() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-copy-'));
+  const f = path.join(d, 'relay.js');
+  fs.copyFileSync(path.join(__dirname, '..', 'relay', 'relay.js'), f);
+  return f;
 }
 const relayLinks = (text) => text.split('\n').filter((l) => l && !l.startsWith('#'));
 
@@ -138,6 +153,109 @@ test('the relay as a proxy for the server’s own traffic (sign-in, plain reques
   } finally { r.p.kill(); pv.srv.close(); }
 });
 
+test('the relay fetches films whole: one connection, instant seeking, finished films reported, unwatched ones stopped', { timeout: 60000 }, async () => {
+  const crypto = require('crypto');
+  const SIZE = 12 * 1024 * 1024 + 4321;
+  const BIG = crypto.randomBytes(SIZE);
+  let open = 0, most = 0;
+  const asked = [];
+  // A provider that sends about 8 MB/s, with or without ranges; a playlist marked as a film; a file of no known size.
+  const srv = http.createServer((req, res) => {
+    open++; most = Math.max(most, open); res.on('close', () => open--);
+    asked.push(req.url + ' ' + (req.headers.range || ''));
+    if (req.url === '/hls.m3u8') { res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' }); return res.end('#EXTM3U\n#EXTINF:4,\nseg.ts\n'); }
+    if (req.url === '/nosize.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); return res.end(BIG.subarray(0, 1000)); }
+    const m = req.url === '/norange.mp4' ? null : /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
+    const a = m ? +m[1] : 0, b = m && m[2] ? +m[2] : SIZE - 1;
+    res.writeHead(m ? 206 : 200, { 'Content-Type': 'video/mp4', 'Content-Length': b - a + 1, ...(m ? { 'Content-Range': `bytes ${a}-${b}/${SIZE}` } : {}) });
+    let p = a;
+    const step = () => { if (res.destroyed) return; if (p > b) return res.end(); const n = Math.min(128 * 1024, b - p + 1); res.write(BIG.subarray(p, p + n)); p += n; setTimeout(step, 15); };
+    step();
+  });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  const pbase = `http://127.0.0.1:${srv.address().port}`;
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-cache-'));
+  const r = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_CACHE_DIR: cache });
+  const film = (p, i) => relayUrl(r.base, SECRET, pbase + p, {}, 3600, { w: 1, i });
+  const bytes = async (u, range) => { const res = await fetch(u, range ? { headers: { Range: range } } : {}); return { status: res.status, cr: res.headers.get('content-range'), buf: Buffer.from(await res.arrayBuffer()) }; };
+  const downloads = async (playing) => {
+    const t = String(Math.floor(Date.now() / 1000));
+    const q = playing === undefined ? '' : `playing=${encodeURIComponent(playing)}&`;
+    const sig = crypto.createHmac('sha256', SECRET).update('downloads:' + (playing || '') + ':' + t).digest('base64url').slice(0, 32);
+    return (await fetch(`${r.base}/downloads?${q}t=${t}&s=${sig}`)).json();
+  };
+  try {
+    const u = film('/film.mp4', 'f1');
+    // The start, then straight to the end (where MP4s keep their index): both right away and correct.
+    let x = await bytes(u, 'bytes=0-65535');
+    assert.strictEqual(x.status, 206);
+    assert.strictEqual(x.cr, `bytes 0-65535/${SIZE}`);
+    assert.ok(x.buf.equals(BIG.subarray(0, 65536)));
+    const t0 = Date.now();
+    x = await bytes(u, 'bytes=-30000');
+    assert.ok(x.buf.equals(BIG.subarray(SIZE - 30000)), 'the end of the file');
+    assert.ok(Date.now() - t0 < 1000, 'seeking ahead jumps the download there');
+    // Still downloading; the server's view of it.
+    let d = await downloads();
+    assert.strictEqual(d.films.length, 1);
+    assert.deepStrictEqual(d.films[0].ids, ['f1']);
+    assert.strictEqual(d.films[0].done, false);
+    // The whole film, read while it downloads: every byte right.
+    x = await bytes(u);
+    assert.strictEqual(x.status, 200);
+    assert.ok(x.buf.equals(BIG));
+    for (let i = 0; i < 50 && !(d = await downloads()).films[0].done; i++) await wait(100);
+    assert.strictEqual(d.films[0].done, true);
+    assert.strictEqual(d.films[0].downloading, false);
+    assert.strictEqual(most, 1, 'never more than one provider connection');
+    // Now it's all here: reading again, and from the middle, doesn't touch the provider.
+    const n = asked.length;
+    x = await bytes(u, 'bytes=5000000-5999999');
+    assert.ok(x.buf.equals(BIG.subarray(5000000, 6000000)));
+    assert.strictEqual(asked.length, n);
+    // A HEAD request answers from what the relay knows.
+    const h = await fetch(u, { method: 'HEAD' });
+    assert.strictEqual(h.headers.get('content-length'), String(SIZE));
+    assert.strictEqual(h.headers.get('accept-ranges'), 'bytes');
+    // A provider without ranges: still fetched whole from the start, still plays.
+    x = await bytes(film('/norange.mp4', 'f2'), 'bytes=0-999');
+    assert.ok(x.buf.equals(BIG.subarray(0, 1000)));
+    // Not something to keep whole (a playlist, or no size): relayed as it comes.
+    assert.match((await bytes(film('/hls.m3u8', 'f3'))).buf.toString(), /#EXTM3U/);
+    assert.ok((await bytes(film('/nosize.mp4', 'f4'))).buf.equals(BIG.subarray(0, 1000)));
+    // The server says f2 isn't being played any more: its download stops (no reader left).
+    await wait(200);
+    d = await downloads('');
+    await wait(300);
+    d = await downloads('');
+    const f2 = d.films.find((f) => f.ids.includes('f2'));
+    assert.ok(f2 && !f2.downloading && !f2.done, JSON.stringify(d));
+    // A wrong signature gets nothing.
+    assert.strictEqual((await fetch(`${r.base}/downloads?t=1&s=x`)).status, 403);
+  } finally { r.p.kill(); srv.close(); }
+});
+
+test('the relay updates itself only with a valid signature and a working file', { timeout: 20000 }, async () => {
+  const crypto = require('crypto');
+  const copy = relayCopy();
+  const r = await startRelay({}, copy);
+  const send = (code, secret, t = String(Math.floor(Date.now() / 1000))) => fetch(r.base + '/update', { method: 'POST', body: code, headers: { 'X-Relay-Time': t, 'X-Relay-Sig': crypto.createHmac('sha256', secret).update('update:' + t + ':' + crypto.createHash('sha256').update(code).digest('hex')).digest('base64url').slice(0, 32) } });
+  try {
+    const good = fs.readFileSync(copy, 'utf8').replace("const VERSION = '", "const VERSION = 'next-");
+    assert.strictEqual((await send(good, 'not-the-secret-123456')).status, 403);
+    assert.strictEqual((await send(good, SECRET, '1000')).status, 403, 'an old signature');
+    assert.strictEqual((await send('this is not ( javascript', SECRET)).status, 400);
+    assert.strictEqual((await send('console.log(1)', SECRET)).status, 400, 'not a relay.js');
+    assert.doesNotMatch(fs.readFileSync(copy, 'utf8'), /VERSION = 'next-/);
+    const ok = await send(good, SECRET);
+    assert.strictEqual(ok.status, 200);
+    assert.match((await ok.json()).to, /^next-/);
+    for (let i = 0; i < 40 && r.p.exitCode === null; i++) await wait(50);
+    assert.strictEqual(r.p.exitCode, 0);
+    assert.match(fs.readFileSync(copy, 'utf8'), /VERSION = 'next-/);
+  } finally { r.p.kill(); }
+});
+
 test('the real server: relay addresses for direct streams, per list, for other apps; admin only', { timeout: 60000 }, async () => {
   const pv = await provider();
   const r = await startRelay({ RELAY_ALLOW_PRIVATE: '1' });
@@ -192,7 +310,21 @@ test('the real server: relay addresses for direct streams, per list, for other a
       assert.match(master, /#EXT-X-STREAM-INF/, 'the channel’s User-Agent went with it');
       reach = (await api('POST', '/api/play/reach', { k: film.k, origin: base })).body;
       assert.strictEqual(reach.kind, 'native');
+      // A film: the relay is asked to fetch it whole (the channel isn't).
+      const sealed = unseal(reach.url, secret);
+      assert.strictEqual(sealed.w, 1);
+      assert.strictEqual(sealed.i, require('../lib/streamrelay').playId(film.k, -1));
+      assert.ok(!unseal((await api('POST', '/api/play/reach', { k: ch.k, origin: base })).body.url, secret).w, 'live channels aren’t fetched whole');
       assert.deepStrictEqual(Buffer.from(await (await fetch(reach.url)).arrayBuffer()), FILM);
+      // The relay now has it all, and says so when the server asks.
+      const t = String(Math.floor(Date.now() / 1000));
+      const sig = require('crypto').createHmac('sha256', secret).update('downloads::' + t).digest('base64url').slice(0, 32);
+      const dl = await (await fetch(`${r2.base}/downloads?t=${t}&s=${sig}`)).json();
+      assert.ok(dl.films.some((f) => f.done && f.ids.includes(sealed.i)), JSON.stringify(dl));
+      // The same version as this server's relay.js: nothing to update.
+      const tested = (await api('POST', '/api/admin/relay/test')).body;
+      assert.strictEqual(tested.outdated, false);
+      assert.strictEqual(tested.films, 1);
       // Devices are told which lists are behind the relay (they then never contact those providers themselves).
       const boot = (await api('GET', '/api/boot')).body;
       assert.deepStrictEqual(boot.relayLists, [list.id]);
@@ -200,6 +332,22 @@ test('the real server: relay addresses for direct streams, per list, for other a
       const ext = (await api('POST', '/api/play/external', { k: film.k })).body;
       assert.strictEqual(ext.how, 'relay');
       assert.ok(ext.url.startsWith(r2.base + '/e/'));
+      assert.strictEqual(unseal(ext.url, secret).w, 1);
+      // "Update the relay": this relay runs from a copy, which it replaces with the server's relay.js and restarts.
+      const copy = relayCopy();
+      fs.writeFileSync(copy, fs.readFileSync(copy, 'utf8').replace("const VERSION = '", "const VERSION = 'old-"));
+      const r3 = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_SECRET: secret }, copy);
+      try {
+        await api('PUT', '/api/admin/settings', { relay: { url: r3.base } });
+        const before = (await api('POST', '/api/admin/relay/test')).body;
+        assert.strictEqual(before.outdated, true);
+        const up = (await api('POST', '/api/admin/relay/update')).body;
+        assert.strictEqual(up.ok, true, JSON.stringify(up));
+        assert.match(up.from, /^old-/);
+        for (let i = 0; i < 40 && r3.p.exitCode === null; i++) await wait(50);
+        assert.strictEqual(r3.p.exitCode, 0, 'it exits so Docker starts it again');
+        assert.strictEqual(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(__dirname, '..', 'relay', 'relay.js'), 'utf8'));
+      } finally { r3.p.kill(); await api('PUT', '/api/admin/settings', { relay: { url: r2.base } }); }
       // One list straight from the provider again.
       await api('PUT', `/api/admin/lists/${list.id}`, { relay: 'off' });
       reach = (await api('POST', '/api/play/reach', { k: film.k, origin: base })).body;
@@ -218,4 +366,12 @@ test('the real server: relay addresses for direct streams, per list, for other a
       assert.doesNotMatch(out, new RegExp(secret), 'the secret is never logged');
     } finally { r2.p.kill(); }
   } finally { app.kill(); r.p.kill(); pv.srv.close(); }
+});
+
+test('a play whose film the relay already has doesn’t count towards the connection limit', () => {
+  const { listUsage } = require('../lib/usage');
+  const conns = [{ id: 'a', playing: { k: 'f1', alt: -1 } }, { id: 'b', playing: { k: 'live1' } }, { id: 'c', playing: { k: 'f2' } }];
+  const use = listUsage(conns, { listOf: () => 'L', freed: (pl) => pl.k === 'f1' });
+  assert.deepStrictEqual(use.get('L').map((c) => c.id), ['b', 'c']);
+  assert.deepStrictEqual(listUsage(conns, { listOf: () => 'L' }).get('L').length, 3);
 });

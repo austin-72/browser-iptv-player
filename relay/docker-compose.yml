@@ -6,8 +6,13 @@ services:
     restart: unless-stopped
     command: node /relay/relay.js
     env_file: .env
+    environment:
+      - RELAY_CACHE_DIR=/cache
     volumes:
-      - ./relay.js:/relay/relay.js:ro
+      # This folder, writable: "Update the relay" in the app replaces relay.js here (then the relay restarts).
+      - ./:/relay
+      # Films and episodes fetched whole while they're watched.
+      - cache:/cache
     ports:
       # Only used when PROXY_PORT=8888 is set in .env (the relay as this server's own proxy).
       - "8888:8888"
@@ -23,3 +28,4 @@ services:
       - caddy-data:/data
 volumes:
   caddy-data: {}
+  cache: {}
