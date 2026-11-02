@@ -249,11 +249,33 @@
     report('rejection', r instanceof Error ? r : { message: (r && r.message) || (typeof r === 'string' ? r : (function () { try { return JSON.stringify(r); } catch (x) { return String(r); } })()), stack: r && r.stack });
   });
   // The page froze (nothing ran for a long time while it was on screen): usually a slow loop on a slow device.
-  var tick = Date.now();
+  // Not a freeze: the computer or phone sleeping, the screen locked, or the browser slowing the page's timers down
+  // (a covered window, battery saving, a phone app in the background). Those show up as a long gap too, but other
+  // things (server calls, events) still ran during it, the browser said it was suspending the page, or the gap is
+  // far longer than anyone would sit through. A real freeze is one somebody was there for: they'd just tapped,
+  // clicked or pressed a key, or something was playing.
+  var tick = Date.now(), suspendedAt = 0, inputAt = 0;
+  var markSuspended = function () { suspendedAt = Date.now(); };
+  document.addEventListener('freeze', markSuspended);   // (Chrome's page lifecycle: the page is being frozen)
+  document.addEventListener('resume', markSuspended);
+  window.addEventListener('pageshow', function (e) { if (e.persisted) markSuspended(); });
+  var userInput = function () { inputAt = Date.now(); };
+  document.addEventListener('pointerdown', userInput, true);
+  document.addEventListener('keydown', userInput, true);
+  document.addEventListener('touchstart', userInput, true);
   setInterval(function () {
-    var now = Date.now(), gap = now - tick;
+    var now = Date.now(), gap = now - tick, from = tick;
     tick = now;
-    if (gap > 8000 && document.visibilityState === 'visible' && now - hiddenAt > gap + 2000) report('freeze', { message: 'The page didn’t respond for ' + Math.round(gap / 1000) + ' seconds' }, { seconds: Math.round(gap / 1000) });
+    if (gap <= 8000 || gap > 10 * 60e3 || document.visibilityState !== 'visible' || now - hiddenAt <= gap + 2000 || now - suspendedAt <= gap + 2000) return;
+    // Something else ran during the "freeze" (a server call finished, a click was noted…): the page wasn't stuck,
+    // only this timer was held back.
+    // (Only after the moment this 1-second timer should have run: whatever started the freeze — the tap, a server
+    // answer — is often noted just before the heavy work, in the same moment.)
+    for (var i = crumbs.length - 1; i >= 0; i--) { var c = crumbs[i]; if (c.at > from + 1500 && c.at < now - 50) return; if (c.at <= from) break; }
+    var vid = document.querySelector('video');
+    var watching = !!(vid && !vid.paused && !vid.ended);
+    if (!watching && !(inputAt && from - inputAt < 15000)) return; // nobody was there to notice
+    report('freeze', { message: 'The page didn’t respond for ' + Math.round(gap / 1000) + ' seconds' }, { seconds: Math.round(gap / 1000), after: watching ? 'while playing' : Math.round((from - inputAt) / 1000) + ' s after a tap, click or key' });
   }, 1000);
 
   // The app's own failures (see core.js V.fail and player.js) report through V.reportError; startup sets this.

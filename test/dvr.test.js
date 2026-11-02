@@ -138,6 +138,68 @@ test('the DVR records, survives a dropped stream, waits for a connection, follow
   } finally { dvr.stop(); pv.srv.close(); }
 });
 
+test('the DVR keeps what it recorded when stopped mid-drop, a folder change or a restart while saving, and series skips stick', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 90000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvr2-'));
+  const pv = await provider(makeTs(dir));
+  const url = pv.base + '/live/1.ts';
+  let ffOk = true;
+  const progs = [];
+  const deps = {
+    ffmpeg: () => ({ bin: cfg.ffmpeg, available: ffOk, netArgs: () => [] }),
+    source: () => ({ input: url, headers: {}, list: 'L', name: 'News' }),
+    programmes: () => progs, allowed: () => true, connFree: () => true,
+  };
+  const dvr = new Dvr(dir, deps, { tick: 200 });
+  dvr.setConfig({ pre: 0, post: 0 });
+  try {
+    // Stop pressed while it waits to carry on after a drop: what's recorded is saved, not thrown away.
+    let r = dvr.add('p1', { k: 'a', s: Date.now(), e: Date.now() + 60000, t: 'Drop then stop' });
+    assert.ok(await until(() => r.state === 'recording', 5000));
+    await wait(2000);
+    r.quick = 5; // (so the restart waits long enough to press Stop)
+    dvr.procs.get(r.id).proc.kill('SIGKILL');
+    assert.ok(await until(() => r.state === 'waiting', 3000), r.state);
+    dvr.stopNow('p1', r.id);
+    assert.ok(await until(() => r.state === 'done', 15000), r.state + ' ' + r.err);
+    assert.ok(fs.existsSync(r.file));
+    // Recording it again after stopping early makes a new recording.
+    const again = dvr.add('p1', { k: 'a', s: r.s, e: Date.now() + 60000, t: 'Drop then stop' });
+    assert.notStrictEqual(again.id, r.id);
+    dvr.remove('p1', again.id);
+    // The recordings folder changes while it records: it's finished where it started.
+    const other = path.join(dir, 'elsewhere');
+    r = dvr.add('p1', { k: 'b', s: Date.now(), e: Date.now() + 2500, t: 'Moved' });
+    assert.ok(await until(() => r.state === 'recording', 5000));
+    dvr.setConfig({ dir: other });
+    assert.ok(await until(() => r.state === 'done', 15000), r.state + ' ' + r.err);
+    assert.strictEqual(path.dirname(r.file), path.join(dir, 'recordings'));
+    // The server stopped while it was being saved (the pieces already joined): it's finished on the next start.
+    const joined = path.join(other, 'zz.ts');
+    fs.copyFileSync(path.join(dir, 'src.ts'), joined);
+    const half = { id: 'zz', pid: 'p1', k: 'c', ch: '', t: 'Half saved', s: Date.now() - 60000, e: Date.now() - 30000, pre: 0, post: 0, rule: '', state: 'resume', at: 0, started: 1, ended: 0, parts: 2, file: '', size: 0, drops: 0, err: '', keep: false, dir: other };
+    dvr.store.data.recs.push(half);
+    assert.ok(await until(() => half.state === 'done', 15000), half.state + ' ' + half.err);
+    // A channel that can't carry on (no ffmpeg any more) after part of it was recorded: that part is kept.
+    r = dvr.add('p1', { k: 'd', s: Date.now(), e: Date.now() + 60000, t: 'Partial' });
+    assert.ok(await until(() => r.state === 'recording', 5000));
+    await wait(1500);
+    ffOk = false;
+    dvr.procs.get(r.id).proc.kill('SIGKILL');
+    assert.ok(await until(() => r.state === 'done' || r.state === 'failed', 15000), r.state);
+    assert.strictEqual(r.state, 'done', r.err);
+    // Series: an episode skipped stays skipped; one that failed isn't added again and again.
+    const t0 = Date.now() + 3600e3;
+    progs.push({ s: t0, e: t0 + 1800e3, t: 'Quiz', st: 'One', ep: '' }, { s: t0 + 3600e3, e: t0 + 5400e3, t: 'Quiz', st: 'Two', ep: '' }, { s: Date.now() - 1000, e: Date.now() + 5000, t: 'Quiz', st: '', ep: '' });
+    const rule = dvr.addRule('p1', { k: 'q', ch: 'News', t: 'Quiz' });
+    const two = dvr.of('p1').find((x) => x.rule === rule.id && x.st === 'Two');
+    dvr.remove('p1', two.id);
+    for (let i = 0; i < 4; i++) { dvr.scan(); await wait(300); }
+    const mine = dvr.of('p1').filter((x) => x.rule === rule.id && x.state !== 'skipped');
+    assert.deepStrictEqual(mine.filter((x) => x.st === 'Two').length, 0, 'the skipped episode stays skipped');
+    assert.strictEqual(mine.filter((x) => x.st === '').length, 1, 'the one on now (failing: no ffmpeg) only once');
+  } finally { dvr.stop(); pv.srv.close(); }
+});
+
 test('the server: record now, stop, play the recording, and Admin → DVR decides who may record', { skip: !hasFfmpeg && 'no ffmpeg', timeout: 90000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvr-srv-'));
   const pv = await provider(makeTs(dir));

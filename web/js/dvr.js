@@ -140,8 +140,11 @@
       else if (a === 'keep') V.put('/api/dvr/' + id, { keep: !r.keep }).then(function (x) { V.toast(x.keep ? 'Kept: it won’t be deleted automatically' : 'It can be deleted automatically again'); return D.load(); }).then(draw).catch(V.fail);
     };
     D.load().then(draw);
-    // While something records or is saved, keep it current.
-    var t = setInterval(function () { if (!document.documentElement.contains(view)) return clearInterval(t); if (D.state && D.state.recs.some(live)) D.load().then(draw); }, 15000);
+    // While something records or is saved, keep it current; and redraw whenever the recordings change (a recording
+    // finished or failed while the page is open).
+    var off = V.on('dvr-state', function () { if (document.documentElement.contains(view)) draw(); });
+    var t = setInterval(function () { if (!document.documentElement.contains(view)) { clearInterval(t); off(); return; } if (D.state && D.state.recs.some(live)) D.load(); }, 15000);
+    V.pageCleanup = function () { clearInterval(t); off(); };
   });
 
   // ------------------------------------------------------------ Admin → DVR

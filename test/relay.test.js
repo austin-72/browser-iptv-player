@@ -235,6 +235,53 @@ test('the relay fetches films whole: one connection, instant seeking, finished f
   } finally { r.p.kill(); srv.close(); }
 });
 
+test('the relay: odd read sizes don’t fetch parts twice, two readers don’t fight over one film, zapping lets go at once', { timeout: 60000 }, async () => {
+  const SIZE = 12 * 1048576;
+  const data = Buffer.alloc(SIZE); for (let i = 0; i < SIZE; i++) data[i] = (i * 7 + (i >> 12)) & 255;
+  let served = 0, conns = 0, open = 0;
+  const prov = http.createServer((req, res) => {
+    if (req.url.startsWith('/slow')) { open++; res.on('close', () => open--); setTimeout(() => { if (!res.destroyed) { res.writeHead(200, { 'content-type': 'video/mp2t' }); res.write(Buffer.alloc(1000)); } }, 800); return; }
+    conns++;
+    const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const a = m ? +m[1] : 0;
+    res.writeHead(m ? 206 : 200, { 'content-type': 'video/mp4', 'content-length': SIZE - a, ...(m ? { 'content-range': `bytes ${a}-${SIZE - 1}/${SIZE}` } : {}), 'accept-ranges': 'bytes' });
+    let p = a;
+    const step = () => { if (res.destroyed) return; if (p >= SIZE) return res.end(); const n = Math.min(100003, SIZE - p); served += n; const ok = res.write(data.subarray(p, p + n)); p += n; if (ok) setTimeout(step, 2); else res.once('drain', () => setTimeout(step, 2)); };
+    step();
+  });
+  await new Promise((ok) => prov.listen(0, '127.0.0.1', ok));
+  const P = prov.address().port;
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-odd-'));
+  const relay = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_CACHE_DIR: cache });
+  const read = (u, range, limit) => new Promise((ok) => {
+    http.get(u, { headers: range ? { range } : {} }, (res) => {
+      const bufs = []; let got = 0;
+      res.on('data', (c) => { bufs.push(c); got += c.length; if (limit && got >= limit) { res.destroy(); ok(Buffer.concat(bufs)); } });
+      res.on('end', () => ok(Buffer.concat(bufs)));
+    });
+  });
+  try {
+    // Part of the start, then from 8 MB to the end, then everything: the provider sends the film about once.
+    let u = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/a.mp4`, {}, 3600, { w: 1, i: 'a' });
+    await read(u, 'bytes=0-', 1048576 * 2);
+    assert.ok((await read(u, 'bytes=8388608-')).equals(data.subarray(8388608)));
+    await wait(300);
+    assert.ok((await read(u, 'bytes=0-')).equals(data));
+    assert.ok(served < SIZE * 1.25, `fetched ${(served / 1048576).toFixed(1)} MB of a ${SIZE / 1048576} MB film`);
+    // Two readers far apart in another film: both get it, with a handful of connections (not thousands).
+    served = 0; conns = 0;
+    u = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/b.mp4`, {}, 3600, { w: 1, i: 'b' });
+    const [x, y] = await Promise.all([read(u, 'bytes=0-'), read(u, 'bytes=10485760-')]);
+    assert.ok(x.equals(data) && y.equals(data.subarray(10485760)));
+    assert.ok(conns < 20, conns + ' connections');
+    // A viewer who zaps away before the provider answers: the provider connection closes straight away.
+    const z = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/slow.ts`, {});
+    const req = http.get(z, () => {}); req.on('error', () => {});
+    await wait(300); req.destroy();
+    await wait(1500);
+    assert.strictEqual(open, 0, 'the provider connection was let go');
+  } finally { relay.p.kill(); prov.close(); }
+});
+
 test('the relay updates itself only with a valid signature and a working file', { timeout: 20000 }, async () => {
   const crypto = require('crypto');
   const copy = relayCopy();

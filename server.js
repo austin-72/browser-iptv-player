@@ -33,6 +33,7 @@ const { Proxy } = require('./lib/proxy');
 const { Reach, kindOfUrl, xtreamHls } = require('./lib/reach');
 const { zipFolder, unzip } = require('./lib/zip');
 const { Stats } = require('./lib/stats');
+const { Concurrency } = require('./lib/concurrency');
 const { fetchAny, setProxyResolver, testProxy } = require('./lib/net');
 const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
@@ -917,12 +918,18 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
 /** Streams the household is watching right now from each list (direct or through the server). */
 /** Filled in by lib/routes-p12.js (the DVR): recordings running now, and "rec:<id>" items. */
-const dvrHooks = { dvrConns: null, dvrItem: null };
+const dvrHooks = { dvrConns: null, dvrItem: null, dvrOwnerOk: null };
 function listUsage() {
   // (Recordings running now hold a provider connection too.)
   const conns = dvrHooks.dvrConns ? [...hub.conns, ...dvrHooks.dvrConns()] : hub.conns;
   return usageOf(conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed });
 }
+// Connections in use per provider, every minute (Admin → Statistics → Watching at once).
+const concurrency = new Concurrency(D, {
+  usage: () => listUsage(),
+  lists: () => lists.all().filter((l) => l.type !== 'folder').map((l) => ({ id: l.id, name: l.name })),
+  limitOf: (id) => { const l = lists.store.data.lists.find((x) => x.id === id); const m = measuredLimit(l, 'live'); if (m !== null) return m; const n = parseInt(l && l.account && l.account.maxConnections, 10); return n > 0 ? n : 0; },
+});
 /**
  * Films and episodes the stream relay already has whole on its disk: their viewers no longer use a provider connection,
  * so those don't count towards the list's limit. Every 10 s while anything plays through the relay, the server asks the
@@ -1071,7 +1078,9 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   // that work (channel health); then ones this page can play directly; then the list order.
   const hr = p9Hooks.rank ? p9Hooks.rank(it) : null;
   const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (hr ? hr(x.alt) - hr(y.alt) : 0) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
-  return { sources: order, allBusy: out.every((x) => x.busy), directAddress: settings().directAddress || '' };
+  const allBusy = out.every((x) => x.busy);
+  if (allBusy && out.length) concurrency.turnedAway(ctx.sess.id + '|' + it.k, out.map((x) => x.list)); // (Statistics: turned away)
+  return { sources: order, allBusy, directAddress: settings().directAddress || '' };
 });
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).
 route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
@@ -1100,7 +1109,12 @@ route('GET', '/api/admin/stats', (req, res, p, q, ctx) => {
   for (const pr of accounts.d.profiles) names[pr.id] = pr.name;
   return stats.summary(clampInt(q.get('days'), 1, 120, 30), names);
 });
-route('DELETE', '/api/admin/stats', (req, res, p, q, ctx) => { requireAdmin(ctx); stats.reset(); return { ok: true }; });
+route('DELETE', '/api/admin/stats', (req, res, p, q, ctx) => { requireAdmin(ctx); stats.reset(); concurrency.reset(); return { ok: true }; });
+// How many streams each provider served at once, and how close to its limit (Admin → Statistics).
+route('GET', '/api/admin/stats/concurrency', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  return concurrency.report(clampInt(q.get('days'), 1, 120, 7), clampInt(q.get('tz'), -840, 840, 0));
+});
 // The optional browser helper for desktop Chrome/Edge (extension/), named after this site.
 route('GET', '/api/direct-helper.zip', (req, res) => {
   const name = `${settings().brand.name || 'IPTV Player'} – Direct Streams`.slice(0, 75);
@@ -1168,19 +1182,34 @@ route('GET', '/api/dash', async (req, res, p, q, ctx) => {
   if (!up.body) return res.end();
   Readable.fromWeb(up.body).on('error', () => res.destroy()).pipe(res);
 });
-route('GET', '/api/session/:sid/:file', (req, res, p) => {
+route('GET', '/api/session/:sid/:file', async (req, res, p) => {
   if (!/^(index\.m3u8|seg\d+\.ts)$/.test(p.file)) throw new HttpError(400, 'Bad file');
   const s = media.touch(p.sid);
   if (!s) throw new HttpError(410, 'Playback session ended');
   const file = path.join(s.dir, p.file);
   countBytes(res, 'convert');
-  if (p.file === 'index.m3u8') return sendText(res, 200, fs.readFileSync(file, 'utf8'), 'application/vnd.apple.mpegurl', req.cast ? { 'Access-Control-Allow-Origin': '*' } : {});
+  if (p.file === 'index.m3u8') {
+    // The playlist may not be written yet (ffmpeg just restarted after a seek or a dropped connection): wait a few
+    // seconds for it rather than failing; players ask again after a "not ready yet".
+    let text = null;
+    for (let i = 0; i < 40 && text === null; i++) {
+      try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        if (!media.touch(p.sid)) throw new HttpError(410, 'Playback session ended');
+        await new Promise((ok) => setTimeout(ok, 250));
+      }
+    }
+    if (text === null) { res.writeHead(503, { 'Retry-After': '2', 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end('The conversion hasn’t started yet'); }
+    return sendText(res, 200, text, 'application/vnd.apple.mpegurl', req.cast ? { 'Access-Control-Allow-Origin': '*' } : {});
+  }
   serveFile(req, res, file, { type: 'video/mp2t', cache: 'max-age=3600', headers: req.cast ? { 'Access-Control-Allow-Origin': '*' } : {} });
 }, 'site');
 route('POST', '/api/session/:sid/ping', (req, res, p) => ({ alive: !!media.touch(p.sid) }), 'site');
 route('DELETE', '/api/session/:sid', (req, res, p) => { media.stopSession(p.sid); return { ok: true }; }, 'site');
 route('GET', '/api/proxy', (req, res, p, q) => proxy.handle(req, res, q, req.cast), 'site');
-route('GET', '/api/local/:list/:id', (req, res, p) => {
+route('GET', '/api/local/:list/:id', (req, res, p, q, ctx) => {
+  // (Recordings belong to the profile that made them; a Chromecast's signed address is allowed through.)
+  if (p.list === 'dvr' && !req.cast && dvrHooks.dvrOwnerOk && !dvrHooks.dvrOwnerOk(ctx && ctx.profile, p.id)) throw new HttpError(404, 'File not found');
   countBytes(res, 'local');
   const li = lists.libraryItem(p.list, p.id);
   if (!li) throw new HttpError(404, 'File not found');
@@ -1902,7 +1931,7 @@ function restartWhenIdle(reason) {
   update.pending = { reason, since: Date.now() };
   log(`Update: ${reason} — restarting when nobody is watching through the server.`);
   const tick = setInterval(() => {
-    const busy = media.sessions.size > 0;
+    const busy = media.sessions.size > 0 || !!(dvrHooks.dvrConns && dvrHooks.dvrConns().length); // (recordings too)
     if (busy && Date.now() - update.pending.since < 30 * 60e3) return;
     clearInterval(tick);
     hub.toAll('restarting', {});

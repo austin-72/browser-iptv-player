@@ -34,7 +34,7 @@ const os = require('os');
 const pathMod = require('path');
 const vm = require('vm');
 
-const VERSION = '2';
+const VERSION = '3';
 const SECRET = process.env.RELAY_SECRET || '';
 const PORT = Number(process.env.PORT) || 8090;
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 0;
@@ -142,15 +142,25 @@ async function relay(req, res, o) {
   if (req.headers.range) headers.Range = req.headers.range;
   let up;
   try { up = await get(o.u, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers }); } catch (e) {
+    if (res.destroyed || res.writableEnded) return;
     res.writeHead(e.status || 502, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end(e.message || 'The provider couldn’t be reached');
   }
+  // The viewer left (zapped away) while the provider was answering: let go of the provider at once.
+  if (res.destroyed || req.destroyed) { up.destroy(); return; }
+  res.on('close', () => { if (!res.writableFinished) up.destroy(); });
   const ct = up.headers['content-type'] || '';
   const headersOut = () => { const h = { 'Cache-Control': up.headers['cache-control'] || 'no-store' }; for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) if (up.headers[k]) h[k] = up.headers[k]; return h; };
   // Playlists: read (they're small), rewrite, send. Recognised by type, name, or their first bytes.
   const maybe = up.statusCode < 400 && req.method !== 'HEAD' && !req.headers.range && !/^(video|audio|image)\//i.test(ct);
   if (maybe) {
-    const first = await new Promise((ok) => { const done = (c) => { up.off('data', done); up.off('end', end); up.pause(); ok(c || null); }; const end = () => done(null); up.on('data', done); up.on('end', end); });
+    const first = await new Promise((ok) => {
+      const done = (c) => { up.off('data', done); up.off('end', end); up.off('close', end); up.off('error', end); up.pause(); ok(c || null); };
+      const end = () => done(null);
+      up.on('data', done); up.on('end', end); up.on('close', end); up.on('error', end); // (the provider hung up before the first byte)
+    });
+    if (res.destroyed) { up.destroy(); return; }
+    if (!first && up.destroyed && !up.complete) { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('The provider hung up'); }
     const looks = /mpegurl/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl) || (first && /^\s*(\ufeff)?#EXTM3U/.test(first.slice(0, 64).toString('utf8')));
     if (looks) {
       const chunks = first ? [first] : []; let size = first ? first.length : 0;
@@ -233,19 +243,31 @@ class Whole {
     if (!makeRoom(total, this)) { up.destroy(); return false; }
     this.size = total; this.type = ct || 'application/octet-stream';
     this.chunks = Math.ceil(total / CHUNK); this.have = new Uint8Array(this.chunks);
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-    this.fd = fs.openSync(this.file, 'w+');
-    fs.ftruncateSync(this.fd, total);
+    try {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      this.fd = fs.openSync(this.file, 'w+');
+      fs.ftruncateSync(this.fd, total);
+    } catch (e) {
+      up.destroy();
+      if (this.fd != null) { try { fs.closeSync(this.fd); } catch {} this.fd = null; }
+      try { fs.unlinkSync(this.file); } catch {}
+      return false;
+    }
     this.attach(up, from);
     return true;
   }
   /** Writes one provider answer into the file from `from` onwards. */
   attach(up, from) {
-    const r = { up, from, at: from, written: from, stop: false };
+    const r = { up, from, at: from, written: from, stop: false, t0: Date.now() };
     this.run = r;
     let writing = Promise.resolve();
     up.on('data', (buf) => {
       if (r.stop) return;
+      // Reaching an MB that's already here (another run filled it): write up to it and end this run there.
+      if (this.ranges) {
+        const nb = (Math.floor(r.at / CHUNK) + 1) * CHUNK;
+        if (r.at + buf.length > nb && nb < this.size && this.have[nb / CHUNK]) { buf = buf.subarray(0, nb - r.at); r.last = true; }
+      }
       const pos = r.at;
       r.at += buf.length;
       up.pause();
@@ -261,7 +283,7 @@ class Whole {
         this.wake();
         // Ran into a part that's already here (or the end): this run is done.
         const next = r.written / CHUNK;
-        if (r.written >= this.size || (this.ranges && r.written % CHUNK === 0 && this.have[next])) { this.endRun(r); return ok(); }
+        if (r.last || r.written >= this.size || (this.ranges && r.written % CHUNK === 0 && this.have[next])) { this.endRun(r); return ok(); }
         if (!r.stop) up.resume();
         ok();
       })));
@@ -297,11 +319,15 @@ class Whole {
     if (!this.ranges) from = 0;
     if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
     const r = { stop: false };
-    this.run = { from, at: from, written: from, up: { destroy() { r.stop = true; } } }; // a placeholder while connecting
+    this.run = { from, at: from, written: from, t0: Date.now(), up: { destroy() { r.stop = true; } } }; // a placeholder while connecting
     const ph = this.run;
     get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` } }).then((up) => {
       if (this.run !== ph) return up.destroy();
-      if (up.statusCode >= 400) { up.destroy(); this.run = null; this.errors++; return this.endRun({ up: { destroy() {} }, stop: false }, true); }
+      // The same film, or nothing: a "too many connections" page or a placeholder video must not land in the file.
+      const ct = up.headers['content-type'] || '';
+      const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || '');
+      const same = !/mpegurl|text\/|json|html/i.test(ct) && (up.statusCode === 206 ? m && Number(m[1]) === this.size : up.statusCode === 200 && Number(up.headers['content-length']) === this.size);
+      if (!same) { up.destroy(); this.run = null; this.errors++; return this.endRun({ up: { destroy() {} }, stop: false }, true); }
       // The provider ignored the range (it sends the whole file from the start): carry on that way.
       if (from && up.statusCode !== 206) { this.ranges = false; from = 0; }
       this.attach(up, from);
@@ -314,6 +340,10 @@ class Whole {
     if (r && r.from <= p && p <= r.at + NEAR) return;
     if (!r && !this.readers.size) return;
     if (!this.ranges && r) return; // can't jump: wait
+    // Another reader is being served by the current run (two TVs on one film, or a player reading the start and the
+    // end of an MP4): let it get going (a few MB or seconds) before moving it, so they don't keep cancelling each
+    // other's download — each move is a new connection to the provider.
+    if (r && (r.written - r.from < NEAR && Date.now() - (r.t0 || 0) < 4000) && [...this.readers].some((x) => x.pos >= r.from && x.pos <= r.at + NEAR)) return;
     this.startAt(Math.floor(p / CHUNK) * CHUNK);
   }
   addReader(x) { this.readers.add(x); this.lastUse = Date.now(); clearTimeout(this.idleTimer); if (!this.run) this.next(); }

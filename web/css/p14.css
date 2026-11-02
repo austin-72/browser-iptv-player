@@ -1,0 +1,31 @@
+/* Admin → Statistics → Watching at once (adminconc.js): streams at once per provider, against its limit. */
+.cc .cc-table tr.on td { background: color-mix(in srgb, var(--st-1) 9%, transparent); }
+.cc .cc-table .linkish { font-weight: 600; text-align: left; }
+.cc .cc-table td.warn { color: var(--warn); }
+.cc-bar { display: block; width: 4.5rem; height: 4px; margin: .35rem 0 0 auto; border-radius: 2px; background: var(--line); overflow: hidden; }
+.cc-bar i { display: block; height: 100%; background: var(--st-1); border-radius: 2px; }
+.cc-bar i.full { background: var(--st-2); }
+.cc-one { margin-top: 1.4rem; }
+.cc-one h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+.cc-sub { margin: 1.2rem 0 .5rem; font-size: .92rem; font-weight: 600; }
+.sw.cc-full { background: var(--st-2); }
+.cc-lim-key { display: inline-block; width: 1.1rem; border-top: 2px dashed var(--danger); vertical-align: middle; }
+.cc-avg-key { display: inline-block; width: 1.1rem; border-top: 2px solid var(--text); vertical-align: middle; }
+.cc-chart { width: 100%; overflow: hidden; margin: .2rem 0 .4rem; }
+.cc-chart svg { display: block; }
+.cc-chart .s1 { fill: var(--st-1); }
+.cc-chart .cc-full { fill: var(--st-2); }
+.cc-chart .st-grid { stroke: var(--line); stroke-width: 1; }
+.cc-chart .st-grid.base { stroke: var(--faint); }
+.cc-chart .st-ax { fill: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cc-chart .st-hit { fill: transparent; cursor: crosshair; }
+.cc-chart .st-cross { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.cc-chart .cc-avg { fill: none; stroke: var(--text); stroke-width: 1.5; stroke-linejoin: round; opacity: .75; pointer-events: none; }
+.cc-chart .cc-lim { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 5 4; pointer-events: none; }
+.cc-chart .cc-lim-t { fill: var(--danger); font-size: 11px; font-weight: 600; }
+.cc-grid { display: grid; grid-template-columns: 2.4rem repeat(24, minmax(12px, 1fr)); gap: 2px; min-width: 22rem; font-size: .72rem; }
+.cc-gd { color: var(--dim); align-self: center; }
+.cc-gh { color: var(--faint); white-space: nowrap; overflow: visible; font-variant-numeric: tabular-nums; height: 1.1rem; }
+.cc-c { height: 18px; border-radius: 3px; background: var(--card); position: relative; }
+.cc-c[style*="--a"] { background: color-mix(in srgb, var(--st-1) calc(var(--a) * 100%), var(--card)); }
+.cc-c.full { box-shadow: inset 0 0 0 2px var(--st-2); }

@@ -47,6 +47,15 @@ V.nativePlays = (function () {
     return c[kind];
   };
 })();
+/** What this browser has for playing streams (for error reports: which player could have worked). */
+V.mediaSupport = function () {
+  var MS = window.ManagedMediaSource ? 'ManagedMediaSource' : window.MediaSource ? 'MediaSource' : window.WebKitMediaSource ? 'WebKitMediaSource' : 'none';
+  var v = document.createElement('video');
+  var cp = function (t) { try { return v.canPlayType(t) || 'no'; } catch (e) { return 'error'; } };
+  var mseH264 = false;
+  try { var M = window.ManagedMediaSource || window.MediaSource; mseH264 = !!(M && M.isTypeSupported('video/mp4; codecs="avc1.64001f,mp4a.40.2"')); } catch (e) {}
+  return { mse: MS, mseH264: mseH264, hlsjs: !!(window.Hls && Hls.isSupported && Hls.isSupported()), nativeHls: cp('application/vnd.apple.mpegurl'), nativeTs: cp('video/mp2t'), nativeMp4: cp('video/mp4; codecs="avc1.64001f,mp4a.40.2"'), way: V.ls.get('hlsWay', '') || '' };
+};
 /** The optional "direct streams" browser helper (see Settings) marks the page when it's active. */
 V.directHelper = function () { return document.documentElement.hasAttribute('data-iptv-direct'); };
 
@@ -581,6 +590,28 @@ PP._attempt = function (a, token, startAt) {
     v.addEventListener('canplay', onCanPlay);
     // Direct attempts give up quickly so the server can take over.
     var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'browser' ? 45000 : a.via === 'direct' || a.via === 'split' ? 12000 : 25000);
+    // A server conversion that's still showing nothing after 25 s: the conversion is usually fine and it's this
+    // browser's player that's stuck (some TV and console browsers claim hls.js support that doesn't work). Swap to
+    // the other HLS player once; whichever starts is remembered for this device.
+    var swapT = a.via === 'session' ? setTimeout(function () {
+      var h = self._hlsAttach;
+      // (Only this attempt's own playlist: the server may still be starting the conversion after 25 s.)
+      if (done || token !== self.token || !h || h.token !== token || h.a !== a || v.readyState > 0) return;
+      var other = self._hlsWay === 'hlsjs' ? (V.nativePlays('hls') ? 'native' : '') : (window.Hls && Hls.isSupported() ? 'hlsjs' : '');
+      if (!other) return;
+      if (V.crumb) V.crumb('player', 'nothing after 25 s with ' + self._hlsWay + ': trying ' + other);
+      if (self.hls) { try { self.hls.destroy(); } catch (e) {} self.hls = null; }
+      v.removeAttribute('src'); try { v.load(); } catch (e) {}
+      self._forceHls = other;
+      try { self._attachHls(h.a, h.token, h.url, h.rel, h.bufGoal); } catch (e) { fail(e); }
+      self._forceHls = null;
+    }, 25000) : null;
+    var cleanup0 = cleanup;
+    cleanup = function () { clearTimeout(swapT); cleanup0(); };
+    var ok0 = ok;
+    ok = function () { if (!done && a.via === 'session' && self._hlsWay) V.ls.set('hlsWay', self._hlsWay); ok0(); };
+    v.addEventListener('playing', ok);
+    v.removeEventListener('playing', ok0);
     self._failNow = fail;
     self._attach(a, token, startAt).catch(fail);
   });
@@ -680,8 +711,19 @@ PP._attachMedia = function (a, token, startAt, kind, url) {
 };
 PP._attachHls = function (a, token, url, rel, bufGoal) {
   var v = this.video;
+  this._hlsAttach = { a: a, token: token, url: url, rel: rel, bufGoal: bufGoal };
+  // This device's own HLS player worked before when hls.js didn't (some TV and console browsers): use it first.
+  var preferNative = V.ls.get('hlsWay', '') === 'native' && V.nativePlays('hls');
+  if (this._forceHls === 'native' || (preferNative && this._forceHls !== 'hlsjs')) {
+    this._hlsWay = 'native';
+    v.src = url;
+    if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
+    this._play();
+    return;
+  }
   {
     if (window.Hls && Hls.isSupported()) {
+      this._hlsWay = 'hlsjs';
       var q = this._quality();
       var hcfg = {
         enableWorker: true, maxBufferLength: bufGoal, backBufferLength: 60, startPosition: this.vod && rel > 0 ? rel : -1,
@@ -693,7 +735,7 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
       var hls = new Hls(hcfg);
       this.hls = hls;
       var self = this;
-      hls.on(Hls.Events.ERROR, function (_, d) { self._hlsError(d); });
+      hls.on(Hls.Events.ERROR, function (_, d) { if (self.hls === hls) self._hlsError(d); }); // (not an old, replaced one)
       hls.on(Hls.Events.MANIFEST_PARSED, function () {
         if (q) { var cap = -1; hls.levels.forEach(function (l, i) { if (l.height && l.height <= q) cap = i; }); if (cap >= 0) hls.autoLevelCapping = cap; }
         self._menuRefresh();
@@ -704,6 +746,7 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
       hls.loadSource(url);
       hls.attachMedia(v);
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      this._hlsWay = 'native';
       v.src = url;
       if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
     } else throw new Error('This browser can’t play HLS streams.');
@@ -1023,7 +1066,7 @@ PP._error = function (err) {
     V.reportError('playback', { message: err.message }, { // (no stack: what each way said is what matters)
       item: { k: it2.k, t: it2.t, n: it2.n, g: it2.g, backups: (it2.a || []).length, offline: !!it2.offlineUrl, drm: !!it2.dr, ext: (String(it2.u || '').split('?')[0].match(/\.(\w{2,5})$/) || [])[1] || '' },
       final: err.detail, attempts: (this._attemptLog || []).slice(), reconnects: this.reconnects, started: !!this._everStarted,
-      caps: V._caps || undefined, reach: this.reachInfo ? Object.keys(this.reachInfo).filter(function (x) { return !/^(url|u|input|src)$/.test(x); }).reduce(function (o, x) { o[x] = this.reachInfo[x]; return o; }.bind(this), {}) : undefined,
+      caps: V._caps || undefined, media: V.mediaSupport(), hlsWay: this._hlsWay || undefined, reach: this.reachInfo ? Object.keys(this.reachInfo).filter(function (x) { return !/^(url|u|input|src)$/.test(x); }).reduce(function (o, x) { o[x] = this.reachInfo[x]; return o; }.bind(this), {}) : undefined,
     });
   }
   V.announce('Playback failed: ' + sub);
@@ -1055,6 +1098,7 @@ PP._msg = function (m) {
 PP._teardownMedia = function () {
   V.emit('player-teardown', this);
   if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
+  this._hlsAttach = null;
   if (this.mts) { try { this.mts.pause(); this.mts.unload(); this.mts.detachMediaElement(); this.mts.destroy(); } catch (e) {} this.mts = null; }
   if (this.shaka) { var sp = this.shaka; this.shaka = null; this._shakaGone = sp.destroy().catch(function () {}); }
   clearInterval(this._pinger);
@@ -1202,13 +1246,28 @@ PP.toggleFullscreen = function () {
   var el = this.el;
   if (el.requestFullscreen) el.requestFullscreen().then(function () { try { if (screen.orientation && screen.orientation.lock && V.device.touch) screen.orientation.lock('landscape').catch(function () {}); } catch (e) {} }).catch(function () {});
   else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-  else if (this.video.webkitEnterFullscreen) this.video.webkitEnterFullscreen();
+  else if (this.video.webkitEnterFullscreen) {
+    // iPhone: only the video itself goes full screen, and only once it has loaded enough to know its size.
+    var me = this;
+    if (this.video.readyState < 1) { this.osd('Full screen works once the video has started', 1800); return; }
+    try { this.video.webkitEnterFullscreen(); } catch (e) { me.osd('Full screen isn’t available right now', 1800); }
+  }
 };
 PP.togglePip = function () {
   var v = this.video;
   if (document.pictureInPictureElement) document.exitPictureInPicture().catch(function () {});
-  else if (v.requestPictureInPicture) v.requestPictureInPicture().catch(V.fail);
-  else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+  else if (v.requestPictureInPicture) {
+    var me = this;
+    v.requestPictureInPicture().catch(function (e) {
+      // Safari on iPhone says no for some streams (those played through Media Source, like server conversions):
+      // its own way sometimes still works; when it doesn't, say so plainly (it isn't a fault in the app).
+      if (v.webkitSetPresentationMode && v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture')) {
+        try { v.webkitSetPresentationMode('picture-in-picture'); return; } catch (x) {}
+      }
+      me.osd(e && e.name === 'NotSupportedError' ? 'Picture-in-picture isn’t available for this stream on this device' : 'Picture-in-picture didn’t start', 2500);
+    });
+  }
+  else if (v.webkitSetPresentationMode) { try { v.webkitSetPresentationMode(v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'); } catch (e) { this.osd('Picture-in-picture isn’t available for this stream on this device', 2500); } }
 };
 PP.setRate = function (r) { this.video.playbackRate = r; V.setPref('speed', r); this.osd('Speed ' + (r === 1 ? 'normal' : r + '×'), 1000); if (this.onUserAction) this.onUserAction('rate'); };
 PP.step = function (dir) { var v = this.video; if (!this.vod) return; v.pause(); v.currentTime = Math.max(0, v.currentTime + dir / 25); };

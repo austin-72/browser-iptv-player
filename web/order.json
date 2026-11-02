@@ -44,6 +44,7 @@
     "adminsources.js",
     "mychannels.js",
     "adminstats.js",
+    "adminconc.js",
     "adminerrors.js",
     "integrations.js",
     "homelists.js",
@@ -77,6 +78,7 @@
     "p8.css",
     "p6.css",
     "p12.css",
-    "p13.css"
+    "p13.css",
+    "p14.css"
   ]
 }

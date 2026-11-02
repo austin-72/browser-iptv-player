@@ -63,11 +63,12 @@
       var served = sum(d.bytes, Object.keys(d.bytes));
       var empty = !allPlays && !d.fails;
 
-      var html = '<section class="card-sec"><div class="st-head"><h2>How streams reached viewers</h2><div class="chips" role="group" aria-label="Period">' +
+      // (Watching at once, per provider: adminconc.js fills this in.)
+      var html = '<div class="st-conc"></div><section class="card-sec"><div class="st-head"><h2>How streams reached viewers</h2><div class="chips" role="group" aria-label="Period">' +
         [[7, '7 days'], [30, '30 days'], [90, '90 days']].map(function (o) { return '<button class="chip' + (o[0] === days ? ' on' : '') + '" aria-pressed="' + (o[0] === days) + '" data-days="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div></div>';
       if (empty) {
         html += '<p class="dim">Nothing has been watched in this period yet. Statistics start counting from the moment this version is running' + (d.since ? ' (' + V.esc(new Date(d.since).toLocaleDateString()) + ')' : '') + '.</p></section>';
-        body.innerHTML = html; return;
+        body.innerHTML = html; if (V.statsConc) V.statsConc(V.$('.st-conc', body), days); return;
       }
       html += '<div class="stats st-tiles">' +
         '<div class="stat st-hero"><b class="num">' + Math.round(directShare * 100) + '%</b><span>watched straight from the provider</span></div>' +
@@ -116,6 +117,7 @@
       html += '<section class="card-sec"><h2>Reset</h2><p class="dim">Counting since ' + V.esc(new Date(d.since).toLocaleString()) + '. Statistics are kept for 120 days.</p><button class="btn danger" data-reset>Reset statistics</button></section>';
       body.innerHTML = html;
       chart(V.$('.st-chart', body), V.$('.st-tip', body), d.series);
+      if (V.statsConc) V.statsConc(V.$('.st-conc', body), days);
     };
 
     var dayTable = function (d) {
