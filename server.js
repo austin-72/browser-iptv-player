@@ -1754,6 +1754,7 @@ route('GET', '/api/admin/groups', (req, res, p, q, ctx) => {
 });
 route('POST', '/api/admin/tmdb/test', async (req, res, p, q, ctx) => { requireAdmin(ctx); try { return { ok: await tmdb.test() }; } catch (e) { return { ok: false, error: e.message }; } });
 let enrichJob = null;
+let enrichCounts = null; // (Admin → Recommendations: the counts, kept for a moment)
 /**
  * Fill in posters, plots, genres, cast and directors from TMDB — started by the admin, and automatically in the
  * background whenever the catalogue changes. Devices get the new details every few minutes (and at the end).
@@ -1793,6 +1794,7 @@ function startEnrich(auto = false, opts = {}) {
   const push = () => { catalog.metaChanged(); hub.toAll('catalog', { version: catalog.version }); lastPush = Date.now(); };
   const label = mode === 'groups' ? [...groups].map((g) => g.split('|').slice(1).join('|')).slice(0, 3).join(', ') + (groups.size > 3 ? ` +${groups.size - 3}` : '') : '';
   enrichJob = { status: { running: true, total: todo.length, done: 0, found: 0, missed: 0, current: '', started: Date.now(), auto, mode, label } };
+  enrichCounts = null;
   const job = enrichJob;
   tmdb.enrich(todo, {
     onStart: (it) => { job.status.current = it.n; },
@@ -1817,8 +1819,10 @@ route('POST', '/api/admin/tmdb/enrich', async (req, res, p, q, ctx) => {
   return startEnrich(false, { mode: ['visible', 'missing', 'all', 'groups'].includes(b.mode) ? b.mode : 'visible', groups: b.groups, types: b.types, retry: !!b.retry }) || { running: false };
 });
 // Progress, and what's left to fetch (overall and per category).
+// (The counts go through every title: worked out at most every 15 s, as the page asks every 2 s while a job runs.)
 route('GET', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
+  if (enrichCounts && Date.now() - enrichCounts.at < 15000 && enrichCounts.v === catalog.version) return { job: enrichJob ? enrichJob.status : null, last: lastEnrich, counts: enrichCounts.counts, groups: enrichCounts.groups };
   const meta = tmdb.meta.data.m, map = tmdb.map.data.m;
   const counts = { titles: 0, fetched: 0, noMatch: 0, missing: 0 };
   const groups = new Map();
@@ -1830,7 +1834,9 @@ route('GET', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => {
     g.total++;
     if (meta[it.k]) { counts.fetched++; g.fetched++; } else if (map[it.k] && map[it.k].none) counts.noMatch++; else counts.missing++;
   }
-  return { job: enrichJob ? enrichJob.status : null, last: lastEnrich, counts, groups: [...groups.values()].sort((a, b) => a.t.localeCompare(b.t) || a.name.localeCompare(b.name)) };
+  const sorted = [...groups.values()].sort((a, b) => a.t.localeCompare(b.t) || a.name.localeCompare(b.name));
+  enrichCounts = { at: Date.now(), v: catalog.version, counts, groups: sorted };
+  return { job: enrichJob ? enrichJob.status : null, last: lastEnrich, counts, groups: sorted };
 });
 route('DELETE', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => { requireAdmin(ctx); if (enrichJob) { enrichJob.status.stopped = true; lastEnrich = enrichJob.status; } enrichJob = null; return { ok: true }; });
 route('DELETE', '/api/admin/sessions/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); media.stopSession(p.id); return { ok: true }; });

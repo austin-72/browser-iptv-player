@@ -71,3 +71,18 @@ test('a broken guide (an element that never closes) is read past instead of fill
   assert.deepStrictEqual(Object.keys(r.channels), ['a']);
   assert.strictEqual(r.programmeCount, 1);
 });
+
+test('the TMDB job lets the server answer meanwhile, even when it goes through thousands of titles it already knows', async () => {
+  const { Tmdb } = require('../lib/tmdb');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmdblag-'));
+  const t = new Tmdb({ dataDir: dir, getKey: () => 'k' });
+  const items = [];
+  for (let i = 0; i < 40000; i++) { const k = 'k' + i; items.push({ k, t: 'movie', n: 'Film ' + i }); t.map.data.m[k] = { id: i + 1, type: 'movie' }; t.meta.data.m[k] = { tmdb: i + 1, v: 2, at: Date.now() }; }
+  let ticks = 0;
+  const iv = setInterval(() => { ticks++; }, 5);
+  const t0 = Date.now();
+  await t.enrich(items, {});
+  clearInterval(iv);
+  const ms = Date.now() - t0;
+  assert.ok(ms < 20 || ticks >= 1, `other work got a turn (${ticks} timer ticks in ${ms} ms)`);
+});
