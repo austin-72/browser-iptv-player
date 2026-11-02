@@ -3,10 +3,39 @@
 V.route('admin', function (view, r) {
   if (!S.profile.admin) { view.innerHTML = V.empty('Admin only', 'Only the admin profile can open this.'); return; }
   var tab = r.args[0] || 'overview';
-  var tabs = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles'], ['content', 'Languages & content'], ['categories', 'Categories'], ['playback', 'Playback'], ['network', 'Network & proxies'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security'], ['mychannels', 'My channels'], ['outputs', 'Other apps'], ['integrations', 'Integrations'], ['api', 'API & automations'], ['apps', 'Backups, updates & apps']];
-  // Tabs added by other parts of the app: [id, label, after which tab].
-  (V.adminExtraTabs || []).forEach(function (t) { if (tabs.some(function (x) { return x[0] === t[0]; })) return; var i = tabs.map(function (x) { return x[0]; }).indexOf(t[2]); tabs.splice(i < 0 ? tabs.length : i + 1, 0, [t[0], t[1]]); });
-  view.innerHTML = V.pageHead('Admin') + '<div class="tabs admin-tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t[0] === tab ? ' on' : '') + '" aria-selected="' + (t[0] === tab) + '" href="#/admin/' + t[0] + '">' + t[1] + '</a>'; }).join('') + '</div><div class="admin-body"><div class="spinner"></div></div>';
+  var names = { overview: 'Overview', stats: 'Statistics', lists: 'Lists', guides: 'TV guides', profiles: 'Profiles', content: 'Languages & content', categories: 'Categories', playback: 'Playback', network: 'Network & proxies', recs: 'Recommendations', brand: 'Brand', security: 'Security', mychannels: 'My channels', outputs: 'Other apps', integrations: 'Integrations', api: 'API & automations', apps: 'Backups & updates' };
+  // The sections, in groups (a sidebar on big screens; group chips and sub-tabs on phones).
+  var groups = [
+    ['status', 'Status', ['overview', 'stats', 'errors', 'health']],
+    ['sources', 'Lists & channels', ['lists', 'channels', 'guides', 'categories', 'mychannels']],
+    ['viewing', 'Viewing', ['playback', 'dvr', 'content', 'recs']],
+    ['people', 'People & security', ['profiles', 'security']],
+    ['connect', 'Connections', ['network', 'outputs', 'integrations', 'api']],
+    ['system', 'System', ['brand', 'apps']],
+  ];
+  // Sections added by other parts of the app: [id, label, after which section].
+  (V.adminExtraTabs || []).forEach(function (t) {
+    names[t[0]] = names[t[0]] || t[1];
+    if (groups.some(function (g) { return g[2].indexOf(t[0]) >= 0; })) return;
+    var g = groups.filter(function (x) { return x[2].indexOf(t[2]) >= 0; })[0] || groups[groups.length - 1];
+    var i = g[2].indexOf(t[2]);
+    g[2].splice(i < 0 ? g[2].length : i + 1, 0, t[0]);
+  });
+  groups.forEach(function (g) { g[2] = g[2].filter(function (id) { return names[id] && (V.adminTabs[id] || id === 'overview'); }); });
+  // (Pages reached from inside another, like "Find guides": shown under that one's group.)
+  var within = { findguides: 'guides' };
+  var cur = within[tab] || tab;
+  var group = groups.filter(function (g) { return g[2].indexOf(cur) >= 0; })[0] || groups[0];
+  var link = function (id, cls) { return '<a class="' + cls + (id === cur ? ' on' : '') + '"' + (id === cur ? ' aria-current="page"' : '') + ' href="#/admin/' + id + '">' + V.esc(names[id]) + '</a>'; };
+  view.innerHTML = V.pageHead('Admin') + '<div class="adm">' +
+    '<nav class="adm-nav" aria-label="Admin sections">' + groups.map(function (g) { return '<div class="adm-g"><div class="adm-gh">' + V.esc(g[1]) + '</div>' + g[2].map(function (id) { return link(id, 'adm-l'); }).join('') + '</div>'; }).join('') + '</nav>' +
+    '<div class="adm-main">' +
+    '<div class="adm-groups" role="tablist" aria-label="Admin groups">' + groups.map(function (g) { return '<a role="tab" class="chip' + (g === group ? ' on' : '') + '" aria-selected="' + (g === group) + '" href="#/admin/' + g[2][0] + '">' + V.esc(g[1]) + '</a>'; }).join('') + '</div>' +
+    (group[2].length > 1 ? '<div class="tabs adm-sub" role="tablist">' + group[2].map(function (id) { return '<a role="tab" class="tab' + (id === cur ? ' on' : '') + '" aria-selected="' + (id === cur) + '" href="#/admin/' + id + '">' + V.esc(names[id]) + '</a>'; }).join('') + '</div>' : '') +
+    '<h2 class="adm-title">' + V.esc(names[cur] || 'Admin') + '</h2>' +
+    '<div class="admin-body"><div class="spinner"></div></div></div></div>';
+  var on = V.$('.adm-groups .on', view);
+  if (on && on.scrollIntoView) try { on.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
   var body = V.$('.admin-body', view);
   V.api('/api/admin').then(function (A) {
     S.admin = A;

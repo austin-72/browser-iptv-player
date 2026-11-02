@@ -57,6 +57,7 @@
     "screentime.js",
     "keymap.js",
     "palette.js",
+    "dvr.js",
     "main.js"
   ],
   "css": [
@@ -73,6 +74,7 @@
     "p7.css",
     "p9.css",
     "p8.css",
-    "p6.css"
+    "p6.css",
+    "p12.css"
   ]
 }

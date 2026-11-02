@@ -71,7 +71,7 @@ function channelsPage(view, r, type) {
   var showEmpty = !hideByAdmin || V.ls.get('showEmptyEvents', false);
   var emptyN = hideByAdmin ? list.filter(V.eventEmpty).length : 0;
   if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !V.eventEmpty(c) || V.inList('favs', c.k); });
-  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
+  view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' + (V.dvr && V.dvr.visible() ? '<a class="btn" href="#/recordings">' + V.icon('rec') + ' Recordings</a>' : '') : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
     (type === 'live' && V.multiview && all.length > 1 ? '<a class="btn" href="#/multiview">' + V.icon('grid') + ' Multiview</a>' : '') +
     // Radio and live TV link to each other (on phones the tab bar has one Live TV tab for both).
     (type === 'live' && S.radio.length ? '<a class="btn" href="#/radio">' + V.icon('radio') + ' Radio</a>' : '') +
@@ -181,7 +181,7 @@ V.route('channel', function (view, r) {
         var cu = past && V.catchup.canPlay(c, p);
         var rem = V.hasReminder(c, p);
         return '<li class="prog' + (live ? ' now' : '') + (past ? ' past' : '') + '"><span class="pt num">' + V.fmtClock(p.s) + '</span><span class="pb"><b>' + V.esc(p.t) + '</b>' + (p.st ? ' <span class="dim">· ' + V.esc(p.st) + '</span>' : '') + (p.ep ? ' <span class="dim">' + V.esc(p.ep) + '</span>' : '') + (p.d ? '<small class="dim clamp2">' + V.esc(p.d) + '</small>' : '') + '</span>' +
-          (live ? '<button class="btn sm primary" data-p="live">' + V.icon('play') + ' Watch</button>' : cu ? '<button class="btn sm" data-p="cu" data-s="' + p.s + '">' + V.icon('play') + ' Play</button>' : !past ? '<button class="icon-btn" data-p="rem" data-s="' + p.s + '" aria-pressed="' + rem + '" aria-label="Remind me">' + V.icon(rem ? 'bellf' : 'bell') + '</button>' : '') + '</li>';
+          (live ? '<button class="btn sm primary" data-p="live">' + V.icon('play') + ' Watch</button>' : cu ? '<button class="btn sm" data-p="cu" data-s="' + p.s + '">' + V.icon('play') + ' Play</button>' : !past ? '<button class="icon-btn" data-p="rem" data-s="' + p.s + '" aria-pressed="' + rem + '" aria-label="Remind me">' + V.icon(rem ? 'bellf' : 'bell') + '</button>' : '') + (V.dvr ? V.dvr.progButton(c, p) : '') + '</li>';
       }).join('') + '</ul>';
     }).join('') || '<p class="dim">No guide information for this channel.</p>';
     var cur = V.$('.prog.now', sched);
@@ -193,6 +193,7 @@ V.route('channel', function (view, r) {
       if (b.dataset.p === 'live') V.play(c);
       else if (b.dataset.p === 'cu') V.playCatchup(c, p, 0);
       else if (b.dataset.p === 'rem') { var on = V.toggleReminder(c, p); b.innerHTML = V.icon(on ? 'bellf' : 'bell'); b.setAttribute('aria-pressed', on); }
+      else if (b.dataset.p === 'dvr') V.dvr.progClick(c, p, b);
     };
   });
 });

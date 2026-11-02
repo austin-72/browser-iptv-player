@@ -89,6 +89,7 @@ V.profileMenu = function (btn) {
     { label: 'Wishlist', icon: 'star', fn: function () { V.router.go('#/wishlist'); } },
     { label: 'Your viewing', icon: 'chart', fn: function () { V.router.go('#/viewing'); } },
     { label: 'Downloads', icon: 'download', fn: function () { V.router.go('#/downloads'); } },
+    V.dvr && V.dvr.visible() ? { label: 'Recordings', icon: 'rec', fn: function () { V.router.go('#/recordings'); } } : null,
     S.profile.admin ? { label: 'Admin', icon: 'shield', fn: function () { V.router.go('#/admin'); } } : null,
     { sep: true },
     { label: 'Switch profile', icon: 'users', fn: function () { V.leaveProfile(); } },

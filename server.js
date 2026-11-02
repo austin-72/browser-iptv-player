@@ -372,6 +372,8 @@ function requireAdmin(ctx) {
 }
 function item(ctx, k) {
   const p = requireProfile(ctx);
+  // A recording (lib/routes-p12.js): "rec:<id>".
+  if (k.startsWith('rec:') && dvrHooks.dvrItem) return dvrHooks.dvrItem(p, k);
   const it = catalog.visible(p, k);
   if (!it) throw new HttpError(404, 'That isn’t available.');
   // Behind the parental PIN (Admin → Channels): not until this device has entered it.
@@ -914,8 +916,12 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
 /** Which list a copy of an item comes from. */
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
 /** Streams the household is watching right now from each list (direct or through the server). */
+/** Filled in by lib/routes-p12.js (the DVR): recordings running now, and "rec:<id>" items. */
+const dvrHooks = { dvrConns: null, dvrItem: null };
 function listUsage() {
-  return usageOf(hub.conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed });
+  // (Recordings running now hold a provider connection too.)
+  const conns = dvrHooks.dvrConns ? [...hub.conns, ...dvrHooks.dvrConns()] : hub.conns;
+  return usageOf(conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed });
 }
 /**
  * Films and episodes the stream relay already has whole on its disk: their viewers no longer use a provider connection,
@@ -1042,14 +1048,15 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
     if (busy) {
       const need = users.length - limit + 1;
       // Your own other devices first, then whoever started watching most recently.
-      const standard = users.filter((c) => !isPri(c) && c.pid !== prof.id);
-      const own = users.filter((c) => c.pid === prof.id);
+      // (A recording is never bumped.)
+      const standard = users.filter((c) => !c.rec && !isPri(c) && c.pid !== prof.id);
+      const own = users.filter((c) => !c.rec && c.pid === prof.id);
       if (mePri && own.length + standard.length >= need) {
         bump = [...own, ...standard.slice().sort((p1, p2) => (p2.playing.at || 0) - (p1.playing.at || 0))].slice(0, need).map(who);
         busy = false;
       } else if (!mePri) {
         // Taking over is only possible from standard viewers (or yourself).
-        locked = users.filter((c) => !isPri(c) || c.pid === prof.id).length < need;
+        locked = users.filter((c) => !c.rec && (!isPri(c) || c.pid === prof.id)).length < need;
       }
     }
     const mixed = https && /^http:/i.test(url || '') && !b.mixedOk;
@@ -1987,6 +1994,7 @@ reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
 
 // [routes:p11] Screen time and bedtime for profiles (enforced on the server), the profile's default remote buttons.
 require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
+require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks });
 // [routes:p10] Home rows from Trakt / TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
 const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, trakt: p5.trakt, catalog: () => catalog });
 followsOf = p10.followsOf;

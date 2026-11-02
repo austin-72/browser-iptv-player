@@ -1495,7 +1495,6 @@ PP._menuPages = function (kind) {
     main.push({ label: 'Source', value: this.alt >= 0 ? 'Backup ' + (this.alt + 1) : 'Main', page: 'alts' });
     pages.alts = [{ label: 'Main', on: this.alt < 0, fn: function () { self.load(self.it, { alt: -1, startAt: self.vod ? self.position : 0 }); } }].concat(this.it.a.map(function (x, i) { var host = ''; try { host = new URL(x.u).host; } catch (e) {} return { label: 'Backup ' + (i + 1) + (host ? ' · ' + host : ''), on: self.alt === i, fn: function () { self.load(self.it, { alt: i, startAt: self.vod ? self.position : 0 }); } }; }));
   }
-  if (S.settings.ffmpeg && this.it) main.push({ label: 'Convert on the server', value: this.attempt && this.attempt.via === 'session' ? 'On' : 'Off', fn: function () { self.load(self.it, { force: 'transcode', startAt: self.vod ? self.position : 0, alt: self.alt }); } });
   if (this.it && this.vod && (this.it.t === 'episode' || this.it.t === 'movie')) main.push({ label: 'Mark intro / credits', value: '', fn: function () { V.markersDialog(self); } });
   main.push({ label: 'Screenshot', value: '', fn: function () { self.screenshot(); } });
   main.push({ label: 'Stream info', value: this.statsOn ? 'On' : 'Off', fn: function () { self.toggleStats(); } });
@@ -1506,6 +1505,7 @@ PP._menuPages = function (kind) {
   return pages;
 };
 
+var MENU_GROUP = { Quality: 0, Speed: 0, Source: 0, 'Sleep timer': 0, 'Sound only': 0, Reload: 0, Picture: 1, Zoom: 1, 'Brightness & colour': 1, 'Volume boost': 2, 'Clear dialogue': 2, 'Night mode': 2, 'Audio sync': 2 };
 PP._openMenu = function (page, kind) {
   var m = V.$('.vp-menu', this.host);
   kind = kind || this._menuKind || 'gear';
@@ -1519,12 +1519,28 @@ PP._openMenu = function (page, kind) {
   var parent = this._menuPage.indexOf('adj-') === 0 ? 'adjust' : 'main';
   var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '">' + V.icon('back') + '<span>Back</span></button>' : '';
   var radio = this._menuPage !== 'main' && this._menuPage !== 'adjust';
-  m.innerHTML = back + items.map(function (it, i) {
+  // (On phones the menu is a sheet from the bottom, with a title and a close button: player.css / p12.css.)
+  var from = (pages[parent] || pages.main || []).filter(function (x) { return x.page === page; })[0];
+  var title = this._menuPage === 'main' ? (kind === 'cc' ? 'Subtitles & audio' : 'Settings') : from ? from.label : 'Settings';
+  var head = '<div class="mh"><span class="mh-t">' + V.esc(title) + '</span><button class="mh-x" data-close aria-label="Close">' + V.icon('x') + '</button></div>';
+  var row = function (it, i) {
     return '<button class="mi" data-i="' + i + '" role="' + (radio ? 'menuitemradio' : 'menuitem') + '"' + (radio ? ' aria-checked="' + !!it.on + '"' : '') + '>' + (radio ? '<span class="dot">' + (it.on ? V.icon('check') : '') + '</span>' : '') + '<span class="ml">' + V.esc(it.label) + '</span>' + (it.value !== undefined && it.value !== '' ? '<span class="mv">' + V.esc(it.value) + '</span>' : '') + (it.page ? V.icon('next') : '') + '</button>';
-  }).join('');
+  };
+  var body;
+  if (this._menuPage === 'main' && kind !== 'cc' && items.length > 7) {
+    // The long settings list in sections (Playback, Picture, Sound, More), so it's quicker to find things.
+    var groups = [['Playback', []], ['Picture', []], ['Sound', []], ['More', []]];
+    items.forEach(function (it, i) {
+      var g = MENU_GROUP[it.label] !== undefined ? MENU_GROUP[it.label] : /record/i.test(it.label) ? 0 : 3;
+      groups[g][1].push(row(it, i));
+    });
+    body = groups.filter(function (g) { return g[1].length; }).map(function (g) { return '<div class="mg" role="presentation">' + g[0] + '</div>' + g[1].join(''); }).join('');
+  } else body = items.map(row).join('');
+  m.innerHTML = head + back + body;
   var self = this;
   m.onclick = function (e) {
     e.stopPropagation();
+    if (e.target.closest('[data-close]')) return self._closeMenu();
     var bk = e.target.closest('[data-back]');
     if (bk) return self._openMenu(bk.dataset.back);
     var b = e.target.closest('[data-i]');
@@ -1535,7 +1551,10 @@ PP._openMenu = function (page, kind) {
     if (self._menuPage === 'main') self._closeMenu(); else self._openMenu(it.back || parent);
   };
   var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mi', m);
-  if (first) first.focus();
+  // (Not on touch screens: there the highlight just looks like a stuck tap. Remotes and keyboards still get it.)
+  var touch = !V.tvMode && window.matchMedia && matchMedia('(hover: none)').matches;
+  if (first && (!touch || keep !== null)) first.focus();
+  if (!keep) m.scrollTop = 0;
 };
 PP._menuRefresh = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) this._openMenu(this._menuPage); this._ccButton(); };
 PP._closeMenu = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) { m.hidden = true; var b = V.$('[data-a=' + (this._menuKind === 'cc' ? 'cc' : 'gear') + ']', this.host); if (b && this.el.contains(document.activeElement)) b.focus(); } };

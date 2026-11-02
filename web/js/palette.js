@@ -91,6 +91,7 @@
     page('search', 'Search', '#/search', 'search');
     page('messages', 'Messages', '#/messages', 'chat', 'chat');
     page('downloads', 'Downloads', '#/downloads', 'download', 'offline');
+    if (V.dvr && V.dvr.visible()) page('recordings', 'Recordings', '#/recordings', 'rec', 'dvr recorded record tv');
     page('remote', 'Use this as a remote', '#/remote', 'remote', 'phone control tv');
     page('settings', 'Settings', '#/settings', 'gear', 'preferences options');
     if (S.profile && S.profile.admin) {

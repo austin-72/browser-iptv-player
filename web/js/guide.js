@@ -145,6 +145,7 @@ V.programmeDialog = function (c, p, list) {
   else if (!past) acts.push({ label: V.hasReminder(c, p) ? 'Cancel reminder' : 'Remind me', primary: true, fn: function () { V.toggleReminder(c, p); } });
   acts.push({ label: 'Channel page', fn: function () { V.router.go('#/channel/' + encodeURIComponent(c.k)); } });
   if (V.isSportProg && V.isSportProg(c, p)) acts.splice(acts.length - 1, 0, { label: 'Follow…', fn: function () { setTimeout(function () { V.followDialog(p); }, 0); } });
+  if (V.dvr) V.dvr.progActions(c, p, acts); // Record, Record every episode (dvr.js)
   V.dialog({
     title: p.t,
     body: '<p class="dim">' + V.esc(c.n) + ' · ' + V.fmtDay(p.s) + ' ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e) + (p.ep ? ' · ' + V.esc(p.ep) : '') + '</p>' + (p.st ? '<p><b>' + V.esc(p.st) + '</b></p>' : '') + (p.ic ? '<img class="prog-img" src="' + V.esc(p.ic) + '" alt="" referrerpolicy="no-referrer">' : '') + (p.d ? '<p>' + V.esc(p.d) + '</p>' : '') + (p.c ? '<p class="dim">' + p.c.map(V.esc).join(' · ') + '</p>' : ''),

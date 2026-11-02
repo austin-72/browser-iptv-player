@@ -38,6 +38,7 @@ V.rt = (function () {
     on('devstate', function (d) { V.emit('devstate', d); });
     on('app-updated', function () { V.appUpdated(); });
     on('screentime', function (d) { V.emit('screentime', d); });
+    on('dvr', function (d) { V.emit('dvr', d); });
     on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {
       V.net.down();

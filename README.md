@@ -49,7 +49,7 @@ Most IPTV players are an app you install and set up again on every device. Media
 | Multiview (several channels at once) | ✅ up to 9 | TiviMate Premium | ❌ |
 | Watch parties, messages, phone remote | ✅ | ❌ | Jellyfin: SyncPlay watch parties |
 | Use it from other apps (Xtream login, HDHomeRun tuner) | ✅ | — | — |
-| Recording (DVR) | ❌ not yet | TiviMate Premium, IPTV Smarters | ✅ |
+| Recording (DVR) | ✅ on the server, with series recording | TiviMate Premium, IPTV Smarters | ✅ |
 | Price | Free, open source | TiviMate: paid Premium for multiple playlists, catch-up and recording | Jellyfin free · Plex: free tier and paid Plex Pass; its Live TV is built around antenna tuners |
 
 <sub>Based on each project's own documentation as of late 2026. Other apps change, so check theirs if a feature matters to you.</sub>
@@ -155,6 +155,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Captions on live TV:** closed captions inside HLS channels and films, and DVB and teletext subtitles on MPEG-TS channels (played in the browser, or when the server converts them anyway).
 - Speed 0.25–3×, frame step, seek-bar thumbnails, picture-in-picture, a mini player while browsing, bookmarks with notes, a sleep timer and *Are you still watching?*.
 - **Live TV:** channel numbers, zapping with arrow keys or channel buttons, previous channel, a channel list, catch-up and timeshift.
+- **Record live TV (DVR):** record a programme from the guide or a channel's schedule, *Record this* while you watch, or every episode of a series. Recordings start a minute early and run two minutes late, carry on after the provider drops, and play like your own films from **Recordings** (in your profile menu). Admin → DVR turns recording on for everyone, priority profiles only, or nobody, and sets the folder and how long recordings are kept.
 - **Rewind and pause live TV** from what your device has already loaded (up to 30 minutes, nothing stored on the server), with *Go live* to jump back.
 - **Multiview:** up to 9 live channels at once (2 on a phone) in a grid or "one big" layout, with sound from the one you pick. Each tile counts as a provider connection, so busy-provider and priority rules still apply.
 - **Audio sync** in either direction: when the sound is early it's held back; when it's late the *picture* is held back. Remembered per channel.
@@ -323,7 +324,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 
 ## Data
 
-Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json`, `error-reports.json` (with a readable copy, `error-reports.txt`), `screentime.json` (screen time rules, today's minutes and requests for more time), `homelists.json` (home rows from lists), `wishlist.json` (wishlists, followed series and alerts), `viewing/<profile>.json` (daily viewing totals), `follow.json` (teams and competitions each profile follows, and the event-channel setting), `health.json` (channel health counters and settings), `guidefinder.json` and `cache/` (including `cache/homelists/` and `cache/publicdb/`, the public guide and logo lists, refreshed weekly). Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
+Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json`, `error-reports.json` (with a readable copy, `error-reports.txt`), `screentime.json` (screen time rules, today's minutes and requests for more time), `homelists.json` (home rows from lists), `wishlist.json` (wishlists, followed series and alerts), `viewing/<profile>.json` (daily viewing totals), `follow.json` (teams and competitions each profile follows, and the event-channel setting), `health.json` (channel health counters and settings), `guidefinder.json`, `dvr.json` (recordings, series rules and DVR settings; the recordings themselves go in `recordings/` unless Admin → DVR names another folder) and `cache/` (including `cache/homelists/` and `cache/publicdb/`, the public guide and logo lists, refreshed weekly). Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
 
 ## Limits
 
@@ -331,6 +332,7 @@ Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg
 - DRM: ClearKey works, and so does Widevine/PlayReady where the browser supports it and the playlist provides a licence URL. Nothing is decrypted on the server.
 - Casting to Chromecast falls back to the server's address when the Chromecast can't play the provider's, so the server must be reachable from the Chromecast.
 - Intro detection needs at least two episodes of a season.
+- A recording holds one of the provider's connections for as long as it runs, like a viewer. When none is free at the start time it waits, and gives up if none comes free before the programme ends.
 
 ---
 
@@ -352,7 +354,7 @@ Current Chrome, Edge, Firefox and Safari on computers and phones, and smart-TV b
 Yes. Turn on the Xtream Codes login in Admin → Other apps and sign TiviMate or IPTV Smarters in with a profile's login, or add it to Plex, Jellyfin or Emby as an HDHomeRun tuner. There are also plain M3U and XMLTV links for VLC and Kodi. See [using this with other apps](docs/sources-and-other-apps.md).
 
 **Can it record?**
-Not yet. You can rewind live TV on your device, use your provider's catch-up, or add it as a tuner to Plex, Jellyfin or Emby and record there.
+Yes. Record a programme from the guide or a channel's schedule, *Record this* in the player, or *Every episode* for a series. The server saves the stream as it comes (no converting), so it needs ffmpeg and disk space, not CPU. Each running recording uses one of the provider's connections. Admin → DVR sets who may record (everyone, priority profiles only, or nobody), where recordings go and how long they're kept.
 
 ---
 

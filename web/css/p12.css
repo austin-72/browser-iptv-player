@@ -1,0 +1,71 @@
+/* The DVR (Recordings page, record buttons), the admin panel's layout, and the player's menu on phones. */
+
+/* ---- DVR */
+.dvr-body { max-width: 980px; }
+.dvr-sec { margin: 1.4rem 0 0; }
+.dvr-sec h2 { font-size: 1.15rem; margin: 0 0 .6rem; display: flex; align-items: baseline; gap: .5rem; }
+.dvr-sec h2 .dim { font-size: .9rem; font-weight: 600; }
+.dvr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.dvr-row { display: flex; align-items: center; gap: .9rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: .65rem .8rem; min-width: 0; }
+.dvr-row .grow { min-width: 0; flex: 1; }
+.dvr-row b { overflow-wrap: anywhere; }
+.dvr-row.s-recording { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.dvr-row.s-failed { opacity: .8; }
+.dvr-row.s-failed .dvr-st { color: var(--danger); }
+.dvr-logo { width: 3.2rem; height: 2.4rem; object-fit: contain; border-radius: 6px; background: var(--card2); flex: none; }
+.dvr-ph { display: inline-flex; align-items: center; justify-content: center; color: var(--dim); }
+.dvr-acts { display: flex; align-items: center; gap: .35rem; flex: none; }
+.dvr-acts .icon-btn.on { color: var(--accent); }
+.dvr-st { margin-top: .2rem; display: flex; align-items: center; gap: .4rem; }
+.dvr-dot, .dvr-pb.on .i { color: var(--danger); }
+.dvr-dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--danger); animation: nbPulse 1.4s ease-in-out infinite; }
+.progs .dvr-pb { color: var(--dim); }
+.progs .dvr-pb.on { color: var(--danger); }
+@media (max-width: 560px) {
+  .dvr-row { flex-wrap: wrap; }
+  .dvr-acts { width: 100%; justify-content: flex-end; }
+}
+
+/* ---- Admin: a sidebar of grouped sections on big screens; group chips and sub-tabs on smaller ones */
+.adm { display: grid; grid-template-columns: 1fr; gap: 0 2rem; align-items: start; }
+.adm-main { min-width: 0; }
+.adm-nav { display: none; }
+.adm-groups { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 0 .6rem; padding-bottom: 2px; }
+.adm-groups::-webkit-scrollbar { display: none; }
+.adm-groups .chip { flex: none; text-decoration: none; }
+.adm-sub { margin-bottom: 1rem; }
+.adm-title { font-size: 1.35rem; margin: .2rem 0 1rem; }
+.admin-tabs { display: none; }
+.adm .admin-body { max-width: 1100px; }
+.adm .card-sec { margin-bottom: 1.1rem; }
+@media (min-width: 900px) {
+  .adm { grid-template-columns: 15rem minmax(0, 1fr); }
+  .adm-nav { display: block; position: sticky; top: calc(var(--top, 64px) + 12px); max-height: calc(100vh - var(--top, 64px) - 24px); overflow-y: auto; padding: .2rem .2rem 1rem 0; scrollbar-width: thin; }
+  .adm-groups, .adm-sub { display: none; }
+  .adm-g { margin-bottom: 1rem; }
+  .adm-gh { font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); padding: 0 .75rem .3rem; }
+  .adm-l { display: block; padding: .45rem .75rem; border-radius: 9px; color: var(--text); text-decoration: none; font-weight: 500; line-height: 1.25; }
+  .adm-l:hover { background: var(--card); }
+  .adm-l.on { background: var(--card2); color: var(--text); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+  .adm-title { font-size: 1.6rem; margin-top: 0; }
+}
+.tv .adm-l:focus { box-shadow: 0 0 0 4px #fff; outline: none; }
+
+/* ---- The player's settings menu: a sheet from the bottom on phones (big rows, a title, a close button) */
+.vp-menu .mh { display: none; }
+.vp-menu .mg { font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: rgba(255,255,255,.5); padding: .7rem .8rem .25rem; }
+.vp-menu .mg:first-child, .vp-menu .mh + .mg { padding-top: .35rem; }
+@media (max-width: 700px), (pointer: coarse) and (max-height: 520px) {
+  .vp-menu { left: 0; right: 0; bottom: 0; width: 100%; max-width: none; min-width: 0; max-height: min(72%, 32rem); border-radius: 18px 18px 0 0; border-width: 1px 0 0; padding: 0 8px calc(10px + env(safe-area-inset-bottom)); background: #16181f; box-shadow: 0 -10px 40px rgba(0,0,0,.5); overscroll-behavior: contain; }
+  .vp-menu .mh { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1; background: inherit; padding: 12px 6px 8px 14px; margin: 0 -8px 2px; border-bottom: 1px solid var(--line); }
+  .vp-menu .mh::before { content: ''; position: absolute; top: 5px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: rgba(255,255,255,.25); }
+  .vp-menu .mh-t { font-weight: 700; font-size: 1.02rem; color: #fff; }
+  .vp-menu .mh-x { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: none; color: #fff; border-radius: 50%; }
+  .vp-menu .mi { min-height: 50px; padding: .8rem .9rem; font-size: 1rem; border-radius: 10px; }
+  .vp-menu .mi + .mi { border-top: 1px solid rgba(255,255,255,.06); }
+  .vp-menu .mg { padding: 1rem .9rem .35rem; font-size: .74rem; }
+  .vp-menu .mh + .mg { padding-top: .6rem; }
+  .vp-menu .mi .mv { font-size: .95rem; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vp-menu .mi.back { border-bottom: 0; margin: 0; color: #fff; font-weight: 600; }
+}
+@media (max-height: 520px) and (orientation: landscape) { .vp-menu { max-height: 88%; left: auto; width: min(26rem, 100%); border-radius: 18px 0 0 0; } }
