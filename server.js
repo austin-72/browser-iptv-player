@@ -116,7 +116,7 @@ const lists = new Lists({
   dir: path.join(D, 'lists'), media, getSettings: settings,
   onChange: () => scheduleRebuild(),
   onGuides: (what, id, data) => {
-    if (what === 'data') epg.setSource(id, data);
+    if (what === 'data') epg.setSource(id, data, { soon: true });
     else if (what === 'removed') epg.removeSource(id);
     epg.setOrder(lists.guides().filter((g) => g.enabled).map((g) => g.id));
     for (const sid of epg.sources.keys()) if (!lists.guides().some((g) => g.id === sid && g.enabled)) epg.removeSource(sid);
@@ -1872,7 +1872,7 @@ function makeBackup() {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
+      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
     }
   };
   walk(D, '');
@@ -2288,6 +2288,21 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// The server being stuck (one job hogging it, so pages and streams wait): say so in the log, with how long, so slow
+// spells can be matched up with what was going on at the time.
+{
+  let last = Date.now(), worst = 0, since = 0;
+  setInterval(() => {
+    const now = Date.now(), lag = now - last - 1000;
+    last = now;
+    if (lag > 3000) { worst = Math.max(worst, lag); if (!since) since = now; }
+    if (since && (lag <= 3000 || now - since > 60e3)) {
+      const mem = process.memoryUsage();
+      log(`The server was busy for ${(worst / 1000).toFixed(1)} s and didn’t answer in that time (memory ${Math.round(mem.rss / 1048576)} MB)`);
+      worst = 0; since = 0;
+    }
+  }, 1000).unref();
+}
 // A home server should keep running: log unexpected errors instead of dropping everyone's streams.
 process.on('uncaughtException', (e) => { console.error('Unexpected error (the server keeps running):', e && e.stack || e); reports.addServer(e, { where: 'uncaught exception' }); });
 process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejection (the server keeps running):', e && e.stack || e); reports.addServer(e instanceof Error ? e : new Error(String(e)), { where: 'unhandled promise rejection' }); });
