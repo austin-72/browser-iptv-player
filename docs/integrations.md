@@ -1,4 +1,4 @@
-# Subtitles, Trakt, the viewing dashboard, speed test, error reports and automations
+# Subtitles, Trakt, rows from lists, the wishlist, your viewing, the viewing dashboard, speed test, error reports and automations
 
 [← Back to the README](../README.md)
 
@@ -29,6 +29,45 @@ Each profile can connect its own [Trakt](https://trakt.tv) account in **Settings
 - **Copy Trakt history here** marks what you've watched elsewhere as watched. **Copy my history to Trakt** sends the other way.
 
 Tokens stay on the server and are refreshed before they run out. **Setup (admin):** create an app at trakt.tv → Settings → Your API Apps with the redirect URI `urn:ietf:wg:oauth:2.0:oob`, then paste its Client ID and Secret into Admin → **Integrations**.
+
+## Home rows from Trakt and TMDB lists
+
+**Home → Add a row from a list** (at the bottom of Home, and in *Customise this page*) puts a list on your home page. Paste a link, or pick one:
+
+- a public **Trakt list**: `trakt.tv/users/<user>/lists/<list>`, or just `user/list` — the copies of IMDb's Top 250, Oscar winners, a director's films and so on that people share;
+- **your own Trakt lists**, once Trakt is connected in Settings;
+- Trakt's **trending, popular and most anticipated** films and series;
+- a **TMDB list** (`themoviedb.org/list/…`), **collection** (`themoviedb.org/collection/…`) or **keyword** (`themoviedb.org/keyword/…`, films or `/tv` for series).
+
+A row shows only the titles your providers have, matched by TMDB (or IMDb) id first, then by title and year, and says how many: *12 of 250 here*. **See the whole list** (the row's title, or its ⋯ menu) shows every entry in the list's order, with *Here* / *Not here* filters; anything that isn't here can go on your wishlist with one click. The ⋯ menu also has *Move to the top*, *Rename*, *Hide this row* and *Remove this row*, and the rows appear in *Customise this page* with the others.
+
+Each list is fetched once for the whole household, kept on the server and checked again about once a day (or with *Check again*). No stream is ever opened for this.
+
+**Setup (admin):** public Trakt lists and charts need only the Trakt app's **Client ID** in Admin → Integrations (the secret is only needed for connecting profiles). TMDB lists need a TMDB key (Admin → Recommendations); without one the dialog says they aren't available.
+
+## Wishlist and alerts
+
+**Wishlist** (profile menu): search TMDB for any film or series — including ones your providers don't have — and add it. Titles can also be added from a list row's *See the whole list*. If it's already here you're taken to it instead.
+
+You get an **alert** when:
+
+- something on your wishlist arrives (checked whenever the lists refresh, and when TMDB has matched more titles);
+- a new episode arrives for a series you're watching (in progress or watched in the last four months), that's in My List, or that you follow with the **bell** on its page. The bell can also turn alerts off for one series.
+
+Alerts show as a message on screen (and a system notification when allowed and the app is in the background). If no device is open they wait: Messages → **New for you** keeps them, the messages button counts them, and the next time the app opens it says what came. There's one alert per title: several new episodes of one series become "3 new episodes of X", and several wishlist titles arriving together become one notification. Arrivals are found by comparing sets of ids, not copies of the catalogue. **Settings → Notifications** turns new-episode alerts and wishlist alerts off separately.
+
+## Your viewing and the year in review
+
+**Your viewing** (profile menu, or Settings → Privacy) shows a week, month or year at a time, with arrows for earlier ones:
+
+- time watched, films finished, days you watched and your longest streak, compared with the period before;
+- time each day (or month), and the split between live TV, films and series;
+- top series, films, channels and genres;
+- when you watch: the day of the week and hour you watch most.
+
+**Your year in review** opens in December for the current year, and any time for earlier years: a few big cards with your hours, series and films of the year, your channel, genres and rhythm (busiest month, favourite day and time, longest streak).
+
+It's counted from what each profile plays here — paused history isn't counted — and kept small: per profile and day, seconds by type and the day's top titles (the detail is dropped after 45 days, the totals kept for about two years). The first time a profile opens it, its existing watch history fills in what came before. The admin can switch to **Household** to see each profile's totals (time and type only, not titles).
 
 ## Watching now (Admin → Overview)
 
@@ -62,6 +101,7 @@ Problems are reported to the server automatically, from every device, so they ca
 | File didn't load | A script or style sheet didn't load |
 | App didn't start | The app hadn't started 30 seconds after opening, e.g. a TV browser too old to read it |
 | Server error | A server request failed unexpectedly, or an exception nothing caught |
+| Reported by a viewer | Someone used **Report a problem** (below) |
 
 Each report has:
 
@@ -72,7 +112,9 @@ Each report has:
 
 Reports are grouped: the same problem from many devices is one issue with a count, a device list and, for playback, the titles affected. The newest 5 full reports of each are kept, and at most 300 issues. A new issue is also written to the server log. **Copy report** gives the whole issue as text; *Download* gives all open ones. The same text is kept in `error-reports.txt` in the data folder. **Mark fixed** hides an issue until it happens again on a newer version of the app.
 
-**Never included:** passwords, PINs (not even which digits were pressed), what's typed into fields, or the logins and tokens in stream addresses. Those are removed on the device and again on the server. Turn reporting off with the switch at the top of the page.
+**Report a problem.** Viewers can report something themselves: player menu → *Report a problem*, or the button on the *Can't play this right now* message. They pick what's wrong (*Won't play*, *Stutters or buffers*, *No sound*, *Sound out of sync*, *Wrong subtitles*, *Wrong title or picture*, *Other*), can add a note, and get a thank-you. Anything in the note that looks like a PIN, code or password ("my PIN is 4321", "password: …") is replaced with "…" on the device and again on the server. The report has the same device, player and *what happened before* details as the automatic ones, every way it tried to play when the title failed, and for sound or subtitle problems the sound settings (volume, boost, audio sync, clear dialogue, night mode) or subtitle choice. Each one is its own issue with the viewer's choice and note shown at the top, in the list and in the text report (`Viewer chose:` / `Viewer’s note:`). They're never dropped as a repeat of something reported a moment ago, and are kept even with automatic collecting switched off; to stop floods, a device sends at most 5 in 10 minutes and the server takes at most 12 an hour from one device and profile.
+
+**Never included:** passwords, PINs (not even which digits were pressed), what's typed into fields (except a *Report a problem* note, with anything like a PIN or password in it taken out), or the logins and tokens in stream addresses. Those are removed on the device and again on the server. Turn reporting off with the switch at the top of the page.
 
 ## API and automations (Home Assistant)
 
@@ -158,4 +200,4 @@ automation:
 
 ### Environment variables (testing only)
 
-`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`).
+`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`), and `TMDB_BASE` points TMDB at one (`test/mock/tmdb.js`).

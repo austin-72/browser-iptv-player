@@ -75,7 +75,16 @@ V.fmtDay = function (ms) {
 };
 V.fmtBits = function (bps) { if (!bps) return '–'; return bps >= 1e6 ? (bps / 1e6).toFixed(1) + ' Mbps' : Math.round(bps / 1e3) + ' kbps'; };
 V.fmtSize = function (b) { if (!b) return '0 B'; var u = ['B', 'KB', 'MB', 'GB', 'TB']; var i = Math.min(4, Math.floor(Math.log(b) / Math.log(1024))); return (b / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + u[i]; };
-V.initials = function (s) { return String(s || '?').replace(/[^\w\sÀ-￿]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase() || '?'; };
+V.initials = function (s) {
+  // Numbered channels keep their number, so "NFL 05", "EVENT 12" and "PPV 03" read "NFL 5", "E 12", "PPV 3" (not "N0", "E1", "P0").
+  var m = /^([A-Za-zÀ-￿][\wÀ-￿+&']*(?:\s+[A-Za-zÀ-￿][\wÀ-￿+&']*)*)\s*[#-]?\s*0*(\d{1,3})$/.exec(String(s || '').replace(/\s+(?:HD|FHD|UHD|4K|SD)$/i, '').trim());
+  if (m) {
+    var w = m[1].split(/\s+/);
+    var pre = w.length === 1 ? (w[0].replace(/[^\wÀ-￿+]/g, '').length <= 3 ? w[0] : w[0][0] + (/\+$/.test(w[0]) ? '+' : '')) : w.slice(0, 2).map(function (x) { return x[0]; }).join('');
+    return (pre.toUpperCase() + ' ' + (m[2] || '0')).trim();
+  }
+  return String(s || '?').replace(/[^\w\sÀ-￿]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0]; }).join('').toUpperCase() || '?';
+};
 V.epLabel = function (it) { return it && it.s != null ? 'S' + it.s + ':E' + it.e : ''; };
 
 // ---------- storage on this device

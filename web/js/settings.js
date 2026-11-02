@@ -35,16 +35,18 @@ V.route('settings', function (view) {
     (V.playerPrefsHtml ? V.playerPrefsHtml() : '') +
 
     '<section class="card-sec"><h2>Phone and TV</h2><p class="dim">Sign a TV in by typing the code it shows (no password typing with the remote), and control what’s playing on it from here.</p><div class="btn-row"><button class="btn" data-a="pair">' + V.icon('tv') + ' Sign in a TV</button><a class="btn" href="#/remote">' + V.icon('remote') + ' Use this as a remote</a></div></section>' +
-    '<section class="card-sec"><h2>Notifications</h2>' + sw('newEpisodeAlerts', 'New episodes', 'Of series in My List or that you’ve been watching') +
+    '<section class="card-sec"><h2>Notifications</h2>' + sw('newEpisodeAlerts', 'New episodes', 'Of series in My List, that you’ve been watching, or that you follow with the bell on their page') + sw('wishlistAlerts', 'Wishlist arrivals', 'When something on your wishlist arrives') +
+    '<p class="dim small">Alerts also wait in Messages → New for you.</p>' +
     (window.Notification ? '<button class="btn" data-a="notif">' + V.icon('bell') + ' ' + (Notification.permission === 'granted' ? 'Notifications on this device are on' : Notification.permission === 'denied' ? 'Notifications are blocked in this browser' : 'Also notify me when the app isn’t open') + '</button>' : '') + '</section>' +
     '<section class="card-sec"><h2>Privacy</h2>' + sw('presence', 'Let others in the household see what I’m watching') +
-    '<p><a href="#/mine/history">Watch history</a> · pause it or clear it there.</p></section>' +
+    '<p><a href="#/mine/history">Watch history</a> · pause it or clear it there.</p><p><a href="#/viewing">Your viewing</a> · time watched, favourites and your year in review.</p></section>' +
 
     '<section class="card-sec"><h2>This device</h2><label class="field"><span>Device name (shown when you use “Play on…”)</span><div class="inline"><input class="input" data-devname value="' + V.esc(V.device.name) + '" maxlength="40"><button class="btn" data-a="devname">Save</button></div></label>' +
     '<label class="check"><input type="checkbox" data-askprofile' + (V.ls.get('askProfile', false) ? ' checked' : '') + '><span>Ask “Who’s watching?” every time the app opens on this device</span></label>' +
     '<div class="btn-row">' + (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
     V.mixedSection() + V.directHelperSection() +
+    (V.followSettingsHtml ? V.followSettingsHtml() : '') + // Teams and competitions (follow.js)
     (V.settingsExtra ? V.settingsExtra() : '') + // Trakt, OpenSubtitles, connection test (integrations.js)
 
     (!pr.admin ? '<section class="card-sec danger-zone"><h2>Remove this profile</h2><p class="dim">Deletes your history, lists and settings.</p><button class="btn danger" data-a="delete">Remove my profile</button></section>' : '') +
@@ -52,6 +54,7 @@ V.route('settings', function (view) {
     (S.settings.tmdb ? '<p class="dim small center tmdb-credit">' + 'Data and images from ' + V.TMDB_LOGO + '.<br>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>' : '') + '</div>';
 
   if (V.settingsExtraBind) V.settingsExtraBind(view);
+  if (V.bindFollowSettings) V.bindFollowSettings(view);
   if (V.bindPlayerPrefs) V.bindPlayerPrefs(view);
   // http streams on this https site: does this browser let them through?
   var ms = V.$('.mixed-state', view);

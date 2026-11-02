@@ -2,12 +2,14 @@
 'use strict';
 V.route('mine', function (view, r) {
   var tab = r.args[0] || 'list';
-  var tabs = [{ v: 'list', l: 'My List' }, { v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }, { v: 'week', l: 'Your week' }];
+  var tabs = [{ v: 'list', l: 'My List' }].concat(V.queue ? [{ v: 'queue', l: 'Queue' + (V.queue.list().length ? ' (' + V.queue.list().length + ')' : '') }] : [], [{ v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }, { v: 'week', l: 'Your week' }]);
   view.innerHTML = V.pageHead('My stuff') + '<div class="tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t.v === tab ? ' on' : '') + '" aria-selected="' + (t.v === tab) + '" href="#/mine/' + t.v + '">' + t.l + '</a>'; }).join('') + '</div><div class="tab-body"></div>';
   var body = V.$('.tab-body', view);
   if (tab === 'list') {
     var items = S.data.list.map(V.entry).filter(Boolean);
     V.grid(body, items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p><div class="btn-row empty-acts"><a class="btn" href="#/movies">Browse movies</a><a class="btn" href="#/series">Browse series</a></div>' });
+  } else if (tab === 'queue' && V.queue) {
+    V.queue.render(body);
   } else if (tab === 'favs') {
     var favs = S.data.favs.map(V.entry).filter(Boolean);
     if (!favs.length) body.innerHTML = V.empty('No favourite channels', 'Use the heart on a channel to add it.', '<div class="btn-row empty-acts"><a class="btn" href="#/live">Go to Live TV</a></div>');

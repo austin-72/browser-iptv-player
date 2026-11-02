@@ -74,6 +74,8 @@ V.route('search', function (view, r) {
         sec.className = 'row';
         sec.innerHTML = '<div class="row-h"><h2>On TV</h2></div><ul class="hits">' + hits.slice(0, 20).map(function (h, i) { var c = V.entry(h.k); if (!c) return ''; return '<li><button class="hit" data-h="' + i + '"><span class="dim num">' + V.fmtDay(h.s) + ' ' + V.fmtClock(h.s) + '</span><b>' + V.esc(h.t) + '</b><span class="dim truncate">' + V.esc(c.n) + (h.s <= now && h.e > now ? ' · on now' : '') + '</span></button></li>'; }).join('') + '</ul>';
         sec.onclick = function (e) { var b = e.target.closest('[data-h]'); if (b) { var h = hits[+b.dataset.h]; V.programmeDialog(V.entry(h.k), h); } };
+        var none = V.$('.empty', out); // (the guide found something after all)
+        if (none) none.remove();
         (V.$('.sr-rows', out) || out).appendChild(sec);
       }).catch(function () {});
     }, 500);

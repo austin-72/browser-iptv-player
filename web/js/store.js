@@ -274,4 +274,8 @@ V.recentChannels = function () {
 };
 
 V.isNew = function (it) { return it.ad && Date.now() / 1000 - it.ad < 14 * 86400; };
-V.langName = function (code) { return (S.settings && S.settings.langNames && S.settings.langNames[code]) || String(code || '').toUpperCase(); };
+// (Tracks inside files and streams name their language with three letters: "eng", "ger"/"deu"…)
+V.langName = (function () {
+  var LANG3 = { eng: 'en', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', spa: 'es', ita: 'it', por: 'pt', dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no', nob: 'no', dan: 'da', fin: 'fi', pol: 'pl', rus: 'ru', ukr: 'uk', jpn: 'ja', chi: 'zh', zho: 'zh', kor: 'ko', ara: 'ar', tur: 'tr', gre: 'el', ell: 'el', heb: 'he', hin: 'hi', cze: 'cs', ces: 'cs', slo: 'sk', slk: 'sk', hun: 'hu', rum: 'ro', ron: 'ro', bul: 'bg', hrv: 'hr', srp: 'sr', slv: 'sl', ice: 'is', isl: 'is', tha: 'th', vie: 'vi', ind: 'id', may: 'ms', msa: 'ms', per: 'fa', fas: 'fa', cat: 'ca', wel: 'cy', cym: 'cy', gle: 'ga', est: 'et', lav: 'lv', lit: 'lt' };
+  return function (code) { var n = S.settings && S.settings.langNames, c = String(code || '').toLowerCase(); return (n && (n[code] || n[c] || n[LANG3[c]])) || String(code || '').toUpperCase(); };
+})();

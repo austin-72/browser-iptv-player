@@ -30,12 +30,14 @@ V.rt = (function () {
     on('catalog', function (d) { if (d.version !== S.catalogVersion) V.emit('catalog-stale', d); });
     on('settings', function (d) { S.settings = Object.assign(S.settings || {}, d); V.emit('settings'); });
     on('profiles', function () { V.emit('profiles'); });
+    on('health', function (d) { V.emit('health-v', d); });
     on('profile', function () { V.refreshMe().then(function () { V.loadCatalog().catch(function () {}); }); });
     on('removed', function () { V.toast('This profile was removed.', { error: true }); V.leaveProfile(); });
     on('lists', function () { V.emit('shared-lists'); });
     on('notify', function (d) { V.notify(d); });
     on('devstate', function (d) { V.emit('devstate', d); });
     on('app-updated', function () { V.appUpdated(); });
+    on('screentime', function (d) { V.emit('screentime', d); });
     on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {
       V.net.down();

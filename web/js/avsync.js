@@ -13,7 +13,10 @@
   var STEP = 50, MAX = 1000;
 
   // ---------------------------------------------------------------- the player's sound chain (shared with volume boost)
-  /** element → delay → gain → (compressor, only while boosting) → speakers. Built once per video element. */
+  /**
+   * element → delay → gain → (compressor, only while boosting) → speakers. Built once per video element.
+   * With clear dialogue or night mode in use (soundfx.js), "speakers" is the start of their chain (p._fxIn).
+   */
   V.audioGraph = function (p) {
     if (!p._audioSrc || p._graphFor !== p.video) {
       p._ac = p._ac || new (window.AudioContext || window.webkitAudioContext)();
@@ -27,11 +30,13 @@
       p._wired = null;
     }
     var boosted = p.boost && p.boost !== 1;
-    if (p._wired !== (boosted ? 'comp' : 'plain')) {
+    var out = p._fxIn && p._fxIn.context === p._ac ? p._fxIn : p._ac.destination;
+    var wiring = (boosted ? 'comp' : 'plain') + (out === p._ac.destination ? '' : '+fx');
+    if (p._wired !== wiring) {
       try { p._gain.disconnect(); } catch (e) {}
       try { p._comp.disconnect(); } catch (e) {}
-      if (boosted) { p._gain.connect(p._comp); p._comp.connect(p._ac.destination); } else p._gain.connect(p._ac.destination);
-      p._wired = boosted ? 'comp' : 'plain';
+      if (boosted) { p._gain.connect(p._comp); p._comp.connect(out); } else p._gain.connect(out);
+      p._wired = wiring;
     }
     if (p._ac.state === 'suspended') p._ac.resume();
     return p;

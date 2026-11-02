@@ -1,0 +1,7 @@
+/* Picture subtitles (picsubs.js) and teletext subtitles (captions.js) over the video. */
+.vp .vp-picsub { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+.vp .vp-ttx { position: absolute; left: 5%; right: 5%; bottom: 9%; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: .15em; pointer-events: none; line-height: 1.25; text-align: center; transition: bottom .3s; }
+.vp .vp-ttx span { padding: .05em .35em; border-radius: 3px; white-space: pre-line; }
+.vp:not(.idle) .vp-ttx { bottom: calc(9% + 4.5rem); }
+.vp.audio-only .vp-picsub, .vp.audio-only .vp-ttx { visibility: hidden; }
+#player-layer.mini .vp-ttx { font-size: 11px !important; bottom: 6%; }

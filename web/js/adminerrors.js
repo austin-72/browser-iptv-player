@@ -5,7 +5,11 @@
 (function () {
   (V.adminExtraTabs = V.adminExtraTabs || []).push(['errors', 'Error reports', 'stats']);
   var state = { show: 'open', kind: '' };
-  var ICON = { playback: 'play', server: 'shield', startup: 'refresh', freeze: 'clock', resource: 'info' };
+  var ICON = { playback: 'play', server: 'shield', startup: 'refresh', freeze: 'clock', resource: 'info', user: 'user' };
+  /** What a viewer said in their own report (Report a problem): shown big, before everything else. */
+  var said = function (choice, note) {
+    return '<div class="er-note"><span class="er-choice">' + esc(choice || 'Something’s wrong') + '</span>' + (note ? esc(note) : '<span class="dim">No note.</span>') + '</div>';
+  };
   var when = function (t) { return t ? V.fmtAgo(t) : ''; };
   var esc = V.esc;
 
@@ -24,11 +28,12 @@
     return '<div class="er-sample">' +
       '<p class="small"><b>' + esc(new Date(s.at).toLocaleString()) + '</b> · ' + esc(s.device || '?') + (s.profile ? ' · ' + esc(s.profile) : '') + ' · app ' + esc(s.v || '?') + ' · server ' + esc(s.server || '?') + (s.count > 1 ? ' · <b>' + s.count + '×</b> on that page' : '') + '</p>' +
       (s.page ? '<p class="small dim">Page: <code>' + esc(s.page) + '</code></p>' : '') +
-      '<p class="er-msg">' + esc((s.name && s.message.indexOf(s.name) !== 0 ? s.name + ': ' : '') + s.message) + '</p>' +
+      (s.kind === 'user' ? '<h4>The viewer said</h4>' + said(ex.choiceLabel || ex.choice, ex.note) : '<p class="er-msg">' + esc((s.name && s.message.indexOf(s.name) !== 0 ? s.name + ': ' : '') + s.message) + '</p>') +
+      (s.kind === 'user' && ex.final ? '<p class="er-msg">It couldn’t be played: ' + esc(ex.final) + '</p>' : '') +
       (s.stack ? '<pre class="er-pre">' + esc(s.stack) + '</pre>' : s.where ? '<pre class="er-pre">at ' + esc(s.where.file + ':' + s.where.line + ':' + s.where.col) + (s.where.code ? '\n    > ' + esc(s.where.code) : '') + '</pre>' : '') +
       (attempts.length ? '<h4>Ways it tried to play</h4><ol class="er-att">' + attempts.map(function (a) { return '<li><b>' + esc(a.via) + (a.kind ? ' (' + esc(a.kind) + ')' : '') + '</b>' + (a.alt >= 0 ? ' · backup ' + (a.alt + 1) : '') + ' · ' + (a.ms || 0) + ' ms — ' + esc(a.msg || '') + (a.detail ? ' <code>' + esc(JSON.stringify(a.detail)) + '</code>' : '') + '</li>'; }).join('') + '</ol>' : '') +
       (ex.item ? '<h4>Title</h4>' + kv(ex.item) : '') +
-      (Object.keys(ex).filter(function (k) { return k !== 'attempts' && k !== 'item'; }).length ? '<h4>Details</h4>' + kv(ex, ['attempts', 'item']) : '') +
+      (Object.keys(ex).filter(function (k) { return ['attempts', 'item', 'note', 'choice', 'choiceLabel'].indexOf(k) < 0; }).length ? '<h4>Details</h4>' + kv(ex, ['attempts', 'item', 'note', 'choice', 'choiceLabel']) : '') +
       (c.player ? '<h4>Player</h4>' + kv(c.player) : '') +
       '<h4>Device</h4><p class="small">' + esc(dev) + '</p>' + kv(c, ['player', 'device', 'screen', 'viewport', 'conn', 'online', 'tv', 'touch']) +
       ((s.crumbs || []).length ? '<h4>Before it happened</h4><ol class="er-crumbs">' + s.crumbs.map(function (b) { return '<li><span class="dim">−' + ((b.t || 0) / 1000).toFixed(1) + ' s</span> <b>' + esc(b.k) + '</b> ' + esc(b.m) + '</li>'; }).join('') + '</ol>' : '') +
@@ -74,6 +79,7 @@
           var devs = Object.keys(x.devices || {}).length;
           return '<details class="er-issue' + (x.status === 'fixed' ? ' fixed' : '') + '" data-id="' + x.id + '"><summary>' +
             '<span class="er-kind-ic">' + V.icon(ICON[x.kind] || 'info') + '</span><span class="er-sum"><span class="er-title">' + esc(x.title) + '</span>' +
+            (x.kind === 'user' && x.note ? '<span class="er-note">“' + esc(x.note) + '”</span>' : '') +
             '<span class="small dim">' + esc(x.label) + ' · <b>' + x.count + '×</b> · ' + V.plural(devs, 'device') + ' · last ' + when(x.last) + (x.where ? ' · <code>' + esc(x.where) + '</code>' : '') + (x.reopened ? ' · <span class="err">came back</span>' : '') + (x.status === 'fixed' ? ' · fixed' : '') + '</span></span></summary>' +
             '<div class="er-body"></div></details>';
         }).join('') + '</div>' : '<p class="dim">' + (all.length ? 'Nothing here.' : 'No problems reported yet.') + '</p>') +

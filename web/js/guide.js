@@ -33,7 +33,7 @@ V.route('guide', function (view, r) {
   var width = (end - start) / 60000 * PX;
   canvas.style.width = width + 'px';
   canvas.style.height = chans.length * ROW + 'px';
-  side.style.height = chans.length * ROW + 'px';
+  // (The channel column keeps the grid's height and scrolls with the programmes: its rows are placed absolutely.)
   var th = '';
   for (var t = start; t < end; t += 1800e3) th += '<span style="left:' + (t - start) / 60000 * PX + 'px">' + V.fmtClock(t) + '</span>';
   times.innerHTML = '<div style="width:' + width + 'px">' + th + '</div>';
@@ -47,7 +47,8 @@ V.route('guide', function (view, r) {
     if (!need.length) return;
     need.forEach(function (i) { drawn.add(i); });
     var keys = need.map(function (i) { return chans[i].k; });
-    side.insertAdjacentHTML('beforeend', need.map(function (i) { var c = chans[i]; return '<button class="g-ch" style="top:' + i * ROW + 'px" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc(c.n) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="truncate">' + V.esc(c.n) + '</span></button>'; }).join(''));
+    side.insertAdjacentHTML('beforeend', need.map(function (i) { var c = chans[i]; return '<button class="g-ch" style="top:' + i * ROW + 'px" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc(c.n + (V.isDown && V.isDown(c.k) ? ' (may be down)' : '')) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="dn-row g-ch-t"><span class="truncate">' + V.esc(c.n) + '</span>' + (V.downMark ? V.downMark(c) : '') + '</span></button>'; }).join(''));
+    side.scrollTop = body.scrollTop; // (rows drawn just now: the column can scroll that far now)
     V.epg.range(keys, start, end).then(function (res) {
       var now = Date.now();
       var html = '';
@@ -143,6 +144,7 @@ V.programmeDialog = function (c, p, list) {
   else if (cu) acts.push({ label: 'Play', primary: true, fn: function () { V.playCatchup(c, p, 0); } });
   else if (!past) acts.push({ label: V.hasReminder(c, p) ? 'Cancel reminder' : 'Remind me', primary: true, fn: function () { V.toggleReminder(c, p); } });
   acts.push({ label: 'Channel page', fn: function () { V.router.go('#/channel/' + encodeURIComponent(c.k)); } });
+  if (V.isSportProg && V.isSportProg(c, p)) acts.splice(acts.length - 1, 0, { label: 'Follow…', fn: function () { setTimeout(function () { V.followDialog(p); }, 0); } });
   V.dialog({
     title: p.t,
     body: '<p class="dim">' + V.esc(c.n) + ' · ' + V.fmtDay(p.s) + ' ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e) + (p.ep ? ' · ' + V.esc(p.ep) : '') + '</p>' + (p.st ? '<p><b>' + V.esc(p.st) + '</b></p>' : '') + (p.ic ? '<img class="prog-img" src="' + V.esc(p.ic) + '" alt="" referrerpolicy="no-referrer">' : '') + (p.d ? '<p>' + V.esc(p.d) + '</p>' : '') + (p.c ? '<p class="dim">' + p.c.map(V.esc).join(' · ') + '</p>' : ''),

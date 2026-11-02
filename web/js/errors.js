@@ -12,6 +12,7 @@
   var sentTotal = 0;
   var timer = null;
   var MAX_PAGE = 40; // reports per page load
+  var userSent = []; // when this device sent a viewer's own report (kind "user")
 
   var appV = (function () {
     var s = document.querySelectorAll('script[src*="app.js"]');
@@ -160,13 +161,22 @@
   // ------------------------------------------------------------ reporting
   var hiddenAt = 0;
   /**
-   * Reports a problem. kind: error | rejection | console | shown | playback | resource | startup | freeze.
+   * Reports a problem. kind: error | rejection | console | shown | playback | resource | startup | freeze | user.
    * err: an Error, or { message, stack, source: { file, line, col } }. extra: anything that helps (kept small).
+   * "user" is a viewer's own report (Report a problem): never dropped as a repeat, sent straight away, at most 5 in
+   * 10 minutes. Returns true when it will be sent.
    */
   var report = V.reportError = function (kind, err, extra) {
     try {
       err = err || {};
+      var mine = kind === 'user';
       var message = clip(scrub(err.message || err.reason || String(err)), 1000);
+      if (mine) {
+        var t0 = Date.now();
+        userSent = userSent.filter(function (t) { return t0 - t < 10 * 60e3; });
+        if (userSent.length >= 5 || !message) return false;
+        userSent.push(t0);
+      }
       if (!message || message === 'Script error.' && !err.stack) return; // (another site's script: nothing to go on)
       if (/AbortError|ResizeObserver loop|The play\(\) request was interrupted|NotAllowedError: play\(\) failed/i.test((err.name || '') + ': ' + message)) return;
       var stack = clip(scrub(err.stack || ''), 12000);
@@ -174,22 +184,24 @@
       var fp = kind + '|' + message.replace(/\d+/g, '#').slice(0, 160) + '|' + String(top).replace(/\?v=[\w-]+/, '');
       var s = seen[fp];
       var now = Date.now();
-      if (s) {
+      if (mine) s = { n: 1 }; // (a viewer's own report: always sent, never counted as a repeat)
+      else if (s) {
         s.n++;
         if (now - s.at < 5 * 60e3) return; // the same again soon: counted, sent with the next one
       } else s = seen[fp] = { n: 1 };
-      if (sentTotal >= MAX_PAGE) return;
+      if (sentTotal >= MAX_PAGE && !mine) return;
       s.at = now;
       var count = s.n; s.n = 0;
-      sentTotal++;
+      if (!mine) sentTotal++;
       queue.push({
         kind: kind, v: appV, at: now, count: count, message: message, name: clip(err.name || '', 80), stack: stack,
         source: err.source ? { file: scrub(err.source.file || ''), line: err.source.line || 0, col: err.source.col || 0 } : undefined,
         page: scrub(location.hash || '/'), ctx: scrubAll(context()), crumbs: snapCrumbs(), extra: scrubAll(extra || {}),
       });
       clearTimeout(timer);
-      timer = setTimeout(function () { flush(false); }, 1500);
-    } catch (e) {}
+      timer = setTimeout(function () { flush(false); }, mine ? 50 : 1500);
+      return true;
+    } catch (e) { return false; }
   };
 
   var KEY = 'errQueue';

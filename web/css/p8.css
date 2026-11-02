@@ -1,0 +1,31 @@
+/* ---- Events (teams and competitions you follow) and event channels: web/js/follow.js */
+.ev-card.live { border-left-color: var(--live); }
+.ev-card .ev-go { display: inline-flex; align-items: center; gap: .3rem; align-self: flex-start; padding: .2rem .65rem; border-radius: 999px; background: var(--accent); color: var(--on); font-size: .85rem; font-weight: 700; }
+.ev-card .ev-go .i { width: .9rem; height: .9rem; }
+.ol-events:empty { display: none; }
+.ol-events { margin: .2rem 0 1.2rem; }
+.ol-events h3 { margin: .9rem 0 .3rem; font-size: 1rem; color: var(--dim); }
+.ev-h { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; margin: .4rem 0; }
+.ev-h .btn { font-size: .85rem; }
+.ol-i.ev-on { border-color: var(--live); }
+.ol-i .btn.sm { flex: none; }
+.ol-time .ev-day { display: block; font-size: .75rem; font-weight: 600; color: var(--dim); }
+.ev-empty { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; padding: .7rem .9rem; border: 1px dashed var(--line); border-radius: 12px; }
+.ev-empty p { margin: 0; display: flex; align-items: center; gap: .4rem; }
+.fol-page { max-width: 52rem; }
+.fol-page .input[type=search] { width: 100%; max-width: 30rem; }
+.fol-sug { min-height: 2.4rem; }
+.fol-chip small, .fol-mine small { opacity: .75; }
+.fol-chip .i, .fol-mine .i { width: 1rem; height: 1rem; }
+.fol-chip[aria-pressed=true] .i { color: inherit; }
+.fol-opts { margin-top: .6rem; }
+.chip.fol-chip { max-width: 100%; white-space: normal; text-align: left; }
+.ev-admin .ev-sample { list-style: none; padding: 0; margin: .3rem 0 .6rem; display: grid; gap: .2rem; font-size: .9rem; }
+.ev-admin .ev-sample .num { color: var(--dim); }
+.tv .ev-card:focus, .tv .ol-card:focus, .tv .ol-b:focus, .tv .fol-chip:focus, .tv .x:focus { box-shadow: 0 0 0 4px #fff; outline: none; }
+.ev-card:focus-visible, .fol-chip:focus-visible, .fol-mine .x:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .ev-h .btn { margin-left: 0; }
+  .ol-i .btn.sm { padding: .3rem .55rem; }
+}
+.art .ini, .chr-logo .ini, .card .ini { white-space: nowrap; }

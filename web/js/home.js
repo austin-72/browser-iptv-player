@@ -12,6 +12,7 @@ V.HOME_ROWS = [
   { id: 'people', name: 'Actors and directors you like' },
   { id: 'live', name: 'On now' },
   { id: 'ontv', name: 'On TV now: sports, films, kids, news' },
+  { id: 'events', name: 'Events: teams and competitions you follow' },
   { id: 'onlater', name: 'On later today: films and sport' },
   { id: 'favs', name: 'Favourite channels' },
   { id: 'household', name: 'Popular in your household' },
@@ -75,7 +76,7 @@ V.route('home', function (view) {
       '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
   }
   if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') + '</div>';
-  html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button></div>';
+  html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button>' + (V.homeFootExtra ? V.homeFootExtra() : '') + '</div>';
   view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
   if (heroIt) {
     V.$('[data-hero=play]', view) && (V.$('[data-hero=play]', view).onclick = function () { V.play(heroIt); });
@@ -113,6 +114,7 @@ V.route('home', function (view) {
       });
     },
     onlater: function () { var r = V.onLaterRow && V.onLaterRow(); if (r) rows.appendChild(r); },
+    events: function () { var r = V.eventsRow && V.eventsRow(); if (r) rows.appendChild(r); },
     shared: function () {
       var soc = S.socialCache;
       if (!soc) return;
@@ -155,11 +157,12 @@ V.route('home', function (view) {
       add({ id: 'random', title: 'Something different', items: V.shuffle(pool, V.hash(new Date().toDateString() + S.profile.id)).slice(0, 24), track: true });
     },
   };
-  order.forEach(function (id) { if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } });
+  order.forEach(function (id) { if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } else if (!hid.has(id) && V.homeRowBuilder) { try { V.homeRowBuilder(id, add); } catch (e) { console.error(e); } } }); // (rows from lists: homelists.js)
   if (!rows.children.length) {
     rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists?add=1">Add a list</a>' : '');
   }
   if (!S.recs || Date.now() - (S.recsAt || 0) > 5 * 60e3) V.loadRecs();
+  if (V.loadHomeLists) V.loadHomeLists();
 });
 
 V.loadRecs = function () {
@@ -210,7 +213,7 @@ V.customizeHome = function () {
   ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupsOf(t).sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.name) + ' (' + g.items.length + ')</option>'); }); });
   V.dialog({
     title: 'Customise your home page', wide: true,
-    body: '<p class="dim">Choose which rows you see and their order.</p><ul class="rows-edit"></ul><h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
+    body: '<p class="dim">Choose which rows you see and their order.</p><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
       '<div class="inline"><select class="input" data-pick><option value="">Choose a category…</option>' + groupOpts.join('') + '</select><button class="btn" data-pin>Pin</button></div>',
     actions: [{ label: 'Reset', fn: function () { S.data.home = { order: [], hidden: [], pinned: [] }; V.saveHome(); V.router.refresh(); } }, { label: 'Save', primary: true, fn: function () { S.data.home = { order: order, hidden: Array.from(hidden), pinned: pinned }; V.saveHome(); V.router.refresh(); } }],
     onOpen: function (d) {

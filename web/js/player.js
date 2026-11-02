@@ -135,9 +135,10 @@ PP.load = function (it, opts) {
   opts = opts || {};
   var self = this;
   var token = ++this.token;
-  if (!opts.quiet) { this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; }
+  if (!opts.quiet) { this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; this._fileTracks = null; this._fileSub = -1; }
   this._triedDirect = false;
-  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; }
+  this._failedWith = null;
+  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; }
   else if (opts.alt !== undefined) this.alt = opts.alt;
@@ -200,7 +201,10 @@ PP.load = function (it, opts) {
     var tagged = errs.map(function (e2, i2) { return { e: e2, via: plan[i2] ? plan[i2].via : '' }; });
     var pick = tagged.filter(function (x) { return x.via === 'relay' && !/decode|format/i.test(x.e.message); })[0] || tagged.filter(function (x) { return x.via !== 'direct' && !/decode|format/i.test(x.e.message); })[0] || tagged.filter(function (x) { return !/decode|format/i.test(x.e.message); })[0] || tagged[tagged.length - 1];
     var best = pick && pick.e;
-    if (token === self.token) self._failed(best || new Error('This couldn’t be played.'));
+    if (token !== self.token) return;
+    // (The caller has its own way back, e.g. sound settings that tried the relay: soundfx.js.)
+    if (opts.onFail) { self._teardownMedia(); return opts.onFail(best || new Error('This couldn’t be played.')); }
+    self._failed(best || new Error('This couldn’t be played.'));
   };
   return (pickSource ? this._sources(it, token, opts) : Promise.resolve(true)).then(function (go) {
     if (!go || token !== self.token) return;
@@ -547,6 +551,9 @@ PP._quality = function () {
 
 PP._attempt = function (a, token, startAt) {
   var self = this;
+  // The sound goes through Web Audio (volume boost, audio sync, clear dialogue, night mode) but this way of playing
+  // can't be read by the page, so it would be silent: start it on a fresh element (before listening to it).
+  if (this._audioSrc && !(V.audioReadable ? V.audioReadable(this, a) : !(a.via === 'direct' && (a.kind === 'native' || a.native)))) this._replaceVideo();
   return new Promise(function (resolve, reject) {
     var v = self.video;
     var done = false;
@@ -588,7 +595,6 @@ PP._hasVideoTrack = function (a) {
   /** Starts one way of playing (a promise). Asks the server first for relays and conversions. */
 PP._attach = function (a, token, startAt) {
   var self = this;
-  if (this._audioSrc && (a.via === 'direct') && a.kind === 'native') this._replaceVideo();
   this.offset = 0;
   this.sessionDuration = 0;
   this.attemptVia = a.via;
@@ -889,6 +895,7 @@ PP._fatal = function (err) {
   /** Everything failed for this stream: try a backup stream if the channel has one. */
 PP._failed = function (err) {
   if (this._altsLeft && this._altsLeft.length) {
+    this._healthFail(err, true);
     var next = this._altsLeft.shift();
     var total = (this.it.a || []).length + 1;
     this._msg({ spin: true, title: 'Trying backup stream ' + (next + 2) + ' of ' + total + '…' });
@@ -903,6 +910,7 @@ PP._failed = function (err) {
 PP._afterStart = function () {
   this.started = true;
   this._everStarted = true;
+  this._startedAlt = this.alt;
   this._msg(null);
   var vod = this.vod;
   var lb = V.$('[data-a=golive]', this.host);
@@ -978,7 +986,7 @@ PP._statStart = function () {
   this._statFlush();
   this._statSig = sig; this._statId = null; this._statSec = 0;
   var self = this;
-  V.api('/api/stats/play', { body: { k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
+  V.api('/api/stats/play', { body: { k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host, cu: it.t === 'catchup' ? 1 : undefined } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
 };
 PP._statTick = function () {
   if (!this._statSig || !this.started || this.video.paused) return;
@@ -992,13 +1000,16 @@ PP._statFlush = function () {
 
 PP._error = function (err) {
   this._teardownMedia();
-  if (this.it && !this.it.offlineUrl) V.api('/api/stats/play', { body: { k: this.it.t === 'catchup' ? this.it.catchupOf : this.it.k, failed: true } }).catch(function () {});
+  this._healthFail(err, false);
   var me = this;
   var acts = [{ label: 'Try again', primary: true, fn: function () { me.load(me.it, { startAt: me.vod ? me._lastPos || 0 : 0 }); } }];
   // (Converting doesn't help when the server can't reach the stream at all.)
   if (S.settings.ffmpeg && !(this.attempt && this.attempt.via === 'session') && !/couldn.t reach|provider/i.test(err.message || '')) acts.push({ label: 'Convert on the server', fn: function () { me.load(me.it, { force: 'transcode', startAt: me._lastPos || 0 }); } });
   // A channel that's down: one press to the next one.
   if (this.it && (this.it.t === 'live' || this.it.t === 'radio') && V.zap) acts.push({ label: 'Next channel', fn: function () { V.zap(1); } });
+  // Tell the admin about it, in the viewer's own words (problem.js).
+  this._failedWith = err;
+  if (V.reportProblem && this.it) acts.push({ label: 'Report a problem', fn: function () { V.reportProblem(me, { failed: true }); } });
   var sub = err.message;
   this._msg({ title: 'Can’t play this right now', sub: sub, actions: acts });
   // Every way of playing it failed: report it, with what each way said.
@@ -1011,6 +1022,13 @@ PP._error = function (err) {
     });
   }
   V.announce('Playback failed: ' + sub);
+};
+
+/** A copy that wouldn't play (statistics and channel health): which one, and what the player said. */
+PP._healthFail = function (err, backup) {
+  var it = this.it, d = err && err.detail;
+  if (!it || it.offlineUrl) return;
+  V.api('/api/stats/play', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, failed: true, backup: backup || undefined, msg: String((err && err.message) || '').slice(0, 200), code: d && d.http ? d.http : undefined, started: this._startedAlt === this.alt || undefined, cu: it.t === 'catchup' ? 1 : undefined } }).catch(function () {});
 };
 
 PP._msg = function (m) {
@@ -1193,7 +1211,7 @@ PP.step = function (dir) { var v = this.video; if (!this.vod) return; v.pause();
   /** Louder than 100% through Web Audio (only for streams the browser may process). */
 PP.setBoost = function (x, quietly) {
   var a = this.attempt;
-  var safe = !a || a.via !== 'direct' || a.kind !== 'native';
+  var safe = !a || (V.audioReadable ? V.audioReadable(this, a, true) : a.via !== 'direct' || a.kind !== 'native');
   if (x !== 1 && !safe) { if (!quietly) V.toast('Volume boost isn’t possible for this stream. Reload it through the server to use it.', { error: true }); return; }
   this.boost = x;
   if (x === 1 && !this._audioSrc) return;
@@ -1301,13 +1319,19 @@ PP._loadExtras = function () {
     var me = this;
     // (Converting in this browser: it already knows the sound tracks; the server only looks for subtitles.)
     if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
-    V.api('/api/probe/' + encodeURIComponent(it.k) + '?alt=' + this.alt).then(function (p) { if (tok === me.token) { me._fileTracks = { audio: me.mb ? me.mb.audioTracks || [] : p.audio || [], subs: (p.subs || []).filter(function (s) { return s.text; }) }; me._menuRefresh(); me._autoSubs(); } }).catch(function () {});
+    V.api('/api/probe/' + encodeURIComponent(it.k) + '?alt=' + this.alt).then(function (p) { if (tok === me.token) { me._fileTracks = { audio: me.mb ? me.mb.audioTracks || [] : p.audio || [], subs: (p.subs || []).filter(function (s) { return s.text || (s.pic && V.picdec); }) }; me._menuRefresh(); me._resumeSubs(); } }).catch(function () {});
   } else if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
-  if (this.sessionInfo) this._autoSubs();
+  if (this.sessionInfo) this._resumeSubs();
   if (it.t === 'episode' || it.t === 'movie') {
     var me2 = this;
     V.api('/api/markers/' + encodeURIComponent(it.k)).then(function (m) { if (tok === me2.token) { me2.markers = m; me2._drawMarks(); } }).catch(function () {});
   }
+};
+  /** After a reload (reconnecting, or the conversion restarting elsewhere): the track that was on, else the usual choice. */
+PP._resumeSubs = function () {
+  var on = this._fileSub;
+  if (on >= 0 && this._fileTracks && this._fileTracks.subs.some(function (x) { return x.i === on; })) this.fileSub(on);
+  else this._autoSubs();
 };
 PP._autoSubs = function () {
   var sl = (V.pref('subLang') || ((S.profile && S.profile.langs) || S.settings.defaultLangs || ['en'])[0] || '').toLowerCase();
@@ -1330,7 +1354,9 @@ PP.fileSub = function (i) {
   tr.kind = 'subtitles';
   tr.label = (s && (s.title || V.langName(s.lang))) || 'Subtitles';
   tr.srclang = (s && s.lang ? s.lang : 'und').slice(0, 3);
-  tr.src = '/api/subs/' + encodeURIComponent(this.it.k) + '/' + i + '?alt=' + this.alt + (this.sessionId && this.offset ? '&offset=' + this.offset : '');
+  // (s.side: a subtitle file next to the video — picsubs.js. Converting from part-way through: the times are moved back.)
+  var off = (this.sessionId || this.mb) && this.offset ? this.offset : 0;
+  tr.src = s && s.side ? s.side + (off ? '?offset=' + off : '') : '/api/subs/' + encodeURIComponent(this.it.k) + '/' + i + '?alt=' + this.alt + (off ? '&offset=' + off : '');
   tr.default = true;
   v.appendChild(tr);
   this.osd('Loading subtitles…', 1500);
@@ -1426,6 +1452,7 @@ PP._menuPages = function (kind) {
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
     // Subtitles found online (SubDL, Addic7ed, OpenSubtitles): see integrations.js.
     if ((S.settings.subtitles || S.settings.opensubtitles) && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
+    if (V.ccMenuExtras) V.ccMenuExtras(this, main, pages); // (subtitle timing: subtiming.js)
     pages.main = main;
     return pages;
   }
@@ -1480,6 +1507,8 @@ PP._openMenu = function (page, kind) {
   this._menuKind = kind;
   var pages = this._menuPages(kind);
   var items = pages[page] || pages.main;
+  // The same page drawn again (a step in a setting, new tracks): keep the highlighted line where it was.
+  var keep = (page || 'main') === this._menuPage && !m.hidden && document.activeElement && m.contains(document.activeElement) ? document.activeElement.getAttribute('data-i') : null;
   this._menuPage = page || 'main';
   m.hidden = false;
   var parent = this._menuPage.indexOf('adj-') === 0 ? 'adjust' : 'main';
@@ -1500,7 +1529,7 @@ PP._openMenu = function (page, kind) {
     it.fn();
     if (self._menuPage === 'main') self._closeMenu(); else self._openMenu(it.back || parent);
   };
-  var first = V.$('.mi[aria-checked=true]', m) || V.$('.mi', m);
+  var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mi', m);
   if (first) first.focus();
 };
 PP._menuRefresh = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) this._openMenu(this._menuPage); this._ccButton(); };

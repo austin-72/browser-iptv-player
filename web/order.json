@@ -18,6 +18,10 @@
     "audioonly.js",
     "extplayer.js",
     "playprefs.js",
+    "picsubdec.js",
+    "subtiming.js",
+    "picsubs.js",
+    "captions.js",
     "ui.js",
     "home.js",
     "browse.js",
@@ -31,6 +35,9 @@
     "downloads.js",
     "social.js",
     "multiview.js",
+    "soundfx.js",
+    "playqueue.js",
+    "problem.js",
     "profiles.js",
     "settings.js",
     "admin.js",
@@ -39,9 +46,17 @@
     "adminstats.js",
     "adminerrors.js",
     "integrations.js",
+    "homelists.js",
+    "viewing.js",
     "channeleditor.js",
+    "health.js",
+    "findguides.js",
+    "follow.js",
     "remote.js",
     "tv.js",
+    "screentime.js",
+    "keymap.js",
+    "palette.js",
     "main.js"
   ],
   "css": [
@@ -52,6 +67,12 @@
     "p1.css",
     "multiview.css",
     "sources.css",
-    "p3.css"
+    "p3.css",
+    "p11.css",
+    "p10.css",
+    "p7.css",
+    "p9.css",
+    "p8.css",
+    "p6.css"
   ]
 }

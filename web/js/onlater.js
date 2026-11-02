@@ -49,6 +49,7 @@
     var rem = V.hasReminder(c, x);
     return '<li class="ol-i"><button class="ol-b" data-k="' + V.esc(c.k) + '" data-s="' + x.s + '"><span class="ol-time num">' + V.fmtClock(x.s) + '</span>' + V.art(c.i, c.n, 'art sm') +
       '<span class="ol-main"><b class="truncate">' + V.esc(x.t) + '</b><small class="dim truncate">' + V.esc(c.n) + (x.st ? ' · ' + V.esc(x.st) : '') + (x.also ? ' · also on ' + V.plural(x.also, 'channel') : '') + '</small></span></button>' +
+      (x.kind === 'sport' && V.followDialog ? '<button class="icon-btn" data-fol="' + V.esc(c.k) + '" data-s="' + x.s + '" aria-label="Follow the teams in ' + V.esc(x.t) + '">' + V.icon('star') + '</button>' : '') +
       '<button class="icon-btn" data-rem="' + V.esc(c.k) + '" data-s="' + x.s + '" aria-pressed="' + rem + '" aria-label="Remind me about ' + V.esc(x.t) + '">' + V.icon(rem ? 'bellf' : 'bell') + '</button></li>';
   };
   var findItem = function (v, k, s) { return v.items.filter(function (x) { return String(x.s) === String(s) && (x.k === k || (x.ks || []).indexOf(k) >= 0); })[0]; };
@@ -58,8 +59,9 @@
     if (!kinds.length) kinds = ['sport', 'film'];
     view.innerHTML = V.pageHead('On later', '<div class="page-tools"><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a></div>') +
       '<div class="chips" role="group" aria-label="What to show">' + Object.keys(LABELS).map(function (k) { return '<button class="chip' + (kinds.indexOf(k) >= 0 ? ' on' : '') + '" data-kind="' + k + '" aria-pressed="' + (kinds.indexOf(k) >= 0) + '">' + LABELS[k] + '</button>'; }).join('') + '</div>' +
-      '<div class="ol-body"><div class="spinner"></div></div>';
+      '<section class="ol-events" aria-label="Events"></section><div class="ol-body"><div class="spinner"></div></div>';
     var body = V.$('.ol-body', view);
+    if (V.eventsSection) V.eventsSection(V.$('.ol-events', view));
     var data = null;
     var draw = function (v) {
       data = v;
@@ -93,6 +95,8 @@
         V.router.go('#/onlater?k=' + kinds.join(','), true);
         return;
       }
+      var fb = e.target.closest('[data-fol]');
+      if (fb && data) { var fx = findItem(data, fb.dataset.fol, fb.dataset.s); if (fx) V.followDialog(fx); return; }
       var rb = e.target.closest('[data-rem]');
       if (rb && data) { var c = V.entry(rb.dataset.rem), x = findItem(data, rb.dataset.rem, rb.dataset.s); if (c && x) { var on = V.toggleReminder(c, x); rb.innerHTML = V.icon(on ? 'bellf' : 'bell'); rb.setAttribute('aria-pressed', on); } return; }
       var b = e.target.closest('.ol-b');

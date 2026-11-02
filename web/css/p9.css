@@ -1,0 +1,73 @@
+/* Channel health (the "may be down" mark, Admin → Channel health) and Find guides and logos. */
+
+/* ---- "may be down": a small, calm amber badge after the channel's name */
+.dn-row { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.dn-row > .truncate { min-width: 0; }
+.dn-badge { display: inline-flex; align-items: center; gap: .25rem; flex: none; padding: .05rem .45rem; border: 1px solid currentColor; border-radius: 999px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: .72rem; font-weight: 600; line-height: 1.35; white-space: nowrap; }
+.dn-badge .i { width: .85em; height: .85em; }
+/* The guide's channel column is narrow: the badge goes under the name there. */
+.g-ch .dn-row { flex-direction: column; align-items: flex-start; gap: 2px; flex: 1; }
+.g-ch .dn-row > .truncate { max-width: 100%; }
+.dn-note { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; color: var(--dim); font-size: .9rem; margin: .2rem 0 .6rem; }
+.dn-note .dn-badge { font-size: .8rem; }
+
+/* ---- Admin → Channel health */
+.hl-st.ok { color: var(--ok); border-color: currentColor; }
+.hl-st.bad, .chip.bad { color: var(--danger); border-color: currentColor; }
+.hl-st.warn, .chip.warn { color: var(--warn); border-color: currentColor; }
+.hl-provs, .hl-list, .hl-copies, .gf-list { list-style: none; padding: 0; margin: 0; }
+.hl-provs { display: grid; gap: .7rem; }
+.hl-prov { border: 1px solid var(--line); border-radius: var(--r); background: var(--card); padding: .7rem .85rem; display: grid; gap: .4rem; min-width: 0; }
+.hl-ph { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .6rem; }
+.hl-ph .sp { flex: 1; }
+.hl-pb { display: flex; align-items: center; gap: .9rem; min-width: 0; }
+.hl-pt { min-width: 0; overflow-wrap: anywhere; }
+.hl-bars { display: inline-flex; align-items: flex-end; gap: 3px; height: 34px; flex: none; padding: 2px 0; }
+.hl-bar { width: 9px; height: 100%; display: flex; align-items: flex-end; background: var(--bg2); border-radius: 2px; }
+.hl-bar i { display: flex; flex-direction: column; width: 100%; background: var(--ok); border-radius: 2px; overflow: hidden; }
+.hl-bar b { display: block; width: 100%; background: var(--danger); }
+.hl-run { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.hl-set summary { cursor: pointer; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.hl-set summary .i { vertical-align: -3px; }
+.hl-set .switch, .hl-set .grid2 { margin: .8rem 0; }
+.hl-tools { margin: .2rem 0 .8rem; }
+.hl-tools .input[type=search] { flex: 1 1 14rem; }
+.hl-list { display: grid; gap: 6px; }
+.hl-row { display: flex; align-items: flex-start; gap: .7rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); min-width: 0; }
+.hl-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hl-copies { margin-top: .25rem; font-size: .85rem; display: grid; gap: .15rem; }
+.hl-copy.bad { padding-left: .5rem; border-left: 3px solid var(--danger); }
+.hl-copy:not(.bad) { padding-left: .5rem; border-left: 3px solid var(--line); }
+.ok-t { color: var(--ok); }
+.hl-acts { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; flex: none; max-width: 22rem; }
+@media (max-width: 720px) {
+  .hl-row { flex-wrap: wrap; }
+  .hl-acts { flex-basis: 100%; justify-content: flex-start; max-width: none; }
+  .hl-pb { align-items: flex-start; }
+}
+
+/* ---- Find guides and logos */
+.gf-step { display: flex; align-items: center; gap: .5rem; }
+.gf-own { margin-top: .6rem; }
+.gf-own summary { cursor: pointer; }
+.gf-own-r { display: flex; gap: .5rem; flex-wrap: wrap; }
+.gf-own-r .input { flex: 1 1 16rem; min-width: 0; }
+.gf-list { display: grid; gap: 6px; margin-top: .6rem; }
+.gf-row { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) auto; align-items: center; gap: .5rem .9rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
+.gf-row.done { border-style: dashed; opacity: .85; }
+.gf-ch { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.gf-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.gf-sug { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
+.gf-opt { display: flex; align-items: center; gap: .5rem; margin: 0; }
+.gf-opt .art { flex: none; }
+.gf-opt .gf-logo { background: #fff; }
+.gf-why { display: block; }
+@media (max-width: 720px) {
+  .gf-row { grid-template-columns: minmax(0, 1fr); }
+  .gf-row > .btn { justify-self: start; }
+}
+
+/* Logos in these lists: small and contained, like Admin → Channels. */
+.hl-row .art.sm, .gf-row .art.sm { width: 2.6rem; height: 1.8rem; border-radius: 5px; background: #fff1; display: flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+.hl-row .art.sm img, .gf-row .art.sm img { width: 90%; height: 90%; object-fit: contain; }
+.hl-row .art.sm { margin-top: .1rem; }

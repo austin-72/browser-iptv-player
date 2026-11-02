@@ -55,11 +55,13 @@ V.route('title', function (view, r) {
     }
     var inList = V.inList('list', it.k), rate = V.ratingOf(it.k);
     html += '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
+      (V.queue ? '<button class="icon-btn lg" data-a="queue" data-qk="' + V.esc(it.k) + '" aria-pressed="' + V.queue.has(it.k) + '" title="Queue: play next or later" aria-label="Queue: play next or later">' + V.icon('playlist') + '</button>' : '') +
       '<button class="icon-btn lg" data-a="up" aria-pressed="' + (rate > 0) + '" title="I like this" aria-label="I like this">' + V.icon(rate > 0 ? 'thumbupf' : 'thumbup') + '</button>' +
       '<button class="icon-btn lg" data-a="down" aria-pressed="' + (rate < 0) + '" title="Not for me" aria-label="Not for me">' + V.icon(rate < 0 ? 'thumbdownf' : 'thumbdown') + '</button>' +
       '<button class="icon-btn lg" data-a="share" title="Send to someone" aria-label="Send to someone">' + V.icon('send') + '</button>' +
       (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" title="Watch together" aria-label="Watch together">' + V.icon('party') + '</button>' : '') +
       (!isShow && S.settings.allowDownloads ? '<button class="icon-btn lg" data-a="dl" title="Download" aria-label="Download">' + V.icon('download') + '</button>' : '') +
+      (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
       '<button class="icon-btn lg" data-a="more" title="More" aria-label="More">' + V.icon('dots') + '</button>';
     V.$('.tp-acts', view).innerHTML = html;
   };
@@ -78,6 +80,8 @@ V.route('title', function (view, r) {
     else if (a === 'party') V.party.startDialog(it);
     else if (a === 'dl') V.downloads.start(it);
     else if (a === 'more') V.itemMenu(b, it);
+    else if (a === 'bell' && V.toggleBell) V.toggleBell(it, b);
+    else if (a === 'queue') V.queue.menu(b, it);
   });
 
   // Full details from the server (plot, cast, trailer, episodes; TMDB when enabled).
@@ -148,7 +152,7 @@ V.route('title', function (view, r) {
           { label: 'Send to someone…', icon: 'send', fn: function () { V.shareDialog(ep); } },
           S.settings.allowDownloads ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(ep); } } : null,
           { label: 'Watch together…', icon: 'party', fn: function () { V.party.startDialog(ep); } },
-        ]);
+        ].concat(V.queue ? [{ sep: true }].concat(V.queue.menuItems(ep)) : []));
       } else V.play(ep);
     };
   }

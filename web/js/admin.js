@@ -238,12 +238,12 @@ V.editListDialog = function (l) {
       (l.type === 'file' ? '<label class="field"><span>Replace the file</span><input class="input" type="file" name="file"></label>' : '') +
       (V.editListFields ? V.editListFields(l) : '') +
       '<div class="grid2"><label class="field"><span>Language of everything in it</span>' + V.langSelect(l.lang) + '</label><label class="field"><span>Refresh every (hours, 0 = never)</span><input class="input" name="refreshHours" type="number" min="0" max="168" value="' + l.refreshHours + '"></label></div>' +
-      (l.type !== 'folder' ? '<label class="field"><span>User-Agent (optional)</span><input class="input" name="ua" value="' + V.esc(l.ua || '') + '"></label><label class="check"><input type="checkbox" name="useGuide"' + (l.useGuide !== false ? ' checked' : '') + '><span>Use the TV guide this list points to</span></label>' +
+      (l.type !== 'folder' ? '<label class="field"><span>User-Agent (optional)</span><input class="input" name="ua" value="' + V.esc(l.ua || '') + '"></label><label class="check"><input type="checkbox" name="useGuide"' + (l.useGuide !== false ? ' checked' : '') + '><span>Use the TV guide this list points to</span></label>' + (V.evTzField ? V.evTzField(l) : '') +
         '<label class="field"><span>Proxy for this list</span><select class="input" name="proxy"><option value="">The default (' + V.esc(((S.admin.settings.proxies || []).filter(function (x) { return x.id === S.admin.settings.proxy; })[0] || { name: 'none' }).name) + ')</option><option value="none"' + (l.proxy === 'none' ? ' selected' : '') + '>No proxy</option>' + (S.admin.settings.proxies || []).map(function (x) { return '<option value="' + x.id + '"' + (l.proxy === x.id ? ' selected' : '') + '>' + V.esc(x.name) + '</option>'; }).join('') + '</select><small class="dim">Set up proxies in Admin → Network & proxies.</small></label>' : '') + '</form>',
     actions: [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, fn: function (d) {
       var fd = new FormData(V.$('form', d));
       var patch = {};
-      ['name', 'url', 'server', 'username', 'password', 'ua', 'lang', 'refreshHours', 'proxy', 'portal', 'mac', 'serial', 'deviceId', 'deviceId2', 'signature', 'token', 'kind'].forEach(function (k) { if (fd.has(k)) patch[k] = fd.get(k); });
+      ['name', 'url', 'server', 'username', 'password', 'ua', 'lang', 'refreshHours', 'proxy', 'portal', 'mac', 'serial', 'deviceId', 'deviceId2', 'signature', 'token', 'kind', 'evTz'].forEach(function (k) { if (fd.has(k)) patch[k] = fd.get(k); });
       V.$$('[data-bool]', d).forEach(function (x) { patch[x.name] = x.checked; });
       if (patch.proxy === (l.proxy || '')) delete patch.proxy;
       if (V.$('[name=useGuide]', d)) patch.useGuide = !!fd.get('useGuide');

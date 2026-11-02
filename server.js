@@ -194,6 +194,7 @@ epg.onChange = () => { if (catalog && catalog.epgChanged()) hub.toAll('catalog',
 
 // ---- new episodes of shows people follow (in My List, or watched in the last 4 months)
 const showsSeen = new JsonFile(path.join(D, 'shows-seen.json'), { m: {} }); // show key → { ad, eps: [keys], at }
+let followsOf = () => []; // series followed with the bell on their page (lib/routes-p10.js)
 let checkingEps = false;
 async function checkNewEpisodes() {
   if (checkingEps) return;
@@ -206,6 +207,7 @@ async function checkNewEpisodes() {
       const d = userdata.of(pr.id).data;
       const add = (k) => { if (!k) return; const it = catalog.get(k); if (!it || it.t !== 'show') return; const l = followers.get(k) || []; if (!l.includes(pr.id)) l.push(pr.id); followers.set(k, l); };
       for (const k of d.list) add(k);
+      for (const k of followsOf(pr.id)) add(k);
       for (const h of d.history) if (h.at > since && h.sk) add(h.sk);
       for (const p of Object.values(d.progress)) if (p.at > since && p.sk) add(p.sk);
     }
@@ -373,10 +375,11 @@ function item(ctx, k) {
 }
 // (Integrations add their own flags: subtitles, Trakt — see lib/routes-p5.js.)
 let p5Public = () => ({});
+let p8Public = () => ({}); // (event channels: lib/routes-p8.js)
 function publicSettings() {
   const s = settings();
   return {
-    ...p5Public(),
+    ...p5Public(), ...p8Public(),
     brand: s.brand, routing: s.routing, allowDownloads: s.allowDownloads !== false, allowParties: s.allowParties !== false,
     ffmpeg: media.available, tmdb: !!s.tmdbKey, version: cfg.version, defaultLangs: s.defaultLangs, showUnknownLang: s.showUnknownLang !== false,
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
@@ -888,6 +891,8 @@ function listUsage() {
 }
 /** Filled in by feature modules (lib/routes-p2.js): watch-party connection sharing. */
 const p2Hooks = { sharedPartyOf: null, partyShareDefault: null };
+/** Filled in by lib/routes-p9.js (channel health): each play's outcome, and which copy of a channel to try first. */
+const p9Hooks = { played: null, rank: null };
 /**
  * What's inside one copy of a film or episode — { v: 'h264', a: 'ac3', pix } — as its Xtream provider describes it
  * (episodes carry it from the series details; films ask get_vod_info once, cached for a week). null when unknown.
@@ -986,22 +991,25 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
       bump, locked,
     });
   }
-  // Free first (a copy that needs someone bumped after a truly free one); then ones this page can play directly; then the list order.
-  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
+  // Free first (a copy that needs someone bumped after a truly free one); then the admin's preferred backup and copies
+  // that work (channel health); then ones this page can play directly; then the list order.
+  const hr = p9Hooks.rank ? p9Hooks.rank(it) : null;
+  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (hr ? hr(x.alt) - hr(y.alt) : 0) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
   return { sources: order, allBusy: out.every((x) => x.busy), directAddress: settings().directAddress || '' };
 });
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).
 route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
-  let provider = '', type = '';
+  let provider = '', type = '', it = null;
   try {
-    const it = item(ctx, String(b.k || ''));
+    it = item(ctx, String(b.k || ''));
     type = it.t;
     const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1);
     if (src && !src.local && isUrl(src.input)) provider = new URL(src.input).host;
   } catch {}
-  if (b.failed) { stats.fail(); return { ok: true }; }
+  if (it && p9Hooks.played) { try { p9Hooks.played(it, Number.isInteger(b.alt) ? b.alt : -1, b); } catch (e) { log(`Channel health: ${e.message}`); } }
+  if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; }
   return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.id, type }) };
 });
 route('POST', '/api/stats/watch', async (req, res, p, q, ctx) => {
@@ -1061,7 +1069,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
   return {
     url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration: finite ? pr.duration : 0, mode: transcode ? 'transcode' : 'remux',
-    audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
+    audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text || x.pic) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
 // DASH through the server: Shaka asks for every manifest/segment here (only addresses on the item's own hosts).
@@ -1877,6 +1885,25 @@ p5Public = p5.publicFlags;
 
 // [routes:errors] Error reports from devices (and the admin's view of them).
 reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
+
+// [routes:p11] Screen time and bedtime for profiles (enforced on the server), the profile's default remote buttons.
+require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
+// [routes:p10] Home rows from Trakt / TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
+const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, trakt: p5.trakt, catalog: () => catalog });
+followsOf = p10.followsOf;
+{ const prev = p5Public; p5Public = () => ({ ...prev(), ...p10.publicFlags() }); }
+// [routes:p7] The play queue (per profile, synced between its devices).
+require('./lib/routes-p7')({ route, requireProfile, readJSON, HttpError, userdata, hub, catalog: () => catalog });
+// [routes:p9] Channel health (dead channels, uptime, background checks) and finding guides and logos in public databases.
+require('./lib/routes-p9')({
+  route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, lists, hub, epg, overrides, nowCache, listUsage, log,
+  fetch: fetchAny, headers: (h) => proxy.headers({ h }), connTest, media, p4, hooks: p9Hooks,
+});
+// [routes:p8] Following teams and competitions (Events, automatic reminders); event / PPV channels' listings from their names.
+const p8 = require('./lib/routes-p8')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, epg, lists, userdata, accounts, hub, overrides, chanShift, nowCache });
+p8Public = p8.publicFlags;
+// [routes:p6] Picture subtitles (PGS, VobSub, DVB) for the player to draw itself.
+require('./lib/routes-p6')({ route, item, inputOf, connLimit, media, lists });
 
 // ---- exports for other apps (VLC, Kodi, Plex…): /k/<exportKey>/playlist.m3u and /k/<exportKey>/epg.xml
 function exportM3U(req, res, key) {

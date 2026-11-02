@@ -28,7 +28,7 @@ V.epg = (function () {
    * Placeholder listings for a channel with no guide data (Admin → TV guides): hour-long blocks named after the
    * channel (or its event), so the guide isn't blank. Made on the spot, never stored. Marked ph: 1.
    */
-  var phOn = function (it) { return it && !it.E && !it.lk && (it.t === 'live' || it.t === 'radio') && !(S.settings && S.settings.epgPlaceholders === false); };
+  var phOn = function (it) { return it && !it.E && !it.lk && it.es !== 'none' && (it.t === 'live' || it.t === 'radio') && !(S.settings && S.settings.epgPlaceholders === false); }; // (an event channel with nothing on says so instead)
   function placeholders(it, from, to) {
     var out = [];
     var t = Math.floor(from / 3600e3) * 3600e3;

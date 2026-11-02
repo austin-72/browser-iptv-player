@@ -76,7 +76,8 @@ V.renderShell = function () {
   document.title = b.name || '';
 };
 V.updateUnread = function () {
-  V.$$('.unread-badge').forEach(function (x) { x.textContent = S.unread > 99 ? '99+' : S.unread || ''; x.hidden = !S.unread; });
+  var n = (S.unread || 0) + (S.alertsUnread || 0); // (messages, and alerts in New for you)
+  V.$$('.unread-badge').forEach(function (x) { x.textContent = n > 99 ? '99+' : n || ''; x.hidden = !n; });
 };
 
 V.profileMenu = function (btn) {
@@ -84,6 +85,9 @@ V.profileMenu = function (btn) {
     { header: S.profile.name },
     { label: 'Settings', icon: 'gear', fn: function () { V.router.go('#/settings'); } },
     { label: 'My List & history', icon: 'bookmark', fn: function () { V.router.go('#/mine'); } },
+    V.palette ? { label: 'Quick launcher', icon: 'search', hint: V.device.touch || V.tvMode ? '' : 'Ctrl+K', fn: function () { V.palette.open(); } } : null,
+    { label: 'Wishlist', icon: 'star', fn: function () { V.router.go('#/wishlist'); } },
+    { label: 'Your viewing', icon: 'chart', fn: function () { V.router.go('#/viewing'); } },
     { label: 'Downloads', icon: 'download', fn: function () { V.router.go('#/downloads'); } },
     S.profile.admin ? { label: 'Admin', icon: 'shield', fn: function () { V.router.go('#/admin'); } } : null,
     { sep: true },
@@ -115,7 +119,7 @@ V.card = function (it, o) {
   if (it.lk && V.parental && !V.parental.open(it)) badges += '<span class="badge" title="Locked: needs the parental PIN">' + V.icon('lock') + '</span>';
   var sub = o.sub;
   if (sub === undefined) {
-    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event on now' : it.g; }
+    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event right now' : it.g; }
     else if (t === 'episode') sub = V.epLabel(it) + (it.et ? ' · ' + it.et : '');
     else sub = [it.y, t === 'show' ? (it.ne ? V.plural(it.ne, 'episode') : 'Series') : it.d ? V.fmtLen(it.d) : ''].filter(Boolean).join(' · ');
   }

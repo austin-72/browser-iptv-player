@@ -9,7 +9,7 @@ function start(opts = {}) {
   const state = {
     subs: { subdl: [], gestdown: [], subdlOff: !!opts.subdlOff, gestdownDown: !!opts.gestdownDown },
     osDownloads: 0, osSearches: 0, osQuota: opts.quota === undefined ? 5 : opts.quota, osLogins: 0,
-    trakt: { approved: false, polls: 0, scrobbles: [], watchlist: { movies: [{ movie: { title: 'Remote Film', year: 2020, ids: { trakt: 9, tmdb: 777 } } }], shows: [] }, ratings: [], history: [], removed: [], refreshes: 0, token: 'tok1' },
+    trakt: { lists: opts.traktLists || {}, mine: opts.traktMine || {}, charts: opts.traktCharts || {}, approved: false, polls: 0, scrobbles: [], watchlist: { movies: [{ movie: { title: 'Remote Film', year: 2020, ids: { trakt: 9, tmdb: 777 } } }], shows: [] }, ratings: [], history: [], removed: [], refreshes: 0, token: 'tok1' },
     hooks: [], hookFailFirst: opts.hookFailFirst || 0,
   };
   const json = (res, code, o) => { const b = JSON.stringify(o); res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(b); };
@@ -95,9 +95,30 @@ function start(opts = {}) {
       if (q === '/oauth/token') { T.refreshes++; T.token = 'tok' + (T.refreshes + 1); return json(res, 200, { access_token: T.token, refresh_token: 'ref2', expires_in: 7776000, created_at: Math.floor(Date.now() / 1000) }); }
       if (q === '/oauth/revoke') return json(res, 200, {});
       if (q.startsWith('/search/')) return json(res, 200, u.searchParams.get('query') === 'Untagged Film' ? [{ type: 'movie', movie: { title: 'Untagged Film', year: 2001, ids: { trakt: 55 } } }] : []);
+      // Public lists and charts (Home rows): only the client id is needed.
+      const L = T.lists;
+      if ((mm = /^\/users\/([^/]+)\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q)) && mm[1] !== 'me') {
+        T.listReads = (T.listReads || 0) + 1;
+        const l = L[`${decodeURIComponent(mm[1])}/${decodeURIComponent(mm[2])}`];
+        if (!l || l.private) return json(res, 404, {});
+        return json(res, 200, mm[3] ? l.items : { name: l.name, item_count: l.items.length, ids: { slug: mm[2] } });
+      }
+      if ((mm = /^\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q))) {
+        const l = L[decodeURIComponent(mm[1])];
+        if (!l) return json(res, 404, {});
+        return json(res, 200, mm[2] ? l.items : { name: l.name, item_count: l.items.length });
+      }
+      if ((mm = /^\/(movies|shows)\/(trending|popular|anticipated)$/.exec(q))) {
+        const type = mm[1] === 'movies' ? 'movie' : 'show';
+        const pool = (T.charts[mm[1]] || []);
+        if (mm[2] === 'popular') return json(res, 200, pool.map((x) => x[type]));
+        return json(res, 200, pool.map((x, i) => ({ [mm[2] === 'trending' ? 'watchers' : 'list_count']: 100 - i, [type]: x[type] })));
+      }
       const auth = req.headers.authorization;
       if (auth !== `Bearer ${T.token}`) return json(res, 401, {});
       if (q === '/users/settings') return json(res, 200, { user: { username: 'alex' } });
+      if (q === '/users/me/lists') return json(res, 200, Object.entries(T.mine).map(([slug, l], i) => ({ name: l.name, item_count: l.items.length, ids: { trakt: 900 + i, slug } })));
+      if ((mm = /^\/users\/me\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q))) { const l = T.mine[decodeURIComponent(mm[1])]; if (!l) return json(res, 404, {}); return json(res, 200, mm[2] ? l.items : { name: l.name, item_count: l.items.length }); }
       if (q.startsWith('/scrobble/')) { const b = await body(req); T.scrobbles.push({ action: q.slice(10), ...b }); return json(res, 201, { id: 1 }); }
       if (q === '/sync/watchlist/movies') return json(res, 200, T.watchlist.movies);
       if (q === '/sync/watchlist/shows') return json(res, 200, T.watchlist.shows);

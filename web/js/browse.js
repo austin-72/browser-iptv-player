@@ -66,9 +66,11 @@ function channelsPage(view, r, type) {
   var recent = V.recentChannels().filter(function (c) { return c.t === type; });
   var list = g === '__fav' ? favs : g === '__recent' ? recent : g ? V.channelsFor(g, type) : all;
   // Pay-per-view channels with nothing on ("No event streaming now") or a finished event: hidden unless asked for.
-  var showEmpty = V.ls.get('showEmptyEvents', false);
-  var emptyN = list.filter(function (c) { return c.es === 'none' || c.es === 'ended'; }).length;
-  if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !(c.es === 'none' || c.es === 'ended') || V.inList('favs', c.k); });
+  // (The admin can have them shown always: Admin → TV guides → Event channels.)
+  var hideByAdmin = S.settings.hideEmptyEvents !== false;
+  var showEmpty = !hideByAdmin || V.ls.get('showEmptyEvents', false);
+  var emptyN = hideByAdmin ? list.filter(V.eventEmpty).length : 0;
+  if (!showEmpty && g !== '__fav') list = list.filter(function (c) { return !V.eventEmpty(c) || V.inList('favs', c.k); });
   view.innerHTML = V.pageHead(type === 'radio' ? 'Radio' : 'Live TV', '<div class="page-tools"><input class="input" type="search" data-filter placeholder="Find a channel or number" aria-label="Find a channel">' + (type === 'live' ? '<a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a><a class="btn" href="#/onlater">' + V.icon('bell') + ' On later</a>' : '') + '<a class="btn" href="#/mychannels">' + V.icon('list') + ' Your lists</a>' +
     (type === 'live' && V.multiview && all.length > 1 ? '<a class="btn" href="#/multiview">' + V.icon('grid') + ' Multiview</a>' : '') +
     // Radio and live TV link to each other (on phones the tab bar has one Live TV tab for both).
@@ -114,15 +116,22 @@ function channelsPage(view, r, type) {
   var tick = setInterval(function () { V.$$('.chr', box).forEach(function (el) { var it = V.entry(el.dataset.k); var nn = V.epg.nowNext(it); var b = V.$('.bar i', el); if (b && nn.now) b.style.width = V.clamp((Date.now() - nn.now.s) / (nn.now.e - nn.now.s), 0, 1) * 100 + '%'; }); }, 30000);
   V.pageCleanup = function () { clearInterval(tick); if (curIo) curIo.disconnect(); };
 }
+/** An event channel with nothing on: its name says so, or its event (from its name) is over and nothing follows. */
+V.eventEmpty = function (c) {
+  if (c.es === 'none' || c.es === 'ended') return true;
+  if (!c.evc || !c.E) return false;
+  var nn = V.epg.nowNext(c);
+  return !nn.now && !nn.next && V.epg.earlier(c).length > 0;
+};
 V.channelRow = function (c) {
   var nn = V.epg.nowNext(c);
   var pct = nn.now ? V.clamp((Date.now() - nn.now.s) / (nn.now.e - nn.now.s), 0, 1) : 0;
   var playing = V.watch && V.watch.it && (V.watch.it.k === c.k || V.watch.it.catchupOf === c.k);
   var fav = V.inList('favs', c.k);
-  return '<a class="chr' + (playing ? ' on' : '') + '" href="#/channel/' + encodeURIComponent(c.k) + '" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc((c.no ? 'Channel ' + c.no + ', ' : '') + c.n + (nn.now ? ', now: ' + nn.now.t : '')) + '">' +
+  return '<a class="chr' + (playing ? ' on' : '') + '" href="#/channel/' + encodeURIComponent(c.k) + '" data-k="' + V.esc(c.k) + '" aria-label="' + V.esc((c.no ? 'Channel ' + c.no + ', ' : '') + c.n + (V.isDown && V.isDown(c.k) ? ' (may be down)' : '') + (nn.now ? ', now: ' + nn.now.t : '')) + '">' +
     '<span class="chr-no num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art chr-logo') +
-    '<span class="chr-main"><span class="chr-name truncate">' + V.esc(c.n) + (c.cu ? ' ' + V.icon('archive', 'tiny') : '') + '</span>' +
-    (c.lk && !V.parental.open(c) ? '<span class="chr-now dim truncate">' + V.icon('lock', 'tiny') + ' Locked</span>' : nn.now ? '<span class="chr-now truncate' + (nn.now.ph ? ' ph' : '') + '">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event on now' : c.g) + '</span>') + '</span>' +
+    '<span class="chr-main"><span class="dn-row"><span class="chr-name truncate">' + V.esc(c.n) + (c.cu ? ' ' + V.icon('archive', 'tiny') : '') + '</span>' + (V.downMark ? V.downMark(c) : '') + '</span>' +
+    (c.lk && !V.parental.open(c) ? '<span class="chr-now dim truncate">' + V.icon('lock', 'tiny') + ' Locked</span>' : nn.now ? '<span class="chr-now truncate' + (nn.now.ph ? ' ph' : '') + '">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event right now' : c.g) + '</span>') + '</span>' +
     '<span class="chr-next dim truncate">' + (nn.next && !nn.next.ph ? V.fmtClock(nn.next.s) + ' ' + V.esc(nn.next.t) : '') + '</span>' +
     '<button class="icon-btn" data-fav="' + V.esc(c.k) + '" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button></a>';
 };
@@ -141,7 +150,7 @@ V.route('channel', function (view, r) {
   var fav = V.inList('favs', c.k);
   var nn = V.epg.nowNext(c);
   var canCU = V.catchup.available(c);
-  view.innerHTML = '<div class="ch-page"><header class="ch-head">' + V.art(c.i, c.n, 'art ch-big') + '<div><div class="dim">' + V.esc(c.g) + (c.no ? ' · Channel ' + c.no : '') + (canCU ? ' · ' + V.icon('archive', 'tiny') + ' Catch-up ' + ((c.cu && c.cu.days) || 7) + ' days' : '') + '</div><h1>' + V.esc(c.n) + '</h1>' +
+  view.innerHTML = '<div class="ch-page"><header class="ch-head">' + V.art(c.i, c.n, 'art ch-big') + '<div><div class="dim">' + V.esc(c.g) + (c.no ? ' · Channel ' + c.no : '') + (canCU ? ' · ' + V.icon('archive', 'tiny') + ' Catch-up ' + ((c.cu && c.cu.days) || 7) + ' days' : '') + '</div><h1>' + V.esc(c.n) + '</h1>' + (V.isDown && V.isDown(c.k) ? '<p class="dn-note"><span class="dn-badge">' + V.icon('pulse', 'tiny') + ' May be down</span> It hasn’t played the last few times anyone tried.</p>' : '') +
     (nn.now ? '<p><b>Now:</b> ' + V.esc(nn.now.t) + ' <span class="dim">' + V.fmtClock(nn.now.s) + '–' + V.fmtClock(nn.now.e) + '</span></p>' : '') +
     '<div class="acts"><button class="btn primary lg" data-a="play">' + V.icon('play') + ' Watch</button>' + (canCU && nn.now ? '<button class="btn lg" data-a="start">' + V.icon('restart') + ' Start over</button>' : '') +
     '<button class="icon-btn lg" data-a="fav" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button><button class="icon-btn lg" data-a="mylist" aria-label="Add to one of your lists">' + V.icon('list') + '</button><button class="icon-btn lg" data-a="share" aria-label="Send to someone">' + V.icon('send') + '</button>' + (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" aria-label="Watch together">' + V.icon('party') + '</button>' : '') + '</div></div></header>' +
@@ -159,7 +168,7 @@ V.route('channel', function (view, r) {
   };
   view.addEventListener('click', acts);
   var sched = V.$('.sched', view);
-  if (!c.E) { sched.innerHTML = '<p class="dim">No guide information for this channel.</p>'; return; }
+  if (!c.E) { sched.innerHTML = '<p class="dim">' + (c.es === 'none' ? 'No event right now.' : c.ev ? V.eventLabel(c) + ' · the channel’s name doesn’t say when it starts.' : 'No guide information for this channel.') + '</p>'; return; }
   var now = Date.now();
   var from = now - (canCU ? Math.min(7, (c.cu && c.cu.days) || 7) : 0.25) * 86400e3;
   V.epg.range([c.k], from, now + 3 * 86400e3).then(function (res) {
@@ -210,7 +219,7 @@ V.checkReminders = function () {
     var c = V.entry(r.k);
     if (!c) return;
     var msg = '“' + r.t + '” is starting on ' + c.n;
-    if (V.pref('reminderAction') === 'switch' && V.reminderSwitch && !document.hidden) V.reminderSwitch(c, r);
+    if ((r.sw || V.pref('reminderAction') === 'switch') && V.reminderSwitch && !document.hidden) V.reminderSwitch(c, r);
     else V.toast(msg, { action: { label: 'Watch', fn: function () { V.play(c); } }, ms: 20000 });
     try { if (window.Notification && Notification.permission === 'granted' && document.hidden) new Notification(msg); } catch (e) {}
   });

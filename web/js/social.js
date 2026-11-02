@@ -15,7 +15,9 @@ V.route('messages', function (view, r) {
       convs.forEach(function (c) { byId[c.id] = c; });
       var entries = [{ id: 'all', name: 'Everyone', all: true }].concat(soc.profiles.filter(function (p) { return p.id !== S.profile.id; }));
       entries.sort(function (a, b) { var x = byId[a.id], y = byId[b.id]; return (y ? y.last.at : 0) - (x ? x.last.at : 0); });
-      listBox.innerHTML = entries.map(function (p) {
+      // Alerts (new episodes, wishlist arrivals) sit at the top: homelists.js.
+      var alertsRow = V.alertsThread ? '<a class="conv' + (conv === 'alerts' ? ' on' : '') + '" href="#/messages/alerts"><span class="avatar sm all">' + V.icon('bell') + '</span><span class="conv-b"><b class="truncate">New for you</b><span class="truncate dim">' + V.esc(V.alertsPreview()) + '</span></span>' + (S.alertsUnread ? '<span class="badge-n">' + S.alertsUnread + '</span>' : '') + '</a>' : '';
+      listBox.innerHTML = alertsRow + entries.map(function (p) {
         var c = byId[p.id];
         var last = c ? c.last : null;
         var preview = last ? (last.from === S.profile.id ? 'You: ' : '') + (last.party ? 'Watch party invite' : last.item ? 'Sent “' + last.item.n + '”' : last.text) : p.all ? 'The household chat' : 'Say hi';
@@ -27,7 +29,8 @@ V.route('messages', function (view, r) {
     };
     drawList();
     V.$('.presence', view).onclick = function (e) { var b = e.target.closest('[data-k]'); if (b) { var it = V.entry(b.dataset.k); if (it) V.play(it); } };
-    if (conv) openThread(conv, soc, drawList);
+    if (conv === 'alerts' && V.alertsThread) V.alertsThread(thread, drawList);
+    else if (conv) openThread(conv, soc, drawList);
     else if (wide) thread.innerHTML = V.empty('Pick a conversation', 'Send messages, share what you’re watching, or start a watch party.');
     var offs = [
       V.on('message', function (m) { var c = m.to === 'all' ? 'all' : m.from === S.profile.id ? m.to : m.from; var cv = soc.conversations.filter(function (x) { return x.id === c; })[0]; if (!cv) soc.conversations.push(cv = { id: c, unread: 0, count: 0 }); cv.last = m; if (c !== conv && m.from !== S.profile.id) cv.unread++; drawList(); }),
