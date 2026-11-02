@@ -13,6 +13,7 @@ V.downloads = (function () {
   var directUrl = function (it) {
     var u = it.u || '';
     if (!/^https?:/i.test(u) || (it.h && Object.keys(it.h).length) || S.settings.routing === 'server') return '';
+    if (V.relayOn && V.relayOn()) return ''; // (streams go through the stream relay: downloads come through the server instead)
     if (location.protocol === 'https:' && /^http:/i.test(u) && !(V._mixedHosts && V._mixedHosts[(/^http:\/\/([^/?#]+)/i.exec(u) || [])[1]])) return '';
     var g = V.guessKind(u, it);
     return g === 'native' || (V.mbSupported() && (g === 'ffmpeg' || g === 'ts' || g === 'unknown')) ? u : '';

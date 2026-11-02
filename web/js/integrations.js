@@ -282,7 +282,8 @@
         if (!t) return;
         row('prov', 'From ' + t.name, spin);
         if (t.busy) { row('prov', 'From ' + t.name, 'not tested — every connection is in use right now'); return; }
-        return directProbe(t).then(function (x) {
+        // (A list behind the stream relay: this device mustn't contact the provider itself — the server measures.)
+        return ((S.settings.relayLists || []).indexOf(t.id) >= 0 ? Promise.reject(new Error('relay')) : directProbe(t)).then(function (x) {
           out.prov = mbps(x.bytes, x.ms);
           row('prov', 'From ' + t.name + ' (straight to this device)', out.prov + ' Mbit/s · first byte after ' + x.ttfb + ' ms');
         }, function () {

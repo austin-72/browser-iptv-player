@@ -1,0 +1,25 @@
+# The stream relay with automatic https (Caddy). On the relay machine: put this folder there, copy .env.example to
+# .env and fill it in, then: docker compose up -d     (see docs/stream-relay.md)
+services:
+  relay:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: node /relay/relay.js
+    env_file: .env
+    volumes:
+      - ./relay.js:/relay/relay.js:ro
+    ports:
+      # Only used when PROXY_PORT=8888 is set in .env (the relay as this server's own proxy).
+      - "8888:8888"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  caddy-data: {}

@@ -104,7 +104,7 @@
     var token = ++t.token, it = t.it;
     t.live = true; // (counts as a connection from the moment it asks for one)
     msg(t, '', true);
-    var mixed = location.protocol === 'https:' && /^http:/i.test(it.u || '') && V.mixedOk ? V.mixedOk(it.u) : Promise.resolve(false);
+    var mixed = location.protocol === 'https:' && /^http:/i.test(it.u || '') && V.mixedOk && !(V.relayOn && V.relayOn()) ? V.mixedOk(it.u) : Promise.resolve(false);
     mixed.then(function (mok) {
       return V.api('/api/play/reach', { body: { k: it.k, alt: t.alt, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } }).catch(function () { return null; });
     }).then(function (info) {

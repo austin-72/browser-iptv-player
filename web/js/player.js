@@ -219,7 +219,7 @@ PP.load = function (it, opts) {
   /** Picks the copy to play (see /api/play/sources). Returns false when it asked the viewer something instead. */
 PP._sources = function (it, token, opts) {
   var self = this;
-  return (location.protocol === 'https:' && /^http:/i.test(it.u || '') ? V.mixedOk(it.u) : Promise.resolve(false)).then(function (mok) {
+  return (location.protocol === 'https:' && /^http:/i.test(it.u || '') && !V.relayOn() ? V.mixedOk(it.u) : Promise.resolve(false)).then(function (mok) {
     return V.api('/api/play/sources', { body: { k: it.k, origin: location.origin, caps: V._caps || (V._caps = V.playCaps()), mixedOk: mok || undefined } });
   }).then(function (r) { return self._useSources(r, it, token, opts); }, function () { return true; });
 };
@@ -384,7 +384,7 @@ PP._planNow = function (it, force) {
   var fallback = function () { return self._planGuess(it, url, g, hasHeaders, mixed, routing, sessions, plan); };
   if (!(routing !== 'server' && /^https?:/i.test(url))) return fallback();
   // An http stream on this https page: fine when this browser has been told to allow it for the site.
-  return (mixed ? V.mixedOk(url) : Promise.resolve(false)).then(function (mok) {
+  return (mixed && !V.relayOn() ? V.mixedOk(url) : Promise.resolve(false)).then(function (mok) {
   if (mok) mixed = false;
   self._mixedOk = mok;
   return V.api('/api/play/reach', { body: { k: key, alt: self.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } }).then(null, function () { return null; }).then(function (info) {
@@ -394,6 +394,8 @@ PP._planNow = function (it, force) {
     {
       self.reachInfo = info;
       if (info.finite) self.vod = it.t !== 'live';
+      // A plain-http stream relay can't be used from an https page (the browser blocks it): through the server instead.
+      if (info.relay && location.protocol === 'https:' && /^http:/i.test(info.url || '')) info.blocked = 'mixed';
       if (!info.blocked && info.kind !== 'ffmpeg') plan = self._directRoutes(info, it);
       // MKV films whose codecs this browser decodes (Chrome, Edge): try the browser's own player first.
       if (info.kind === 'ffmpeg' && !info.blocked && V.mkvPlays(info.codecs)) plan = [{ via: 'direct', kind: 'native', url: info.url || url, mkv: true }];
@@ -419,6 +421,8 @@ PP._planNow = function (it, force) {
  * content") unless the viewer allows it for this site — Chrome/Edge: the icon left of the address → Site settings →
  * Insecure content → Allow. A tiny request to the host answers it; remembered for the visit.
  */
+/** Some lists' streams go through the stream relay: then a device never contacts a provider by itself (no checks, no guesses). */
+V.relayOn = function () { return !!(S.settings && S.settings.relayLists && S.settings.relayLists.length); };
 V.mixedOk = (function () {
   var memo = {};
   return function (url) {
@@ -477,7 +481,8 @@ V.mixedHelp = function () {
   /** The server couldn't check (or routing is server-only): the old way — guess, try direct, then the server. */
 PP._planGuess = function (it, url, g, hasHeaders, mixed, routing, sessions, plan) {
   var self = this;
-  var direct = routing !== 'server' && !hasHeaders && !mixed && (g !== 'ffmpeg');
+  // (With the stream relay in use, the server couldn't be asked: don't go to the provider directly.)
+  var direct = routing !== 'server' && !hasHeaders && !mixed && (g !== 'ffmpeg') && !V.relayOn();
   if (g === 'dash') {
     if (direct) plan.push({ via: 'direct', kind: 'dash', url: url });
     if (routing !== 'direct-only') plan.push({ via: 'relay', kind: 'dash', url: url });
@@ -495,7 +500,7 @@ PP._planGuess = function (it, url, g, hasHeaders, mixed, routing, sessions, plan
     var order = { hls: ['hls'], ts: ['ts'], native: ['native'], dash: ['dash'], unknown: ['ts', 'hls', 'native'] }[g] || ['native'];
     order.forEach(function (k) { plan.push({ via: 'direct', kind: k, url: url }); });
   }
-  if (routing !== 'server' && !hasHeaders && !mixed && (g === 'ffmpeg' || g === 'native') && self.vod && !self._quality() && V.mbSupported()) plan.push({ via: 'browser', kind: 'mb', url: url });
+  if (routing !== 'server' && !hasHeaders && !mixed && !V.relayOn() && (g === 'ffmpeg' || g === 'native') && self.vod && !self._quality() && V.mbSupported()) plan.push({ via: 'browser', kind: 'mb', url: url });
   if (routing === 'direct-only') {
     if (!plan.length) throw new Error(hasHeaders ? 'This channel needs special headers that browsers can’t send. Ask the admin to allow playback through the server.' : mixed ? 'This page is https but the stream is plain http, which browsers block. Ask the admin to allow playback through the server.' : 'Browsers can’t play this format directly. Ask the admin to allow playback through the server.');
     return plan;

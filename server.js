@@ -30,7 +30,7 @@ const { Epg } = require('./lib/epg');
 const { Overrides } = require('./lib/overrides');
 const { Media } = require('./lib/media');
 const { Proxy } = require('./lib/proxy');
-const { Reach } = require('./lib/reach');
+const { Reach, kindOfUrl, xtreamHls } = require('./lib/reach');
 const { zipFolder, unzip } = require('./lib/zip');
 const { Stats } = require('./lib/stats');
 const { fetchAny, setProxyResolver, testProxy } = require('./lib/net');
@@ -49,6 +49,7 @@ const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
+const { makeRelay, testRelay, newSecret } = require('./lib/streamrelay');
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
@@ -74,6 +75,8 @@ const DEFAULT_SETTINGS = {
   allowedHosts: [],
   // Outgoing proxies (Admin → Network): [{ id, name, url, video }]; `proxy` is the default for everything.
   proxies: [], proxy: '',
+  // The stream relay on an internet machine (relay/relay.js) for viewers' direct streams: { url, secret, all }.
+  relay: { url: '', secret: '', all: true },
   // A plain-http address of this server (e.g. http://192.168.1.20:8080) that https pages switch to so streams from
   // http-only providers can play straight from the provider instead of through the server.
   directAddress: '', directSwitch: 'ask', // 'ask' | 'auto' | 'off'
@@ -136,6 +139,8 @@ setProxyResolver((url) => {
   const p = owner ? listProxy(owner) : proxyById(settings().proxy);
   return p ? p.url : '';
 });
+/** Viewers' direct streams through the stream relay (lib/streamrelay.js): which lists, and their signed addresses. */
+const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().find((x) => x.id === id) });
 /** Does video from this list have to go through the server (its proxy is set to carry video)? */
 const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
 const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase });
@@ -386,6 +391,8 @@ function publicSettings() {
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
     features: ['browserRoute', 'copyCodecs'],
     epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
+    // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
+    relayLists: relayOf.conf() ? lists.all().filter((l) => relayOf.uses(l.id)).map((l) => l.id) : [],
   };
 }
 
@@ -874,6 +881,24 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
   const origin = typeof b.origin === 'string' && /^https?:\/\/[^/]+$/.test(b.origin) ? b.origin : `${req.secure ? 'https' : 'http'}://${req.headers.host}`;
   if (b.forget) { reach.forget(src.input, origin); return { ok: true }; }
   const alt = Number.isInteger(b.alt) ? b.alt : -1;
+  // Through the stream relay: the device fetches from the relay, which sends the headers the provider needs and lets
+  // web pages read the answer — so it plays "directly" without this server or the provider's permission.
+  if (relayOf.uses(srcList(it, alt))) {
+    const a = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt] : { u: it.u, h: it.h };
+    const raw = b.url || a.u;
+    const headers = { ...(settings().userAgent ? { 'User-Agent': settings().userAgent } : {}), ...(a.h || {}) };
+    let kind = kindOfUrl(raw) || (it.t === 'live' && xtreamHls(raw) ? 'ts' : '');
+    // No telling from the name: ask (through this server's proxy) what it is.
+    let info = null;
+    if (!kind) { info = await reach.check(raw, { h: a.h || {} }, origin, '', { limit: connLimit(it, alt), formats: listFormats(it, alt), mixedOk: true }).catch(() => null); kind = (info && info.kind) || 'ts'; }
+    const finite = it.t === 'movie' || it.t === 'episode' || it.t === 'catchup' || !!(info && info.finite);
+    const out = { kind, finite, mse: true, url: relayOf.wrap(raw, headers), blocked: '', split: false, splitUrl: '', relay: true, alt: null };
+    // Xtream live channels in MPEG-TS are also served as HLS (better on phones and TVs): that through the relay too.
+    const xh = it.t === 'live' && kind === 'ts' ? xtreamHls(raw) : '';
+    if (xh) out.alt = { url: relayOf.wrap(xh, headers), mse: true, split: false };
+    if (kind === 'ffmpeg' || kind === 'native') { const cx = await copyCodecs(it, alt).catch(() => null); if (cx) out.codecs = cx; }
+    return out;
+  }
   if (videoViaProxy(srcList(it, alt))) return { kind: '', url: src.input, blocked: 'proxy' };
   const out = await reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt), mixedOk: !!b.mixedOk });
   // Films and episodes: Chrome and Edge play many MKV files themselves when the codecs suit — the provider says which.
@@ -1470,6 +1495,17 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     }).filter((x) => x.url);
   }
   if (typeof b.proxy === 'string') s.proxy = (s.proxies || []).some((x) => x.id === b.proxy) ? b.proxy : '';
+  if (b.relay && typeof b.relay === 'object') {
+    const r = { ...(s.relay || {}) };
+    if (typeof b.relay.url === 'string') {
+      const u = b.relay.url.trim().replace(/\/+$/, '');
+      if (u && !/^https?:\/\/[^\s/?#]+(\/[^\s?#]*)?$/i.test(u)) throw new HttpError(400, 'The relay’s address looks like https://relay.example.com (or http://its-ip:8090).');
+      r.url = u;
+    }
+    if (b.relay.newSecret || (r.url && !r.secret)) r.secret = newSecret();
+    if ('all' in b.relay) r.all = !!b.relay.all;
+    s.relay = r;
+  }
   if (typeof b.directAddress === 'string') {
     const d = b.directAddress.trim().replace(/\/+$/, '');
     if (d && !/^http:\/\/[^\s/]+$/i.test(d)) throw new HttpError(400, 'The direct address is a plain http address of this server, like http://192.168.1.20:8080');
@@ -1503,6 +1539,14 @@ function accountAlerts() {
 }
 // Account details once a day (expiry, connections), without waiting for the next list refresh.
 setInterval(() => { for (const l of lists.all()) if (l.type === 'xtream' && l.enabled && (!l.account || Date.now() - (l.account.checkedAt || 0) > 20 * 3600e3)) lists.accountStatus(l.id, 0).catch(() => {}); }, 3600e3).unref();
+// The stream relay: its secret (to copy onto the relay machine) and a test that it's there with the same secret.
+route('GET', '/api/admin/relay/secret', (req, res, p, q, ctx) => { requireAdmin(ctx); return { secret: (settings().relay || {}).secret || '' }; });
+route('POST', '/api/admin/relay/test', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const r = settings().relay || {};
+  if (!r.url || !r.secret) return { ok: false, error: 'Save the relay’s address first.' };
+  return testRelay(r.url, r.secret, fetch);
+});
 route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const b = await readJSON(req);
@@ -1514,7 +1558,7 @@ route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
 /** Settings as the admin page sees them (secrets masked). */
 function adminSettingsView() {
   const s = settings();
-  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })) };
+  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })), relay: { url: (s.relay || {}).url || '', all: (s.relay || {}).all !== false, hasSecret: !!(s.relay || {}).secret } };
 }
 route('POST', '/api/admin/password', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -1861,7 +1905,7 @@ route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
 
 // ---- feature modules: each registers its routes here (one line each, kept apart so parallel work merges cleanly)
 // [routes:p1]
-require('./lib/routes-p1')({ route, requireProfile, readJSON, HttpError, item, inputOf, isUrl, proxy, castSign, siteOrigin });
+require('./lib/routes-p1')({ route, requireProfile, readJSON, HttpError, item, inputOf, isUrl, proxy, castSign, siteOrigin, relayOf, srcList: (it, alt) => srcList(it, alt), settings });
 
 // [routes:p2]
 require('./lib/routes-p2')({ route, requireProfile, readJSON, social, item, inputOf, isUrl, proxy, srcList, connLimit, fetchAny, hooks: p2Hooks, stats });
