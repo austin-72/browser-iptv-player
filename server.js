@@ -41,6 +41,7 @@ const { Concurrency } = require('./lib/concurrency');
 const { fetchAny, setProxyResolver, testProxy, proxyFor } = require('./lib/net');
 const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
+const catsnap = require('./lib/catsnap');
 const Titles = require('./lib/titles');
 const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
@@ -114,7 +115,8 @@ const hub = new Hub();
 const social = new Social(D, { hub, accounts });
 // The admin's channel edits, guide offsets and parental locks (Admin → Channels).
 const overrides = new Overrides(D);
-const epg = new Epg(path.join(D, 'epg'), { offsets: overrides.d.guideOffsets });
+// (The saved guides are read in the background: a big set is gigabytes, and the server answers meanwhile.)
+const epg = new Epg(path.join(D, 'epg'), { offsets: overrides.d.guideOffsets, background: true });
 let catalog;
 let rebuildTimer = null;
 const scheduleRebuild = (ms = 1500) => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildCatalog, ms); };
@@ -130,6 +132,7 @@ const lists = new Lists({
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
 catalog.overrides = overrides;
+catalog.decorate = (it) => applyMeta(it, tmdb.meta.data.m[it.k]); // (applyMeta and tmdb: further down, used once built)
 // The TMDB entry each title was matched to (by its key in the last build): titles that are one entry are merged.
 // (Only a sure match: picked by hand, or TMDB's title is clearly this title — a match found by searching a name is
 // sometimes another film, and merging on it would hide one of them.)
@@ -191,7 +194,9 @@ const relayProxyOf = (url) => {
 const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().find((x) => x.id === id), proxyOf: relayProxyOf });
 /** Does video from this list have to go through the server (its proxy is set to carry video)? */
 const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
+const tmdbT0 = Date.now();
 const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase });
+const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 
 function applyMeta(it, m) {
@@ -217,10 +222,12 @@ const sameTitle = (it, m) => Titles.sameTitle(it.n, it.y, m.title, m.y);
 let rebuilding = null, rebuildAgain = false, catalogReady = null;
 /** Rebuild the catalogue: at start-up in one go, afterwards in slices so nobody's stream stalls while it runs. */
 function rebuildCatalog(now) {
-  if (now === true) { catalog.build(); return afterRebuild(); }
+  if (now === true) { const sig = catalogInputs(); catalog.build(); builtSig = sig; return afterRebuild(); }
   if (rebuilding) { rebuildAgain = true; return rebuilding; }
+  // (What it's made from, as it is now: saved with the catalogue, so the next start can tell whether it's still right.)
+  const sig = catalogInputs();
   // (A failure is logged and the next change tries again: one bad build mustn't stop all later ones.)
-  const done = catalog.buildAsync().then(afterRebuild).catch((e) => log('Catalogue rebuild failed:', e && e.stack || e));
+  const done = catalog.buildAsync().then(() => { builtSig = sig; return afterRebuild(); }).catch((e) => log('Catalogue rebuild failed:', e && e.stack || e));
   rebuilding = done;
   done.then(() => {
     rebuilding = null;
@@ -237,10 +244,13 @@ function afterRebuild() {
     moved += tmdb.migrateKeys(catalog.renamed);
     if (moved) log(`Moved ${moved} saved things to renamed titles`);
   }
-  const meta = tmdb.meta.data.m;
-  for (const it of catalog.items) applyMeta(it, meta[it.k]);
+  // (TMDB's details went on each title while it was built: catalog.decorate.)
   catalog.cache.clear();
-  hub.toAll('catalog', { version: catalog.version });
+  if (!catalog.sameAsBefore) hub.toAll('catalog', { version: catalog.version });
+  afterCatalog();
+}
+/** After a new catalogue (built, or the saved one at start-up): the jobs that go through it, a little later. */
+function afterCatalog() {
   setTimeout(() => checkNewEpisodes().catch((e) => log('New episodes:', e.message)), 20e3);
   // Ready before anyone searches for an actor (made in the background, in slices).
   setTimeout(() => peopleIndex().catch(() => {}), 30e3);
@@ -249,6 +259,57 @@ function afterRebuild() {
   rebuildCatalog.enrichTimer = setTimeout(() => { try { startEnrich(true); } catch (e) { log('TMDB:', e.message); } }, 60e3);
 }
 epg.onChange = () => { if (catalog && catalog.epgChanged()) hub.toAll('catalog', { version: catalog.version }); };
+
+// ---- the finished catalogue, saved for a quick start next time (lib/catsnap.js)
+// Putting a catalogue of millions of entries together takes minutes (reading every list, sorting out duplicates and
+// languages). The result is saved a minute after it last changed; a restart puts it back in seconds, and builds it
+// again — in the background, with the saved one in use meanwhile — only when something it's made from has changed.
+const SNAP_FILE = path.join(D, 'catalog.snapshot');
+// (The code that decides what the catalogue holds: an update to it means building again.)
+const CODE_SIG = crypto.createHash('sha1').update(['catalog.js', 'titles.js', 'lists.js', 'parse.js', 'langs.js', 'events.js', 'overrides.js', 'stalker.js', 'mediaserver.js', 'library.js', 'shared/m3u.js']
+  .map((f) => { try { return fs.readFileSync(path.join(__dirname, 'lib', f), 'utf8'); } catch { return ''; } }).join('\u0000')).digest('hex');
+let builtSig = ''; // what the catalogue in use was made from (catalogInputs at the start of its build)
+/** Everything the catalogue is made from, as one fingerprint. */
+function catalogInputs() {
+  const h = crypto.createHash('sha1').update(CODE_SIG);
+  const S = settings();
+  h.update(JSON.stringify([S.tidyGroups, S.groupRules, S.hiddenGroups, S.hiddenKeys, S.defaultLangs, S.showUnknownLang, keepSig(), overrides.d]));
+  for (const l of lists.all().concat(lists.extras || [])) {
+    const { status, account, ...conf } = l; // (how its last refresh went doesn't change what's in it)
+    h.update(JSON.stringify(conf));
+    if (l.type === 'folder' || (lists.extras || []).includes(l)) {
+      // (The household's own folders and "My channels": their entries, which are in memory and small.)
+      const p = lists.parsed.get(l.id);
+      for (const it of (p && p.items) || []) h.update(`${it.url}|${it.name}|${it.group || ''};`);
+      continue;
+    }
+    try { const st = fs.statSync(lists.rawFile(l)); h.update(`|${st.size}|${st.mtimeMs}`); } catch { h.update('|none'); }
+  }
+  return h.digest('hex');
+}
+// (SNAPSHOT_QUIET_MS: how long it must stay the same before it's saved — shorter in tests.)
+const SNAP_QUIET = Number(process.env.SNAPSHOT_QUIET_MS) || 60e3;
+let snapVersion = '', snapSig = '', snapAt = 0, snapSaving = false, lastSeenVersion = '', versionSince = Date.now();
+async function saveSnapshot() {
+  if (snapSaving || JsonFile.frozen || !builtSig || !catalog.items.length) return;
+  snapSaving = true;
+  const v = catalog.version, sig = builtSig, t = Date.now();
+  try {
+    const bytes = await catsnap.save(SNAP_FILE, { v: 1, sig, at: Date.now(), ...catalog.snapshotHead(), lists: lists.snapshotMeta() }, catalog.items, catalog.snapshotHistory());
+    if (JsonFile.frozen) { try { fs.unlinkSync(SNAP_FILE); } catch {} } // (a backup was restored meanwhile)
+    else log(`Catalogue saved for a quick start (${(bytes / 1048576).toFixed(0)} MB in ${((Date.now() - t) / 1000).toFixed(1)} s)`);
+  } catch (e) { log('Couldn’t save the catalogue for a quick start:', e.message); }
+  snapVersion = v; snapSig = sig; snapAt = Date.now(); // (also after a failure: tried again on the next change, not every few seconds)
+  snapSaving = false;
+}
+setInterval(() => {
+  if (catalog.version !== lastSeenVersion) { lastSeenVersion = catalog.version; versionSince = Date.now(); return; }
+  // (Once it has stayed the same a minute: not in the middle of a burst of changes.)
+  // (Or built again from changed lists with the same result: saved with what it's made from now.)
+  // (Details filled in from TMDB change it every few minutes while that runs: then at most every 5 minutes.)
+  if (rebuilding || catalogReady || Date.now() - versionSince < SNAP_QUIET) return;
+  if (builtSig !== snapSig || (catalog.version !== snapVersion && Date.now() - snapAt > 5 * SNAP_QUIET)) saveSnapshot();
+}, Math.min(15e3, SNAP_QUIET / 4)).unref();
 
 // ---- new episodes of shows people follow (in My List, or watched in the last 4 months)
 const showsSeen = new JsonFile(path.join(D, 'shows-seen.json'), { m: {} }); // show key → { ad, eps: [keys], at }
@@ -590,6 +651,10 @@ route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
 // ---- catalogue & details
 route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
+  // The device has this version already (after a restart too: the saved catalogue keeps its version): nothing to
+  // make or send.
+  const current = catalog.etagFor(prof);
+  if (!q.get('page') && (req.headers['if-none-match'] === current || q.get('since') === current)) { res.writeHead(304, { ETag: current }); return res.end(); }
   // (Made in slices: a big catalogue takes a second or so to put together, and nobody else should wait for it.)
   // A huge catalogue can take a while to put together (and other profiles' copies are made one at a time): rather
   // than keep the device waiting past what a proxy allows (Cloudflare: 100 s), say "not yet" and let it ask again.
@@ -2153,7 +2218,7 @@ function makeBackup() {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp|tmp-bg)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
+      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp|tmp-bg)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full) && full !== SNAP_FILE) files[r] = fs.readFileSync(full).toString('base64');
     }
   };
   walk(D, '');
@@ -2204,6 +2269,8 @@ route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
 });
 function restoreFiles(data) {
   if (!data || data.app !== 'browser-iptv-player' || !data.files) throw new HttpError(400, 'That isn’t a backup file from this app.');
+  // (The saved catalogue was made from what's being replaced: built again from the restored lists and settings.)
+  try { fs.unlinkSync(SNAP_FILE); } catch {}
   for (const [rel, b64] of Object.entries(data.files)) {
     if (rel.includes('..') || path.isAbsolute(rel)) continue;
     const f = path.join(D, rel);
@@ -2608,7 +2675,7 @@ process.on('uncaughtException', (e) => { console.error('Unexpected error (the se
 process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejection (the server keeps running):', e && e.stack || e); reports.addServer(e instanceof Error ? e : new Error(String(e)), { where: 'unhandled promise rejection' }); });
 
 (async () => {
-  const T = { modules: process.uptime() };
+  const T = { modules: process.uptime() - tmdbLoadS, 'TMDB details': tmdbLoadS };
   let t = Date.now();
   const ff = await media.detect();
   T.ffmpeg = (Date.now() - t) / 1000; t = Date.now();
@@ -2616,13 +2683,48 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
   epg.setOrder(lists.guides().filter((g) => g.enabled).map((g) => g.id));
   buildBundle();
   T.bundle = (Date.now() - t) / 1000; t = Date.now();
-  // Answer straight away ("getting ready…"); the saved lists are read and the catalogue built in the background,
-  // and anything that needs them waits for it.
-  catalogReady = lists.loadSavedAsync()
-    .then(() => { T.lists = (Date.now() - t) / 1000; t = Date.now(); return rebuildCatalog(); })
-    .then(() => { T.catalog = (Date.now() - t) / 1000; log(`Ready ${process.uptime().toFixed(1)} s after starting (${Object.entries(T).map(([k, v]) => `${k} ${v.toFixed(1)} s`).join(', ')})`); })
+  // Answer straight away ("getting ready…"); the catalogue is put in place in the background, and anything that needs
+  // it waits for it. Quickest: the one saved last time (see saveSnapshot). Otherwise the saved lists are read and it's
+  // built from them (with the guides in, so channels get their listings).
+  const timing = () => Object.entries(T).map(([k, v]) => `${k} ${v.toFixed(1)} s`).join(', ');
+  let stale = false;
+  catalogReady = (async () => {
+    let snap = null;
+    try { snap = await catsnap.load(SNAP_FILE); } catch (e) { log(`The saved catalogue can’t be used (${e.message}): building it from the lists`); }
+    if (snap && snap.head && snap.head.v === 1 && snap.items.length) {
+      lists.fromSnapshot(snap.head.lists || {});
+      catalog.restore(snap.items, snap.head, snap.extras);
+      // (Details found on TMDB since it was saved.)
+      const meta = tmdb.meta.data.m;
+      for (const it of catalog.items) applyMeta(it, meta[it.k]);
+      builtSig = snap.head.sig || '';
+      builtKeep = keepSig(catalog._keep || null);
+      snapVersion = catalog.version; snapSig = builtSig; snapAt = Date.now();
+      stale = builtSig !== catalogInputs();
+      T.catalog = (Date.now() - t) / 1000;
+      log(`Ready ${process.uptime().toFixed(1)} s after starting, with the saved catalogue: ${catalog.items.length.toLocaleString('en-US')} items${stale ? ' — something it’s made from changed (lists, settings or an update), so it’s built again in the background meanwhile' : ''} (${timing()}, ${(snap.bytes / 1048576).toFixed(0)} MB)`);
+      afterCatalog();
+      epg.load(); // (the guides after it: they don't hold up the catalogue)
+      return;
+    }
+    epg.load(); // (alongside the lists)
+    await lists.loadSavedAsync();
+    T.lists = (Date.now() - t) / 1000; t = Date.now();
+    await epg.ready;
+    T.guides = (Date.now() - t) / 1000; t = Date.now();
+    await rebuildCatalog();
+    T.catalog = (Date.now() - t) / 1000;
+    log(`Ready ${process.uptime().toFixed(1)} s after starting (${timing()})`);
+  })()
     .catch((e) => log('Start-up:', e && e.stack || e))
-    .then(() => { catalogReady = null; lists.startScheduler(); });
+    .then(() => {
+      catalogReady = null;
+      epg.load();
+      lists.startScheduler();
+      // The saved catalogue was out of date: the lists it doesn't know are read, then it's built again (once the
+      // guides are in, so channels keep their listings). Everything works with the saved one meanwhile.
+      if (stale) lists.loadSavedAsync({ missingOnly: true }).then(() => epg.ready).then(() => rebuildCatalog()).catch((e) => log('Start-up:', e && e.stack || e));
+    });
   // Under the front (lib/front.js), which holds the port and hands over each connection; otherwise on the port itself.
   const front = require('./lib/front');
   const announce = () => {
