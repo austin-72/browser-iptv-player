@@ -109,6 +109,7 @@ To hide your home address from those too, let the relay be this server's proxy:
 
 ## Good to know
 
+- **Your server restarting doesn't interrupt anyone watching through the relay.** The video goes from the relay to the device, not through your server. If the stream hiccups while the server is away, the player reconnects straight to the relay (its addresses stay valid for 12 hours) instead of asking the server; once the server is back, every device tells it again what it's watching, and for the first minute the relay keeps the connection shares it had, so nobody's connection is handed to someone else.
 - **Connection limits:** a stream through the relay is still one connection to the provider, and busy-provider and priority rules work as before. A film that's fully on the relay no longer uses one.
 - **The relay only fetches public internet addresses.** It refuses its own network, so it can't be used to reach anything else on the VPS's network. Set `RELAY_ALLOW_PRIVATE=1` only if a provider is on the same private network as the relay.
 - **Make a new secret** (Admin → Network & proxies) if you think it has leaked, then put the new one in the relay's `.env` and restart it.

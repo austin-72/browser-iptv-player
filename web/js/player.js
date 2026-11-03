@@ -922,6 +922,16 @@ PP._mediaErr = function () {
 PP._fatal = function (err) {
   if (this._failNow) { this._failNow(err); return; }
   if (!this.it) return;
+  // Through the stream relay, while the server can't be reached (restarting): the relay doesn't need it, so keep
+  // reconnecting to the same relay address (good for 12 hours) instead of giving up or asking the server for another.
+  var a0 = this.attempt;
+  if (a0 && a0.via === 'direct' && this.reachInfo && this.reachInfo.relay && !V.rt.open() && Date.now() - (this._relayHoldSince || (this._relayHoldSince = Date.now())) < 5 * 60e3) {
+    var it0 = this.it, tok0 = this.token, me0 = this, pos0 = this.vod ? this.position : 0;
+    this._msg({ spin: true, title: 'Reconnecting…' });
+    setTimeout(function () { if (tok0 === me0.token) me0.load(it0, { quiet: true, only: a0, alt: me0.alt, startAt: pos0 || undefined }); }, 3000);
+    return;
+  }
+  this._relayHoldSince = 0;
   if (!this.vod && this.reconnects < 4) {
     this.reconnects++;
     var it = this.it, tok = this.token, a = this.attempt;
@@ -958,6 +968,7 @@ PP._failed = function (err) {
 
 PP._afterStart = function () {
   this.started = true;
+  this._relayHoldSince = 0;
   this._everStarted = true;
   this._startedAlt = this.alt;
   this._msg(null);

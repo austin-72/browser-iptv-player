@@ -957,6 +957,9 @@ const concurrency = new Concurrency(D, {
  */
 const relayFinished = (() => {
   let done = new Set(), busy = false, downloading = false, v5 = false, seq = 0, runs = new Map(), timer = null;
+  // Just started (a restart): not every device has said what it's watching yet, so for a minute the relay keeps the
+  // shares it had — it mustn't take a connection a live viewer is still using.
+  const bootAt = Date.now();
   const isFilm = (pl) => {
     if (!pl || !pl.k) return null;
     const it = catalog.get(pl.k);
@@ -991,7 +994,7 @@ const relayFinished = (() => {
     if (!ids.size && !downloading) { done = new Set(); runs = new Map(); return; }
     busy = true;
     try {
-      const j = await relayDownloads(r.url, r.secret, [...ids], fetch, { budget: budgets(), since: seq, full: true });
+      const j = await relayDownloads(r.url, r.secret, [...ids], fetch, { budget: Date.now() - bootAt > 60000 ? budgets() : null, since: seq, full: true });
       if (!j) return;
       const next = new Set();
       for (const f of j.films) if (f.done) for (const i of f.ids || []) next.add(i);

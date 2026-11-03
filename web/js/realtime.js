@@ -12,7 +12,9 @@ V.rt = (function () {
     if (!window.EventSource || !S.profile) return;
     es = new EventSource('/api/events?device=' + encodeURIComponent(V.device.id) + '&name=' + encodeURIComponent(V.device.name));
     es.onopen = function () { V._epsOk = {}; }; // (re)connected: the server may have restarted
-    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; V.net.up(); V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
+    // (A new connection — the server may have restarted and forgotten who's watching what: always say it again, so it
+    // doesn't hand someone else the provider connection this device is using, and the stream relay keeps it.)
+    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; lastPresence = ''; V.net.up(); V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
     var on = function (name, fn) { es.addEventListener(name, function (e) { var d; try { d = JSON.parse(e.data); } catch (x) { return; } fn(d); }); };
     on('message', function (m) { V.emit('message', m); });
     on('read', function (d) { V.emit('read', d); });
@@ -43,7 +45,7 @@ V.rt = (function () {
     es.onerror = function () {
       V.net.down();
       if (es && es.readyState === 2) {
-        close(); retry++; clearTimeout(timer); timer = setTimeout(connect, Math.min(30000, 1000 * Math.pow(2, retry)));
+        close(); retry++; clearTimeout(timer); timer = setTimeout(connect, Math.min(V.watch && V.watch.it ? 3000 : 15000, 1000 * Math.pow(2, retry))); // (while watching: back within seconds of the server)
         // The server refused (rather than couldn't be reached): if this device was signed out, any request says so.
         V.api('/api/me').catch(function () {});
       }
