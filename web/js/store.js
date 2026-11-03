@@ -5,10 +5,12 @@ V.TYPE_NAMES = { live: 'Live TV', radio: 'Radio', movie: 'Movie', show: 'Series'
 V.entry = function (k) { return (S.byKey && S.byKey.get(k)) || (S.extra && S.extra.get(k)) || null; };
 
 // ---------------------------------------------------------------- catalogue
-V.loadCatalog = function (force) {
+V.loadCatalog = function (force, tries) {
   var pid = S.profile.id;
   var cacheKey = 'catalog:' + pid;
   var cached = null;
+  // (A newer load replaces this one: the pages still coming for this one stop.)
+  var token = S.catalogLoad = (S.catalogLoad || 0) + 1;
   var start = force ? Promise.resolve(null) : V.idb.get(cacheKey);
   return start.then(function (c) {
     cached = c;
@@ -18,12 +20,23 @@ V.loadCatalog = function (force) {
     return fetch('/api/catalog' + (c && c.etag && c.data && c.data.items ? '?since=' + encodeURIComponent(c.etag) : ''), { headers: h, credentials: 'same-origin' });
   }).then(function (r) {
     if (r.status === 304 && cached) return cached.data;
-    if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'Couldn’t load the catalogue'); });
+    // Still being put together on the server (a huge catalogue after a change): the copy here meanwhile, or wait and
+    // ask again.
+    if (r.status === 503 && r.headers.get('Retry-After')) {
+      if (cached && cached.data) { setTimeout(function () { V.emit('catalog-stale', {}); }, 15000); return cached.data; }
+      if ((tries || 0) < 60) return new Promise(function (ok) { setTimeout(ok, 5000); }).then(function () { return V.loadCatalog(force, (tries || 0) + 1); });
+    }
+    if (!r.ok) return V.catalogError(r);
     var etag = r.headers.get('ETag');
     return r.json().then(function (data) {
       if (data.delta) {
         if (!cached || !cached.data) return V.loadCatalog(true);
         data = V.applyCatalogDelta(cached.data, data);
+      } else if (data.pages > 1) {
+        // A big catalogue comes in pages: start with the first (all the live channels and the first films), and
+        // fetch the rest in the background. It's kept on this device once it's all here.
+        V.catalogRest(token, pid, cacheKey, etag, data);
+        return data;
       }
       V.idb.set(cacheKey, { etag: etag, data: data });
       return data;
@@ -32,11 +45,74 @@ V.loadCatalog = function (force) {
     if (cached) { S.offlineCatalog = true; return cached.data; }
     throw e;
   }).then(function (data) {
+    if (token !== S.catalogLoad && S.items) return data; // (a newer load already drew)
     S.catalogVersion = data.base || data.version;
     V.index(data.items || []);
     V.emit('catalog');
     return data;
   });
+};
+
+/** A refused answer, as a readable error (a proxy's own error page isn't JSON: say what it means instead). */
+V.catalogError = function (r) {
+  return r.text().then(function (t) {
+    var j = null;
+    try { j = JSON.parse(t); } catch (e) {}
+    if (j && j.error) throw new Error(j.error);
+    throw new Error(r.status >= 500 ? 'The server is busy getting the catalogue ready. Try again in a minute.' : 'Couldn’t load the catalogue');
+  });
+};
+
+/** The other pages of a big catalogue, one after another; the pages already on screen are re-drawn once it's all here. */
+V.catalogRest = function (token, pid, cacheKey, etag, first) {
+  var all = first.items.slice(), page = 1, tries = 0;
+  var stale = function () { return token !== S.catalogLoad || !S.profile || S.profile.id !== pid; };
+  var show = function () {
+    var el = V.$('#cat-more');
+    if (!S.catalogLoading) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'cat-more'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.innerHTML = '<span class="spinner sm"></span> Loading the rest of the catalogue… ' + Math.floor(100 * S.catalogLoading.got / Math.max(1, S.catalogLoading.total)) + '%';
+  };
+  S.catalogLoading = { got: all.length, total: first.total || all.length };
+  show();
+  var next = function () {
+    if (stale()) return;
+    if (page >= first.pages) {
+      var data = { version: first.version, base: first.base, items: all };
+      S.catalogLoading = null; show();
+      S.catalogVersion = data.base || data.version;
+      V.index(all);
+      V.emit('catalog');
+      V.renderShell();
+      // (Re-drawn only when it won't get in the way: not while typing, in a dialog, or watching full screen.)
+      var ae = document.activeElement;
+      var busy = (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) || V.$('dialog[open]') || (V.watch && V.watch.it && !V.watch.mini);
+      if (!busy) V.router.refresh();
+      // (A very big catalogue may not fit in this browser's storage: then it's fetched again next time.)
+      try { var w = V.idb.set(cacheKey, { etag: etag, data: data }); if (w && w.catch) w.catch(function () {}); } catch (e) {}
+      return;
+    }
+    return fetch('/api/catalog?page=' + page + '&v=' + encodeURIComponent(etag || ''), { credentials: 'same-origin' }).then(function (r) {
+      if (stale()) return;
+      // The catalogue changed meanwhile: start again with the new one.
+      if (r.status === 409) { S.catalogLoading = null; show(); return V.loadCatalog(true).catch(function () {}); }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json().then(function (d) {
+        if (stale()) return;
+        for (var i = 0; i < d.items.length; i++) all.push(d.items[i]);
+        page++; tries = 0;
+        S.catalogLoading.got = all.length;
+        show();
+        return next();
+      });
+    }).catch(function () {
+      if (stale()) return;
+      // (A dropped connection or a busy server: wait and ask for the same page again, a few times.)
+      if (++tries > 4) { S.catalogLoading = null; show(); V.toast('Part of the catalogue didn’t load. It will try again when the page reloads.', { error: true }); return; }
+      return new Promise(function (ok) { setTimeout(ok, 3000 * tries); }).then(next);
+    });
+  };
+  next();
 };
 
 /** Applies the changes the server sent ({set, del}) to the copy kept on this device. */

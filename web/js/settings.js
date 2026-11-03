@@ -106,7 +106,7 @@ V.route('settings', function (view) {
       var own = V.$('[name=lmode]:checked', view).value === 'own';
       var picked = V.$$('.lang-pick input:checked', view).map(function (x) { return x.value; });
       if (own && !picked.length) { V.toast('Pick at least one language, or use the default', { error: true }); return; }
-      busy(b, V.put('/api/me', { langs: own ? picked : null, unknownLang: V.$('[data-unknown]', view).checked }).then(function (p) { S.profile = p; V.toast('Languages saved — reloading the catalogue'); return V.loadCatalog(); }).then(function () { V.renderShell(); }));
+      busy(b, V.put('/api/me', { langs: own ? picked : null, unknownLang: V.$('[data-unknown]', view).checked }).then(function (p) { S.profile = p; V.toast('Languages saved — reloading the catalogue. A language nobody here had before takes a few minutes to appear.', { ms: 7000 }); return V.loadCatalog(); }).then(function () { V.renderShell(); }));
     }
     else if (a === 'substyle') V.subtitleStyleDialog();
     else if (a === 'devname') { var n = V.$('[data-devname]', view).value.trim(); if (n) { V.ls.set('deviceName', n); V.device.name = n; V.rt.connect(); V.toast('Device name saved'); } else { V.toast('Type a name for this device first', { error: true }); V.$('[data-devname]', view).focus(); } }

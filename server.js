@@ -129,6 +129,25 @@ const lists = new Lists({
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
 catalog.overrides = overrides;
+// The languages anyone in the household can see (each profile's own, or the server default): titles in others are
+// left out of the catalogue. null = someone sees every language, keep all.
+catalog.keepLangs = () => {
+  const S = settings();
+  const langs = new Set();
+  let unknown = false;
+  for (const p of accounts.profiles) {
+    const l = Array.isArray(p.langs) ? p.langs : (S.defaultLangs || []);
+    if (!l.length) return null;
+    for (const x of l) langs.add(x);
+    if (typeof p.unknownLang === 'boolean' ? p.unknownLang : S.showUnknownLang !== false) unknown = true;
+  }
+  return langs.size ? { langs, unknown } : null;
+};
+// Someone's languages changed (Settings → Languages, Admin → Languages, a new profile): rebuild once the household's
+// combined choice differs from the one the catalogue was built with.
+const keepSig = (k = catalog.keepLangs()) => (k ? JSON.stringify([[...k.langs].sort(), k.unknown]) : 'all');
+let builtKeep = null;
+setInterval(() => { if (builtKeep !== null && keepSig() !== builtKeep && !rebuilding) { log('Languages changed: rebuilding the catalogue'); builtKeep = keepSig(); scheduleRebuild(3000); } }, 15e3).unref(); // (builtKeep: set after each build)
 
 // ---- outgoing proxies: a list's own choice, else the default (Admin → Network)
 function proxyById(id) { return (settings().proxies || []).find((x) => x.id === id) || null; }
@@ -193,6 +212,7 @@ function rebuildCatalog(now) {
   return done; // (resolves when this build is in place, not after any queued after it)
 }
 function afterRebuild() {
+  builtKeep = keepSig(catalog._keep || null); // (what this build used)
   // Titles renamed by the tidy-up or merged: move history, lists, favourites… and TMDB matches to the new keys.
   if (catalog.renamed && catalog.renamed.size) {
     let moved = 0;
@@ -554,7 +574,20 @@ route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
 route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   // (Made in slices: a big catalogue takes a second or so to put together, and nobody else should wait for it.)
-  const out = await catalog.payloadAsync(prof);
+  // A huge catalogue can take a while to put together (and other profiles' copies are made one at a time): rather
+  // than keep the device waiting past what a proxy allows (Cloudflare: 100 s), say "not yet" and let it ask again.
+  const making = catalog.payloadAsync(prof);
+  const out = await Promise.race([making, new Promise((r) => setTimeout(r, 60e3, null).unref())]);
+  if (!out) { res.setHeader('Retry-After', '5'); throw new HttpError(503, 'The catalogue is still being put together.'); }
+  // In pages (see Catalog._payloadSteps): page 0 says how many there are, and the device fetches the rest with
+  // ?page=N&v=<the ETag of page 0>. A later page of a version that has since been replaced: 409, start again.
+  const page = Math.max(0, parseInt(q.get('page'), 10) || 0);
+  if (page) {
+    const v = q.get('v');
+    if (v && v !== out.etag) throw new HttpError(409, 'The catalogue changed while it was loading.');
+    if (page >= out.pages.length) throw new HttpError(404, 'That part of the catalogue isn’t there.');
+    return sendGz({ headers: { ...req.headers, 'if-none-match': '' } }, res, () => out.raw(page), out.pages[page], 'application/json; charset=utf-8', out.etag);
+  }
   // A device that has an older copy asks for just the changes.
   const since = q.get('since');
   if (since && req.headers['if-none-match'] !== out.etag) {
@@ -562,7 +595,7 @@ route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
     if (d && d.same) { res.writeHead(304, { ETag: d.etag }); return res.end(); }
     if (d) return sendGz(req, res, d.raw, d.gz, 'application/json; charset=utf-8', d.etag);
   }
-  sendGz(req, res, () => out.raw, out.gz, 'application/json; charset=utf-8', out.etag);
+  sendGz(req, res, () => out.raw(0), out.pages[0], 'application/json; charset=utf-8', out.etag);
 });
 route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -968,6 +1001,38 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
 });
 /** Which list a copy of an item comes from. */
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
+/**
+ * Admin → Lists: for each list, its live channels, series and films once duplicates are combined, and how many of
+ * those no other list has ([count, only here] each). Worked out in slices after a catalogue change; the last counts
+ * are shown meanwhile.
+ */
+let listCounts = { version: null, by: null, pending: null };
+function listCountsNow() {
+  if (catalog && listCounts.version !== catalog.version && !listCounts.pending) {
+    const items = catalog.items, v = catalog.version;
+    listCounts.pending = (async () => {
+      const by = {};
+      const kind = { live: 'live', radio: 'live', movie: 'movie', show: 'show' };
+      for (let i = 0; i < items.length; i++) {
+        if ((i & 8191) === 0) await new Promise((r) => setImmediate(r));
+        const it = items[i], t = kind[it.t];
+        if (!t) continue;
+        const ids = new Set();
+        if (it.src) ids.add(it.src);
+        for (const a of it.alts || []) if (a.l) ids.add(a.l);
+        for (const x of it.xts || []) if (x && x.l) ids.add(x.l);
+        for (const id of ids) {
+          const c = by[id] || (by[id] = { live: [0, 0], show: [0, 0], movie: [0, 0] });
+          c[t][0]++;
+          if (ids.size === 1) c[t][1]++;
+        }
+      }
+      if (items === catalog.items) listCounts.version = v;
+      listCounts.by = by;
+    })().catch((e) => log('List counts:', e.message)).finally(() => { listCounts.pending = null; });
+  }
+  return listCounts.by;
+}
 /** Streams the household is watching right now from each list (direct or through the server). */
 /** Filled in by lib/routes-p12.js (the DVR): recordings running now, and "rec:<id>" items. */
 const dvrHooks = { dvrConns: null, dvrItem: null, dvrOwnerOk: null };
@@ -1716,7 +1781,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
   const use = listUsage();
   return {
     settings: adminSettingsView(),
-    lists: lists.all().map((l) => ({ ...lists.view(l), testing: !!(connTest.status(l.id) || {}).running, inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
+    lists: lists.all().map((l) => ({ ...lists.view(l), uniq: (listCountsNow() || {})[l.id] || null, testing: !!(connTest.status(l.id) || {}).running, inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
     profiles: accounts.profiles.map((x) => ({ ...accounts.view(x), online: hub.online().includes(x.id) })),
     devices: accounts.sessionsList(),
     me: ctx.sess ? ctx.sess.id : null,

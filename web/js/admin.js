@@ -95,6 +95,15 @@ V.adminAccountLine = function (l) {
     (use.length ? '<div class="small">In use by ' + use.map(function (u) { return V.esc(u.name) + ' (' + V.esc(u.device) + ': ' + V.esc(u.n) + ')'; }).join(', ') + '</div>' : '') + (a.checkedAt ? '<div class="dim small">Checked ' + V.fmtAgo(a.checkedAt) + '</div>' : '');
 };
 
+/** A list's live channels, series and films with duplicates combined, and how many only this list has. */
+V.listUniqLine = function (u) {
+  if (!u) return '';
+  var parts = [['live', 'live channel', 'live channels'], ['show', 'series', 'series'], ['movie', 'film', 'films']].filter(function (x) { return u[x[0]] && u[x[0]][0]; });
+  if (!parts.length) return '';
+  var n = function (v, one, many) { return Number(v).toLocaleString() + ' ' + (v === 1 ? one : many); };
+  return '<div class="al-s small dim al-uniq">' + parts.map(function (x) { var c = u[x[0]]; return n(c[0], x[1], x[2]) + ' <span title="Not in any other list">(' + Number(c[1]).toLocaleString() + ' only here)</span>'; }).join(' · ') + '</div>';
+};
+
 V.adminTabs.lists = function (body, A) {
   var draw = function () {
     // Keep the focus on the same button through a redraw (a TV remote would lose its place every 4 s while refreshing).
@@ -111,6 +120,7 @@ V.adminTabs.lists = function (body, A) {
           '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label>' + (l.type !== 'folder' ? '<button class="icon-btn" data-ct aria-label="Test how many streams play at once" title="Test how many streams play at once">' + V.icon('pulse') + '</button>' : '') + '<button class="icon-btn" data-ref aria-label="Refresh now"' + (l.refreshing ? ' disabled' : '') + '>' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
           '<div class="al-b dim small">' + info + '</div><div class="al-s small">' + (l.refreshing ? '<span class="spinner sm"></span> Refreshing…' : s.ok ? V.icon('check', 'tiny ok') + ' ' + V.plural(s.count || 0, 'item') + ' · updated ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.icon('x', 'tiny') + ' ' + V.esc(s.error) + '</span>' + (s.count ? ' <span class="dim">(using the saved copy)</span>' : '') : '') +
           (l.refreshHours ? ' · every ' + l.refreshHours + ' h' : ' · no automatic refresh') + (l.lang ? ' · language forced: ' + V.esc(V.langName(l.lang)) : '') + '</div>' +
+          V.listUniqLine(l.uniq) +
           (l.testing ? '<div class="al-s small"><span class="spinner sm"></span> Testing how many streams play at once…</div>' : l.connTest ? '<div class="al-s small">' + V.icon('pulse', 'tiny') + ' ' + V.connTestLine(l.connTest) + ' <span class="dim">· tested ' + V.fmtAgo(l.connTest.at) + '</span></div>' : '') + '</li>';
       }).join('') + '</ul>' : V.empty('No lists yet', 'Add an M3U/M3U8 playlist (any format: PLS, XSPF, JSON…), an Xtream Codes account, an uploaded file, or a folder of your own videos on the server.'));
     if (fk) {
@@ -414,7 +424,7 @@ V.adminTabs.content = function (body, A) {
     body.addEventListener('change', function (e) { if (e.target.closest('.groups-adm')) { if (e.target.checked) hidden.add(e.target.value); else hidden.delete(e.target.value); } });
     V.$('[data-save-g]', body).onclick = function () { V.adminSave({ hiddenGroups: Array.from(hidden) }, 'Saved — the catalogue is being rebuilt'); };
   }).catch(function (e) { var gb = V.$('.groups-adm', body); if (gb) gb.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; V.$('[data-save-g]', body).disabled = true; }); // (not a spinner forever, nor a Save that does nothing)
-  V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked }, 'Saved — everyone using the default sees the change'); };
+  V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked }, 'Saved — everyone using the default sees the change (a language nobody had before takes a few minutes to appear)'); };
 };
 
 V.adminTabs.playback = function (body, A) {
