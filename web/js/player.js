@@ -23,17 +23,20 @@ V.guessKind = function (url, it) {
 /** Video codecs this browser can decode, so the server only converts what it must. */
 V.codecs = (function () {
   var c = null;
-  return function () {
+  var f = function () {
     if (c) return c;
     c = ['h264'];
     var MS = window.ManagedMediaSource || window.MediaSource;
     var v = document.createElement('video');
     var ok = function (t) { try { return (MS && MS.isTypeSupported(t)) || v.canPlayType(t) === 'probably'; } catch (e) { return false; } };
-    if (ok('video/mp4; codecs="hvc1.1.6.L93.B0"') || ok('video/mp4; codecs="hev1.1.6.L93.B0"')) c.push('hevc');
+    // (Some browsers say they play HEVC and then show no picture: once that happened here, it's converted instead.)
+    if (!V.ls.get('noHevc', 0) && (ok('video/mp4; codecs="hvc1.1.6.L93.B0"') || ok('video/mp4; codecs="hev1.1.6.L93.B0"'))) c.push('hevc');
     if (ok('video/mp4; codecs="av01.0.05M.08"')) c.push('av1');
     if (ok('video/webm; codecs="vp9"')) c.push('vp9');
     return c;
   };
+  f.forget = function () { c = null; };
+  return f;
 })();
 
 /** Can the browser's own player (no JavaScript reading the bytes, so no CORS needed) play this kind? */
@@ -151,6 +154,7 @@ PP.load = function (it, opts) {
   this._loadAt = opts.startAt || 0; // (where this load starts: a backup stream tried after it fails starts there too)
   if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
+  if (!opts.quiet) this._picRetried = this._picConverted = false;
   if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; }
   else if (opts.alt !== undefined) this.alt = opts.alt;
   this._teardown();
@@ -1034,12 +1038,94 @@ PP._afterStart = function () {
   this._pickLangs();
   this._loadExtras();
   this._checkSound();
+  this._watchPicture();
   if (this._routeReason(this._routeName(this.attempt)) === 'https' || (this.attempt && this.attempt.via === 'session' && location.protocol === 'https:' && /^http:/i.test(this.url) && !this._mixedOk)) V.mixedTip();
   if (this.onPlaying) this.onPlaying(this);
   V.rt.presence({ k: this.it.t === 'catchup' ? this.it.catchupOf : this.it.k, n: this.it.n, pos: this.vod ? this.position : 0, alt: this.alt, force: true });
   this._mediaSession();
   this._wakeLock(true);
   this._statStart();
+};
+
+  /**
+   * A stream that plays but shows nothing: a black picture with the sound going (a channel whose provider is down
+   * often keeps sending sound over black), no picture at all, or a picture that has stopped while the time moves on.
+   * Checked every 2 s on a tiny copy of the picture; after 20 s of it (45 s for a film — dark scenes happen) the next
+   * copy of the channel is tried, or, with none, this one is started again once and then the viewer is told.
+   * (Not for radio, sound-only mode, or while paused, seeking or buffering.)
+   */
+PP._watchPicture = function () {
+  var self = this, tok = this.token, v = this.video, it = this.it;
+  clearInterval(this._picTimer);
+  if (!it || it.t === 'radio' || (this.attempt && this.attempt.audioOnly)) return;
+  var STEP = 2, c = null, g = null, readable = true;
+  var black = 0, still = 0, none = 0, lastT = v.currentTime, lastFrames = null;
+  var limit = this.vod ? 45 : 20;
+  try { c = document.createElement('canvas'); c.width = 32; c.height = 18; g = c.getContext('2d', { willReadFrequently: true }); } catch (e) { g = null; }
+  this._picTimer = setInterval(function () {
+    if (tok !== self.token || !self.started) { clearInterval(self._picTimer); return; }
+    var moved = v.currentTime - lastT;
+    lastT = v.currentTime;
+    // (Only while it really plays: paused, seeking, buffering or in sound-only mode isn't the picture's fault.)
+    // (Nor in a hidden tab: browsers stop drawing the picture there to save power.)
+    if (v.paused || v.seeking || v.readyState < 3 || moved < 1 || self._aoActive || document.hidden) { black = still = none = 0; lastFrames = null; return; }
+    if (!v.videoWidth) none += STEP; else none = 0;
+    if (v.videoWidth && g && readable) {
+      try {
+        g.drawImage(v, 0, 0, 32, 18);
+        var d = g.getImageData(0, 0, 32, 18).data, sum = 0, lit = 0;
+        for (var i = 0; i < d.length; i += 4) { var y = (d[i] * 3 + d[i + 1] * 6 + d[i + 2]) / 10; sum += y; if (y > 40) lit++; }
+        // Black: dark on average and hardly anything lit (a small channel logo in a corner still counts as black).
+        if (sum / 576 < 12 && lit < 15) black += STEP; else black = 0;
+      } catch (e) { readable = false; } // (a picture from another site the browser won't let the page look at)
+    }
+    // The picture stopped: no new frames while the time goes on (works whatever the picture's origin).
+    var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+    var frames = q ? q.totalVideoFrames : v.webkitDecodedFrameCount;
+    if (v.videoWidth && typeof frames === 'number') { if (lastFrames !== null && frames === lastFrames) still += STEP; else still = 0; lastFrames = frames; }
+    var why = none >= 12 ? 'no picture' : black >= limit ? 'a black picture' : still >= limit ? 'a picture that has stopped' : '';
+    if (why) { clearInterval(self._picTimer); self._badPicture(why); }
+  }, STEP * 1000);
+};
+
+/** What to do about a picture that isn't there (see _watchPicture). */
+PP._badPicture = function (why) {
+  var it = this.it, tok = this.token, self = this;
+  if (!it) return;
+  var err = new Error('The stream played with ' + why + '.');
+  var a = this.attempt || {};
+  var canConvert = S.settings.ffmpeg && !(a.via === 'session' && a.mode === 'transcode') && !this._picConverted;
+  var at0 = this.vod ? this.position : 0;
+  // No picture at all, with the sound going: almost always a picture this browser can't decode (HEVC, 10-bit…) —
+  // the server's conversion fixes that for this same copy. (Tried first; a black picture tries other copies first.)
+  if (why === 'no picture' && canConvert) {
+    this._picConverted = true;
+    // (A conversion that only repackaged the picture: this browser can't decode that picture — it's HEVC more often
+    // than not. From now on this device has such pictures converted.)
+    if (a.via === 'session' && a.mode === 'remux' && V.codecs().indexOf('hevc') >= 0) { V.ls.set('noHevc', 1); V.codecs.forget(); }
+    this._healthFail(err, true);
+    this.osd('No picture from this copy — converting it on the server…', 3500);
+    setTimeout(function () { if (tok === self.token) self.load(it, { force: 'transcode', quiet: true, alt: self.alt, startAt: at0 || undefined }); }, 400);
+    return;
+  }
+  if (this._altsLeft && this._altsLeft.length) { this._picConverted = this._picRetried = false; this.osd('This copy shows ' + why + ' — trying another', 3500); this._failed(err); return; }
+  if (canConvert) {
+    this._picConverted = true;
+    this._healthFail(err, true);
+    this.osd('This copy shows ' + why + ' — converting it on the server…', 3500);
+    setTimeout(function () { if (tok === self.token) self.load(it, { force: 'transcode', quiet: true, alt: self.alt, startAt: at0 || undefined }); }, 400);
+    return;
+  }
+  this._healthFail(err, false);
+  if (!this._picRetried) {
+    // (Once: a decoder that got stuck, or a provider that hiccupped, often comes back on a fresh start.)
+    this._picRetried = true;
+    this.osd('The stream shows ' + why + ' — starting it again…', 3000);
+    var at = this.vod ? this.position : 0, a = this.attempt;
+    setTimeout(function () { if (tok === self.token) self.load(it, { quiet: true, only: a, alt: self.alt, startAt: at || undefined }); }, 800);
+    return;
+  }
+  V.toast('“' + it.n + '” shows ' + why + ' and has no other copy to switch to. Its provider may be having trouble.', { error: true, ms: 9000 });
 };
 
   /**
@@ -1173,6 +1259,7 @@ PP._teardownMedia = function () {
   }
   if (this.shaka) { var sp = this.shaka; this.shaka = null; try { this._shakaGone = sp.destroy().catch(function () {}); } catch (e) { this._shakaGone = null; } }
   clearInterval(this._pinger);
+  clearInterval(this._picTimer);
   this._dropSeekOnMeta();
   if (this.sessionId) { V.api('/api/session/' + this.sessionId, { method: 'DELETE', keepalive: true }).catch(function () {}); this.sessionId = null; }
   if (this.mb) { this.mb.stop(); this.mb = null; }

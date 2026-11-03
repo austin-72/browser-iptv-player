@@ -249,6 +249,9 @@
     var r = e.reason;
     if (r && r.offline) return; // (the server couldn't be reached: not a bug)
     if (r && r.status && r.status < 500) return; // (the server said no — a message the viewer saw, not a bug)
+    // The in-browser converter tidying up after a conversion that was stopped or failed (its error was already
+    // handled — the player moved on to another way of playing): a knock-on effect, not a fault of its own.
+    if (r && /ERRORED writable stream|already canceled/i.test(String(r.message || '')) && /vendor\/mediabunny/.test(String(r.stack || ''))) { crumb('log', 'mediabunny: ' + r.message); return; }
     report('rejection', r instanceof Error ? r : { message: (r && r.message) || (typeof r === 'string' ? r : (function () { try { return JSON.stringify(r); } catch (x) { return String(r); } })()), stack: r && r.stack });
   });
   // The page froze (nothing ran for a long time while it was on screen): usually a slow loop on a slow device.
