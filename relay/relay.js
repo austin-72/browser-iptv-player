@@ -35,7 +35,7 @@ const os = require('os');
 const pathMod = require('path');
 const vm = require('vm');
 
-const VERSION = '4';
+const VERSION = '5';
 const SECRET = process.env.RELAY_SECRET || '';
 const PORT = Number(process.env.PORT) || 8090;
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 0;
@@ -298,31 +298,107 @@ async function relay(req, res, o) {
 const CACHE_DIR = process.env.RELAY_CACHE_DIR || pathMod.join(os.tmpdir(), 'relay-cache');
 const CACHE_LIMIT = (Number(process.env.RELAY_CACHE_GB) || 0) * 1e9; // 0: the free space minus KEEP_FREE
 const KEEP_FREE = 5e9;
-const CHUNK = 1 << 20;                 // bookkeeping unit: which MBs of a file are here
+const CHUNK = 1 << 20;                 // bookkeeping unit: which MBs of a film are here
+const BLOCK = Number(process.env.RELAY_BLOCK_MB || 16) * CHUNK; // kept in pieces this big, so watched parts can go
 const NEAR = 8 * CHUNK;                // a reader this far ahead of the download just waits for it
 const IDLE_STOP = Number(process.env.RELAY_IDLE_STOP_MS) || 120000; // nobody reading for this long: stop downloading
 // (sooner when the server says nobody's playing it any more: see /downloads)
-const KEEP_FOR = 6 * 3600e3;           // a file nobody has used for this long is deleted
+const KEEP_FOR = 6 * 3600e3;           // a film nobody has used for this long is deleted (and after twice its length)
+const AHEAD = Number(process.env.RELAY_AHEAD_S) || 600;  // the aim: 10 minutes ready ahead of every viewer
+const BACK = Number(process.env.RELAY_BACK_S) || 600;    // what's kept behind the viewer: 10 minutes at most
+const MIN_RUN = Number(process.env.RELAY_MIN_RUN_MS) || 20000; // a download keeps its connection this long before another film may take it
+const SWAP = Number(process.env.RELAY_SWAP_S) || 240;    // …and gives it up early to a viewer this much further behind
+const GUESS_LEN = 6600;                // a film's length when the server doesn't know it (1 h 50)
+const SETTLED = Number(process.env.RELAY_STRAIN_AFTER_MS) || 20000; // (waiting just after starting or seeking isn't struggling)
 const wholes = new Map();              // key → Whole
+const budgets = new Map();             // provider account → { n, at }: provider connections the relay may use for its films
+const strain = [];                     // times it couldn't keep up (for the server: Admin → Statistics)
+let strainSeq = 0;
 
 /**
- * One film being fetched whole. The file on disk is as big as the film from the start; `have` marks the MBs that are
- * in. One provider connection at a time ("a run") fills it from some point onwards; a reader that needs a part that
- * isn't here, and isn't coming soon, moves the run there. When a run reaches a part that's already here, the next run
- * starts at the next gap — first after the furthest-behind reader, then from the start — until everything is in.
+ * One film being fetched whole. `have` marks the MBs that are on disk, in BLOCK-sized files (so the part already
+ * watched can be deleted). One provider connection at a time ("a run") fills it from some point onwards; a reader that
+ * needs a part that isn't here, and isn't coming soon, moves the run there. When a run reaches a part that's already
+ * here, the next run starts at the next gap — first after the furthest-behind reader, then from the part still kept —
+ * until everything is in.
+ *
+ * Films of one provider account share its connections (the server says how many: see budgets): the scheduler below
+ * decides which films get one, so that every viewer has at least AHEAD seconds ready.
  */
 class Whole {
   constructor(key, o) {
     this.key = key; this.o = o; this.ids = new Set(o.i ? [String(o.i)] : []);
+    this.acct = typeof o.a === 'string' ? o.a.slice(0, 40) : '';
+    this.len = Number(o.d) > 0 ? Number(o.d) : 0;
     this.size = 0; this.type = 'application/octet-stream'; this.ranges = true;
     this.have = null; this.haveCount = 0; this.chunks = 0;
-    this.file = pathMod.join(CACHE_DIR, key + '.bin'); this.fd = null;
+    this.fds = new Map(); this.floor = 0; this.trimmed = 0;
     this.readers = new Set(); this.waiters = new Set();
     this.run = null; this.failed = null; this.done = false; this.bypass = false; this.errors = 0;
+    this.parked = false; this.starting = false; this.grantWait = null; this.asking = 0; this.wantAt = -1;
     this.lastUse = Date.now(); this.idleTimer = null; this.started = Date.now();
   }
   headers() { return { 'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21', Accept: '*/*', ...(this.o.h || {}) }; }
   chunkHave(i) { return !!(this.have && this.have[i]); }
+  /** Bytes a second of the film (its size over its length). */
+  bps() { return this.size / (this.len || GUESS_LEN) || 1; }
+  // ---- the pieces on disk
+  blockFile(b) { return pathMod.join(CACHE_DIR, `${this.key}.${b}.bin`); }
+  fdOf(b) {
+    let fd = this.fds.get(b);
+    if (fd != null) { this.fds.delete(b); this.fds.set(b, fd); return fd; }
+    fd = fs.openSync(this.blockFile(b), fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600);
+    this.fds.set(b, fd);
+    if (this.fds.size > 24) { const [ob, ofd] = this.fds.entries().next().value; this.fds.delete(ob); try { fs.closeSync(ofd); } catch {} }
+    return fd;
+  }
+  /** Writes buf at byte pos of the film (across pieces as needed). */
+  writeAt(buf, pos) {
+    return new Promise((ok, no) => {
+      const step = (off) => {
+        if (off >= buf.length) return ok();
+        const p = pos + off, b = Math.floor(p / BLOCK), n = Math.min(buf.length - off, (b + 1) * BLOCK - p);
+        let fd;
+        try { fd = this.fdOf(b); } catch (e) { return no(e); }
+        fs.write(fd, buf, off, n, p - b * BLOCK, (err) => (err ? no(err) : step(off + n)));
+      };
+      step(0);
+    });
+  }
+  /** Reads up to n bytes at pos (never past the end of a piece). */
+  readAt(buf, n, pos) {
+    const b = Math.floor(pos / BLOCK);
+    n = Math.min(n, (b + 1) * BLOCK - pos);
+    return new Promise((ok, no) => { let fd; try { fd = this.fdOf(b); } catch (e) { return no(e); } fs.read(fd, buf, 0, n, pos - b * BLOCK, (err, k) => (err ? no(err) : ok(k))); });
+  }
+  /** Deletes one piece: its MBs are no longer here. */
+  dropBlock(b) {
+    const fd = this.fds.get(b);
+    if (fd != null) { try { fs.closeSync(fd); } catch {} this.fds.delete(b); }
+    try { fs.unlinkSync(this.blockFile(b)); } catch {}
+    let n = 0;
+    for (let i = (b * BLOCK) / CHUNK; i < Math.min(this.chunks, ((b + 1) * BLOCK) / CHUNK); i++) if (this.have[i]) { this.have[i] = 0; this.haveCount--; n++; }
+    this.trimmed += Math.min(n * CHUNK, this.size);
+  }
+  /**
+   * The part already watched goes: everything more than BACK seconds behind the furthest-behind viewer (the first and
+   * the last piece stay — players read the film's index there). Nothing goes while nobody is reading.
+   */
+  trim() {
+    if (!this.have || !this.readers.size || this.size <= 3 * BLOCK) return;
+    const behind = Math.min(...[...this.readers].map((x) => x.pos));
+    const cut = behind - BACK * this.bps();
+    if (cut <= BLOCK) return;
+    this.floor = Math.max(this.floor, Math.floor(cut / CHUNK) * CHUNK);
+    const last = Math.floor((this.size - 1) / BLOCK);
+    const r = this.run;
+    for (let b = 1; b < last && (b + 1) * BLOCK <= cut; b++) {
+      if (r && r.from < (b + 1) * BLOCK && r.at >= b * BLOCK) continue; // (being written)
+      let any = false;
+      for (let i = (b * BLOCK) / CHUNK; i < ((b + 1) * BLOCK) / CHUNK; i++) if (this.have[i]) { any = true; break; }
+      if (any) this.dropBlock(b);
+    }
+  }
   /** The end (exclusive) of the bytes readable from p onwards: whole MBs that are in, then the running download. */
   availEnd(p) {
     if (!this.have || p >= this.size) return p;
@@ -333,35 +409,60 @@ class Whole {
     if (r && r.from <= end && r.written > end) end = r.written;
     return Math.max(end, p);
   }
+  /** Seconds of film ready for a reader (Infinity once it's all there to the end). */
+  aheadOf(x) { const e = this.availEnd(x.pos); return e >= this.size ? Infinity : (e - x.pos) / this.bps(); }
+  /** The least any of its viewers has ready (0 for a film still starting). */
+  ahead() {
+    if (!this.size) return 0;
+    if (!this.readers.size) return Infinity;
+    let a = Infinity;
+    for (const x of this.readers) a = Math.min(a, this.aheadOf(x));
+    return a;
+  }
+  /** Wants a provider connection: starting, or a viewer has something still to come. */
+  wants() {
+    if (this.failed || this.bypass) return false;
+    if (this.grantWait) return this.asking > 0;
+    if (!this.size || !this.readers.size) return false;
+    return !this.done || this.ahead() !== Infinity;
+  }
   wake() { for (const w of this.waiters) w(); this.waiters.clear(); }
   wait(ms) { return new Promise((ok) => { const t = setTimeout(done, ms); function done() { clearTimeout(t); ok(); } this.waiters.add(done); }); }
   bytesHere() { return Math.min(this.haveCount * CHUNK, this.size); }
+  /** What's still to download (from the part still kept to the end). */
+  toFetch() {
+    if (!this.have) return 0;
+    let n = 0;
+    for (let i = Math.floor(this.floor / CHUNK); i < this.chunks; i++) if (!this.have[i]) n++;
+    return Math.min(n * CHUNK, this.size);
+  }
+  /** Waits for the scheduler to give this film a provider connection (false: nobody wants it any more). */
+  grant() {
+    if (mayStart(this)) { this.starting = true; return Promise.resolve(true); } // (taken at once, so two films can't both take the last one)
+    this.askedAt = Date.now();
+    return new Promise((ok) => { this.grantWait = ok; kick(); });
+  }
   /** Starts the first run at `from`; resolves once the size and type are known (or this film can't be done whole). */
   async begin(from) {
-    from = Math.floor(from / CHUNK) * CHUNK;
-    const up = await get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` }, proxy: this.o.p || '' });
-    const ct = up.headers['content-type'] || '';
-    let total = 0;
-    if (up.statusCode === 206) { const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || ''); total = m ? Number(m[1]) : 0; }
-    else if (up.statusCode === 200) { total = Number(up.headers['content-length']) || 0; this.ranges = false; if (from) from = 0; }
-    if (up.statusCode >= 400 || !total || /mpegurl|text\/|json|html/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl || '')) { up.destroy(); return false; }
-    if (!makeRoom(total, this)) { up.destroy(); return false; }
-    this.size = total; this.type = ct || 'application/octet-stream';
-    this.chunks = Math.ceil(total / CHUNK); this.have = new Uint8Array(this.chunks);
+    if (!(await this.grant())) return false;
+    this.starting = true;
     try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
-      this.fd = fs.openSync(this.file, 'w+');
-      fs.ftruncateSync(this.fd, total);
-    } catch (e) {
-      up.destroy();
-      if (this.fd != null) { try { fs.closeSync(this.fd); } catch {} this.fd = null; }
-      try { fs.unlinkSync(this.file); } catch {}
-      return false;
-    }
-    this.attach(up, from);
-    return true;
+      from = Math.floor(from / CHUNK) * CHUNK;
+      const up = await get(this.o.u, { headers: { ...this.headers(), Range: `bytes=${from}-` }, proxy: this.o.p || '' });
+      const ct = up.headers['content-type'] || '';
+      let total = 0;
+      if (up.statusCode === 206) { const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || ''); total = m ? Number(m[1]) : 0; }
+      else if (up.statusCode === 200) { total = Number(up.headers['content-length']) || 0; this.ranges = false; if (from) from = 0; }
+      if (up.statusCode >= 400 || !total || /mpegurl|text\/|json|html/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl || '')) { up.destroy(); return false; }
+      if (!makeRoom(total, this)) { up.destroy(); return false; }
+      this.size = total; this.type = ct || 'application/octet-stream';
+      this.chunks = Math.ceil(total / CHUNK); this.have = new Uint8Array(this.chunks);
+      try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (e) { up.destroy(); return false; }
+      this.attach(up, from);
+      return true;
+    } finally { this.starting = false; kick(); }
   }
-  /** Writes one provider answer into the file from `from` onwards. */
+  /** Writes one provider answer into the film from `from` onwards. */
   attach(up, from) {
     const r = { up, from, at: from, written: from, stop: false, t0: Date.now() };
     this.run = r;
@@ -376,9 +477,10 @@ class Whole {
       const pos = r.at;
       r.at += buf.length;
       up.pause();
-      writing = writing.then(() => new Promise((ok) => fs.write(this.fd, buf, 0, buf.length, pos, (err) => {
-        if (err) { this.fail(new Error('The relay’s disk is full or failing')); return ok(); }
+      writing = writing.then(() => this.writeAt(buf, pos).then(() => {
+        if (!this.have) return;
         r.written = pos + buf.length;
+        gotBy.set(this.acct, (gotBy.get(this.acct) || 0) + buf.length);
         // The MBs this write finished (runs start on an MB boundary, so every MB from `pos` on is this run's).
         for (let i = Math.floor(pos / CHUNK); i < this.chunks; i++) {
           if (Math.min((i + 1) * CHUNK, this.size) > r.written) break;
@@ -388,41 +490,53 @@ class Whole {
         this.wake();
         // Ran into a part that's already here (or the end): this run is done.
         const next = r.written / CHUNK;
-        if (r.last || r.written >= this.size || (this.ranges && r.written % CHUNK === 0 && this.have[next])) { this.endRun(r); return ok(); }
+        if (r.last || r.written >= this.size || (this.ranges && r.written % CHUNK === 0 && this.have[next])) { this.endRun(r); return; }
         if (!r.stop) up.resume();
-        ok();
-      })));
+      }, () => { this.fail(new Error('The relay’s disk is full or failing')); }));
     });
     up.on('end', () => writing.then(() => { if (this.run === r && !r.stop) this.endRun(r); }));
     up.on('error', () => writing.then(() => { if (this.run === r && !r.stop) { this.errors++; this.endRun(r, true); } }));
     up.on('close', () => writing.then(() => { if (this.run === r && !r.stop) { this.errors++; this.endRun(r, true); } }));
   }
+  stopRun() { if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } kick(); }
   endRun(r, broken) {
     r.stop = true; try { r.up.destroy(); } catch {}
     if (this.run === r) this.run = null;
-    if (this.haveCount >= this.chunks) return this.complete();
+    if (this.missingFrom(this.floor) < 0) return this.complete();
     if (broken && this.errors > 4) return this.fail(new Error('The provider keeps dropping the connection'));
-    setTimeout(() => this.next(), broken ? Math.min(5000, 500 * this.errors) : 0);
+    const later = broken ? Math.min(5000, 500 * this.errors) : 0;
+    this.retryAt = Date.now() + later;
+    setTimeout(() => this.next(), later);
+  }
+  /** The first MB not here at or after byte p (-1: none). */
+  missingFrom(p) {
+    if (!this.have) return -1;
+    for (let i = Math.floor(p / CHUNK); i < this.chunks; i++) if (!this.have[i]) return i;
+    return -1;
   }
   complete() {
+    if (!this.done) log(`whole ${this.key.slice(0, 8)}: all ${(this.size / 1e9).toFixed(2)} GB here in ${Math.round((Date.now() - this.started) / 1000)} s`);
     this.done = true; this.run = null;
-    log(`whole ${this.key.slice(0, 8)}: all ${(this.size / 1e9).toFixed(2)} GB here in ${Math.round((Date.now() - this.started) / 1000)} s`);
-    this.wake();
+    this.wake(); kick();
   }
-  fail(e) { this.failed = e; if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } this.wake(); }
-  /** The next gap to fill: after the furthest-behind reader first, then from the start. Nothing if nobody's reading. */
+  fail(e) { this.failed = e; if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } this.wake(); kick(); }
+  /** The next gap to fill: where a viewer is waiting, after the furthest-behind reader, then from the part still kept. */
   next() {
-    if (this.done || this.failed || this.run || !this.readers.size) return;
+    if (this.failed || this.run || !this.readers.size || !this.have) return;
+    if (!mayStart(this)) return kick();
+    if (this.wantAt >= 0 && !this.chunkHave(Math.floor(this.wantAt / CHUNK))) { const at = this.wantAt; this.wantAt = -1; return this.startAt(at); }
+    this.wantAt = -1;
     const behind = Math.min(...[...this.readers].map((x) => x.pos));
-    let i = Math.floor(behind / CHUNK);
-    while (i < this.chunks && this.have[i]) i++;
-    if (i >= this.chunks) { i = 0; while (i < this.chunks && this.have[i]) i++; }
-    if (i >= this.chunks) return this.complete();
+    let i = this.missingFrom(behind);
+    if (i < 0) i = this.missingFrom(Math.min(this.floor, behind));
+    if (i < 0) return this.complete();
+    this.done = false;
     this.startAt(i * CHUNK);
   }
   startAt(from) {
     if (!this.ranges) from = 0;
     if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
+    this.done = false;
     const r = { stop: false };
     this.run = { from, at: from, written: from, t0: Date.now(), up: { destroy() { r.stop = true; } } }; // a placeholder while connecting
     const ph = this.run;
@@ -433,14 +547,15 @@ class Whole {
       const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || '');
       const same = !/mpegurl|text\/|json|html/i.test(ct) && (up.statusCode === 206 ? m && Number(m[1]) === this.size : up.statusCode === 200 && Number(up.headers['content-length']) === this.size);
       if (!same) { up.destroy(); this.run = null; this.errors++; return this.endRun({ up: { destroy() {} }, stop: false }, true); }
-      // The provider ignored the range (it sends the whole file from the start): carry on that way.
+      // The provider ignored the range (it sends the whole film from the start): carry on that way.
       if (from && up.statusCode !== 206) { this.ranges = false; from = 0; }
       this.attach(up, from);
+      this.run.t0 = ph.t0;
     }, () => { if (this.run === ph) { this.run = null; this.errors++; this.endRun({ up: { destroy() {} }, stop: false }, true); } });
   }
   /** A reader needs byte p: if it isn't here and the download won't reach it soon, move the download there. */
   need(p) {
-    if (this.done || this.failed) return;
+    if (this.failed) return;
     const r = this.run;
     if (r && r.from <= p && p <= r.at + NEAR) return;
     if (!r && !this.readers.size) return;
@@ -449,24 +564,142 @@ class Whole {
     // end of an MP4): let it get going (a few MB or seconds) before moving it, so they don't keep cancelling each
     // other's download — each move is a new connection to the provider.
     if (r && (r.written - r.from < NEAR && Date.now() - (r.t0 || 0) < 4000) && [...this.readers].some((x) => x.pos >= r.from && x.pos <= r.at + NEAR)) return;
+    this.done = false;
+    // No connection of its own right now (another film of this account has it): the scheduler decides.
+    if (!r && !mayStart(this)) { this.wantAt = Math.floor(p / CHUNK) * CHUNK; return kick(); }
     this.startAt(Math.floor(p / CHUNK) * CHUNK);
   }
-  addReader(x) { this.readers.add(x); this.lastUse = Date.now(); clearTimeout(this.idleTimer); if (!this.run) this.next(); }
+  addReader(x) { this.readers.add(x); this.lastUse = Date.now(); clearTimeout(this.idleTimer); if (!this.run) this.next(); kick(); }
   dropReader(x) {
-    this.readers.delete(x); this.lastUse = Date.now();
+    if (!this.readers.delete(x)) return;
+    this.lastUse = Date.now();
+    kick();
     if (this.readers.size) return;
     clearTimeout(this.idleTimer);
     // Nobody watching for a while: stop downloading, so the provider connection is free again.
-    this.idleTimer = setTimeout(() => { if (!this.readers.size && this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } }, IDLE_STOP);
+    this.idleTimer = setTimeout(() => { if (!this.readers.size && this.run) this.stopRun(); }, IDLE_STOP);
   }
   remove() {
     clearTimeout(this.idleTimer);
     if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
-    if (this.fd != null) { try { fs.closeSync(this.fd); } catch {} this.fd = null; }
-    try { fs.unlinkSync(this.file); } catch {}
-    wholes.delete(this.key);
+    if (this.grantWait) { const g = this.grantWait; this.grantWait = null; g(false); }
+    for (const fd of this.fds.values()) { try { fs.closeSync(fd); } catch {} }
+    this.fds.clear();
+    const blocks = this.size ? Math.ceil(this.size / BLOCK) : 0;
+    for (let b = 0; b < blocks; b++) { try { fs.unlinkSync(this.blockFile(b)); } catch {} }
+    this.have = null;
+    if (wholes.get(this.key) === this) wholes.delete(this.key);
+    kick();
   }
-  status() { return { ids: [...this.ids], size: this.size, here: this.bytesHere(), done: this.done, downloading: !!this.run, readers: this.readers.size }; }
+  status() {
+    const a = this.ahead();
+    return { ids: [...this.ids], size: this.size, here: this.bytesHere(), done: this.done, downloading: !!this.run, readers: this.readers.size, ahead: a === Infinity ? -1 : Math.round(a), waiting: !this.run && this.wants() };
+  }
+}
+
+// ---------------------------------------------------------------- sharing an account's connections between films
+/** How many provider connections films of this account may use at once (0: as many as they need). */
+function budgetOf(a) { const b = a && budgets.get(a); return b ? b.n : 0; }
+const runningIn = (a, except) => { let n = 0; for (const w of wholes.values()) if (w !== except && w.acct === a && (w.run || w.starting)) n++; return n; };
+/** May this film open a provider connection now (it has none, and its account has one free)? */
+function mayStart(w) {
+  if (w.run || w.starting) return true;
+  const n = budgetOf(w.acct);
+  if (!n) return true;
+  if (w.parked) return false;
+  return runningIn(w.acct, w) < n;
+}
+let kicked = false;
+function kick() { if (kicked) return; kicked = true; setImmediate(() => { kicked = false; schedule(); }); }
+/** Hands this film the connection (its first, or another film's). */
+function resume(w) {
+  w.parked = false;
+  if (!w.grantWait && w.retryAt > Date.now()) return; // (the provider just dropped it: after a pause)
+  if (w.grantWait) { const g = w.grantWait; w.grantWait = null; w.starting = true; g(true); return; }
+  if (!w.run) w.next();
+}
+/**
+ * For every provider account with a limit: the films whose viewers have the least ready get the connections. A film
+ * that's running gives its connection up when another viewer is short of AHEAD seconds and it has more than that
+ * itself (or SWAP seconds more than them) — once it has had it for MIN_RUN, so connections don't flap. Films nobody is
+ * watching give theirs up first. Spare connections keep fetching ahead (all of a film, if there's time).
+ */
+function schedule() {
+  const now = Date.now();
+  const byAcct = new Map();
+  for (const w of wholes.values()) {
+    if (w.failed || w.bypass) continue;
+    // The "starting" film whose request is gone: nobody wants it any more.
+    if (w.grantWait && w.asking <= 0) { w.remove(); continue; }
+    (byAcct.get(w.acct) || byAcct.set(w.acct, []).get(w.acct)).push(w);
+  }
+  for (const [a, list] of byAcct) {
+    const n = budgetOf(a);
+    const st = list.map((w) => ({ w, ahead: w.ahead(), wants: w.wants() }));
+    if (!n) { for (const s of st) if (s.wants && !s.w.run && !s.w.starting) resume(s.w); noteStrain(a, st, 0, now); continue; }
+    let running = st.filter((s) => s.w.run || s.w.starting);
+    // Fewer connections than before (someone started watching live TV on this account): the ones with the most ready stop.
+    while (running.length > n) {
+      const v = running.filter((s) => !s.w.starting).sort((x, y) => y.ahead - x.ahead)[0];
+      if (!v) break;
+      v.w.parked = true; v.w.stopRun(); running = running.filter((s) => s !== v);
+    }
+    const waiting = st.filter((s) => s.wants && !s.w.run && !s.w.starting).sort((x, y) => x.ahead - y.ahead);
+    for (const c of waiting) {
+      if (running.length < n) { resume(c.w); running.push(c); continue; }
+      if (c.ahead >= AHEAD) break;
+      const v = running.filter((s) => s.w.run && !s.w.starting && (!s.w.readers.size || now - (s.w.run.t0 || 0) >= MIN_RUN)).sort((x, y) => y.ahead - x.ahead)[0];
+      if (!v || !(!v.w.readers.size || v.ahead >= AHEAD + 60 || v.ahead - c.ahead >= SWAP)) break;
+      v.w.parked = true; v.w.stopRun();
+      running = running.filter((s) => s !== v);
+      resume(c.w); running.push(c);
+    }
+    // (Everyone else may run when there's room.)
+    for (const s of st) if (s.w.parked && !s.wants) s.w.parked = false;
+    noteStrain(a, st, n, now);
+  }
+}
+setInterval(() => { schedule(); for (const w of wholes.values()) try { w.trim(); } catch {} }, Number(process.env.RELAY_TICK_MS) || 1000).unref();
+
+/**
+ * Struggling to keep up: the films being watched on an account need more than the provider is sending (over the last
+ * 20 s) while someone has less than half of AHEAD ready, or someone pressed play and has waited more than 5 s for a
+ * connection. (How long a viewer waits for the next bytes says little: the player has its own store of the film.)
+ * Noted at most once a minute per account, with the worst of it, for the server to show when it happened.
+ */
+const lastStrain = new Map();
+const gotBy = new Map();   // account → bytes fetched for its films so far
+const rateLog = new Map(); // account → [[time, bytes so far], …] (the last 20 s)
+function noteStrain(a, st, n, now) {
+  const hist = rateLog.get(a) || [];
+  hist.push([now, gotBy.get(a) || 0]);
+  while (hist.length > 2 && now - hist[1][0] >= 20000) hist.shift();
+  rateLog.set(a, hist);
+  const span = (now - hist[0][0]) / 1000;
+  const rate = span * 1000 >= Math.min(10000, SETTLED) ? (hist[hist.length - 1][1] - hist[0][1]) / span : Infinity;
+  let viewers = 0, stalled = 0, least = Infinity, need = 0;
+  for (const s of st) {
+    viewers += s.w.readers.size;
+    // Someone pressed play and is still waiting for the film to start, because the connections are all busy.
+    if (s.w.grantWait && s.w.asking > 0 && now - s.w.askedAt > 5000) { viewers++; stalled++; least = 0; }
+    let settled = false;
+    for (const x of s.w.readers) {
+      if (now - x.t0 < SETTLED) continue;
+      settled = true;
+      least = Math.min(least, s.w.aheadOf(x));
+    }
+    if (settled && s.ahead !== Infinity) need += s.w.bps();
+  }
+  const short = need > 0 && rate < need * 0.95 && least < AHEAD / 2;
+  const runs = st.filter((s) => s.w.run).length;
+  if (!stalled && !short) return;
+  const prev = lastStrain.get(a);
+  if (prev && now - prev.t < 60000) { prev.stalled = Math.max(prev.stalled, stalled); prev.viewers = Math.max(prev.viewers, viewers); prev.least = Math.min(prev.least, Math.round(least)); return; }
+  const e = { seq: ++strainSeq, t: now, a, viewers, films: st.filter((s) => s.w.readers.size).length, runs, budget: n, least: least === Infinity ? -1 : Math.round(least), stalled, need: Math.round(need), rate: rate === Infinity ? -1 : Math.round(rate) };
+  lastStrain.set(a, e);
+  strain.push(e);
+  if (strain.length > 500) strain.splice(0, strain.length - 500);
+  log(`can't keep up${a ? ' (account ' + a.slice(0, 6) + ')' : ''}: ${viewers} watching, ${runs}${n ? ' of ' + n : ''} connections, ${stalled} waiting to start${least < Infinity ? ', least ready ' + Math.round(least) + ' s' : ''}${need ? `, needs ${(need * 8 / 1e6).toFixed(1)} Mbit/s, getting ${rate === Infinity ? '?' : (rate * 8 / 1e6).toFixed(1)}` : ''}`);
 }
 
 function diskFree() { try { const s = fs.statfsSync(fs.existsSync(CACHE_DIR) ? CACHE_DIR : os.tmpdir()); return s.bavail * s.bsize; } catch { return 0; } }
@@ -478,8 +711,8 @@ function makeRoom(size, self) {
   const others = () => [...wholes.values()].filter((w) => w !== self && w.size);
   const room = () => {
     const o = others();
-    let r = diskFree() - KEEP_FREE - o.reduce((s, w) => s + (w.size - w.bytesHere()), 0);
-    if (CACHE_LIMIT) r = Math.min(r, CACHE_LIMIT - o.reduce((s, w) => s + w.size, 0));
+    let r = diskFree() - KEEP_FREE - o.reduce((s, w) => s + w.toFetch(), 0);
+    if (CACHE_LIMIT) r = Math.min(r, CACHE_LIMIT - o.reduce((s, w) => s + w.bytesHere() + w.toFetch(), 0));
     return r;
   };
   if (room() >= size) return true;
@@ -490,10 +723,18 @@ function makeRoom(size, self) {
 function stopUnwatched(activeIds) {
   for (const w of wholes.values()) {
     if (!w.run || w.readers.size || !w.ids.size) continue;
-    if (![...w.ids].some((i) => activeIds.has(i))) { w.run.stop = true; try { w.run.up.destroy(); } catch {} w.run = null; }
+    if (![...w.ids].some((i) => activeIds.has(i))) w.stopRun();
   }
 }
-setInterval(() => { for (const w of [...wholes.values()]) if (!w.readers.size && (Date.now() - w.lastUse > KEEP_FOR || (w.bypass && Date.now() - w.started > 10 * 60e3))) w.remove(); }, 10 * 60e3).unref();
+// A film is kept for at most twice its length (and never more than KEEP_FOR unused) once nobody is watching it.
+setInterval(() => {
+  const now = Date.now();
+  for (const w of [...wholes.values()]) {
+    if (w.readers.size || w.grantWait) continue;
+    const old = now - w.started > 2 * (w.len || GUESS_LEN) * 1000;
+    if (old || now - w.lastUse > KEEP_FOR || (w.bypass && now - w.started > 10 * 60e3)) w.remove();
+  }
+}, Number(process.env.RELAY_SWEEP_MS) || 60e3).unref();
 
 const drained = (res) => new Promise((ok) => { const done = () => { res.off('drain', done); res.off('close', done); ok(); }; res.on('drain', done); res.on('close', done); });
 
@@ -507,10 +748,18 @@ async function whole(req, res, o) {
   if (!w) {
     w = new Whole(key, o);
     wholes.set(key, w);
-    w.ready = w.begin(m && m[1] === '' ? 0 : a).catch(() => false).then((ok) => { if (!ok) w.bypass = true; return ok; });
+    w.ready = w.begin(m && m[1] === '' ? 0 : a).catch(() => false).then((ok) => { if (!ok && wholes.get(key) === w && !w.have) w.bypass = true; return ok; });
   }
   if (o.i) w.ids.add(String(o.i));
-  const ok = await w.ready;
+  if (Number(o.d) > 0 && !w.len) w.len = Number(o.d);
+  // (Waiting for a connection of its own: a viewer who gives up meanwhile no longer counts.)
+  w.asking++;
+  let gone = false;
+  const left = () => { if (!gone) { gone = true; w.asking--; kick(); } };
+  res.on('close', left);
+  let ok;
+  try { ok = await w.ready; } finally { left(); }
+  if (res.destroyed) return;
   if (!ok || w.bypass) return relay(req, res, o);
   const size = w.size;
   let b = size - 1;
@@ -523,23 +772,26 @@ async function whole(req, res, o) {
   if (m) head['Content-Range'] = `bytes ${a}-${b}/${size}`;
   res.writeHead(m ? 206 : 200, head);
   if (req.method === 'HEAD') return res.end();
-  const reader = { pos: a };
+  const reader = { pos: a, t0: Date.now(), waitSince: 0 };
   w.addReader(reader);
   res.on('close', () => w.dropReader(reader));
   try {
     let p = a;
     const buf = Buffer.allocUnsafe(CHUNK);
     while (p <= b && !res.destroyed) {
+      if (!w.have) throw new Error('gone');
       const end = Math.min(w.availEnd(p), b + 1);
       if (end > p) {
-        const n = Math.min(end - p, CHUNK);
-        const got = await new Promise((ok, no) => fs.read(w.fd, buf, 0, n, p, (err, k) => (err ? no(err) : ok(k))));
-        if (!got) throw new Error('read');
+        reader.waitSince = 0;
+        let got;
+        try { got = await w.readAt(buf, Math.min(end - p, CHUNK), p); } catch (e) { if (w.have && !w.chunkHave(Math.floor(p / CHUNK))) continue; throw e; }
+        if (!got) { if (w.have && !w.chunkHave(Math.floor(p / CHUNK))) continue; throw new Error('read'); }
         if (!res.write(Buffer.from(buf.subarray(0, got)))) await drained(res);
         p += got; reader.pos = p; w.lastUse = Date.now();
         continue;
       }
       if (w.failed) throw w.failed;
+      if (!reader.waitSince) reader.waitSince = Date.now();
       w.need(p);
       await w.wait(15000);
     }
@@ -593,14 +845,32 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(ok ? 200 : 403, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(ok ? { ok: true, version: VERSION, streams: active.size + films.filter((w) => w.run).length, films: films.length, update: true } : { ok: false, error: 'The secret doesn’t match' }));
   }
-  // The server asks which films are fully here (their provider connection is free again).
+  // The server asks which films are fully here (their provider connection is free again), says how many provider
+  // connections each account's films may use, and collects the times the relay couldn't keep up.
   if (path === '/downloads') {
     const q = new URL(req.url, 'http://x').searchParams;
     const playing = q.get('playing') || '';
     if (!signedQuery(req, 'downloads:' + playing)) { res.writeHead(403); return res.end(); }
     if (q.has('playing')) stopUnwatched(new Set(playing.split(',').filter(Boolean)));
+    const bq = q.get('budget');
+    if (bq !== null && q.get('bs') === sigOf('budget:' + bq + ':' + q.get('t'))) {
+      const now = Date.now();
+      for (const part of bq.split(',')) { const [acct, n] = part.split(':'); if (acct && /^\d+$/.test(n || '')) budgets.set(acct.slice(0, 40), { n: Math.min(64, Number(n)), at: now }); }
+      for (const [acct, v] of budgets) if (now - v.at > 10 * 60e3) budgets.delete(acct); // (no word for 10 minutes: no limit known)
+      kick();
+    }
+    const since = Number(q.get('since')) || 0;
+    const accts = {};
+    for (const w of wholes.values()) {
+      if (!w.size || w.bypass) continue;
+      const x = accts[w.acct] || (accts[w.acct] = { budget: budgetOf(w.acct), runs: 0, viewers: 0, films: 0, waiting: 0 });
+      if (w.run) x.runs++;
+      x.viewers += w.readers.size;
+      if (w.readers.size) x.films++;
+      if (!w.run && w.wants()) x.waiting++;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({ ok: true, films: [...wholes.values()].filter((w) => w.size && !w.bypass).map((w) => w.status()) }));
+    return res.end(JSON.stringify({ ok: true, version: VERSION, films: [...wholes.values()].filter((w) => w.size && !w.bypass).map((w) => w.status()), accounts: accts, strain: strain.filter((e) => e.seq > since), seq: strainSeq }));
   }
   if (path === '/update' && req.method === 'POST') { try { return await update(req, res); } catch { if (!res.headersSent) { res.writeHead(500); res.end(); } return; } }
   if (path === '/' || path === '/health') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('Stream relay ' + VERSION + '\n'); }
@@ -650,8 +920,8 @@ if (require.main === module) {
   // One bad connection must not stop everyone's streams: note it and carry on.
   process.on('uncaughtException', (e) => log('error: ' + ((e && e.stack) || e)));
   // Films left over from before a restart: their bookkeeping is gone, so start afresh.
-  try { for (const f of fs.readdirSync(CACHE_DIR)) if (/^[0-9a-f]{32}\.bin(\.\w+)?$/.test(f)) fs.unlinkSync(pathMod.join(CACHE_DIR, f)); } catch {}
+  try { for (const f of fs.readdirSync(CACHE_DIR)) if (/^[0-9a-f]{32}(\.\d+)?\.bin(\.\w+)?$/.test(f)) fs.unlinkSync(pathMod.join(CACHE_DIR, f)); } catch {}
   server.listen(PORT, () => log(`Stream relay ${VERSION} on port ${PORT} (whole films kept in ${CACHE_DIR}, ${(diskFree() / 1e9).toFixed(0)} GB free)`));
   if (PROXY_PORT) startProxy();
 }
-module.exports = { signPath, seal, open, rewrite, isPrivate, VERSION };
+module.exports = { signPath, seal, open, rewrite, isPrivate, VERSION, Whole, schedule, budgets };

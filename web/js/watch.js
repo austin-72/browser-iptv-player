@@ -326,6 +326,7 @@ V.initWatch = function () {
     else if ((k === 'ArrowDown' || k === 'ChannelDown' || k === 'PageDown') && live) V.zap(1);
     else if (k === 'ArrowUp') p.setVolume(p.video.volume + 0.05);
     else if (k === 'ArrowDown') p.setVolume(p.video.volume - 0.05);
+    else if (k === 'u' || k === 'U') p.hideControls();
     else if (k === 'Tab') { handled = false; p._wake(); }
     else if (k === 'x' && live) V.previousChannel();
     // Subtitle timing, as in VLC (on live TV G opens the guide, so Shift+G there).
@@ -607,7 +608,7 @@ V.keyHelp = function (inPlayer, live) { // inPlayer: true, false or 'all'
     row(['←', '→'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s (with Shift: 60 s)'),
     row(['J', 'L'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s'),
     row(['↑', '↓'], live ? 'Change channel' : 'Volume'),
-    row(['F'], 'Full screen'), row(['M'], 'Mute'), row(['P'], 'Picture-in-picture'),
+    row(['F'], 'Full screen'), row(['M'], 'Mute'), row(['P'], 'Picture-in-picture'), row(['U'], 'Hide the controls'),
     row(['C'], 'Subtitles on / off'), row(['A'], 'Next audio track'),
     row(live ? ['Shift+G', 'H'] : ['G', 'H'], 'Subtitles 0.1 s earlier / later'),
   ];

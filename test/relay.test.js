@@ -464,6 +464,7 @@ test('the real server: relay addresses for direct streams, per list, for other a
       const sealed = unseal(reach.url, secret);
       assert.strictEqual(sealed.w, 1);
       assert.strictEqual(sealed.i, require('../lib/streamrelay').playId(film.k, -1));
+      assert.strictEqual(sealed.a, require('../lib/streamrelay').acctId((list.list || list).id), 'its account (whose connections its films share)');
       assert.ok(!unseal((await api('POST', '/api/play/reach', { k: ch.k, origin: base })).body.url, secret).w, 'live channels aren’t fetched whole');
       assert.deepStrictEqual(Buffer.from(await (await fetch(reach.url)).arrayBuffer()), FILM);
       // The relay now has it all, and says so when the server asks.
@@ -524,4 +525,140 @@ test('a play whose film the relay already has doesn’t count towards the connec
   const use = listUsage(conns, { listOf: () => 'L', freed: (pl) => pl.k === 'f1' });
   assert.deepStrictEqual(use.get('L').map((c) => c.id), ['b', 'c']);
   assert.deepStrictEqual(listUsage(conns, { listOf: () => 'L' }).get('L').length, 3);
+});
+
+test('relay 5: films of one account share its connections (everyone kept ahead), watched parts deleted, old films go, struggling reported', { timeout: 90000 }, async () => {
+  const crypto = require('crypto');
+  const MB = 1048576;
+  const SIZE = 24 * MB;
+  const data = crypto.randomBytes(SIZE);
+  let open = 0, most = 0, refused = 0;
+  const speed = { '/a.mp4': 4 * MB, '/b.mp4': 4 * MB, '/t.mp4': 8 * MB, '/x.mp4': 8 * MB, '/s1.mp4': 200 * 1024, '/s2.mp4': 200 * 1024 }; // bytes a second
+  // A provider account that allows ONE connection at a time for a.mp4 and b.mp4 (a second one is refused).
+  const prov = http.createServer((req, res) => {
+    const limited = /^\/[ab]\.mp4/.test(req.url);
+    if (limited) { if (open >= 1) { refused++; res.writeHead(403, { 'content-type': 'text/plain' }); return res.end('too many connections'); } open++; most = Math.max(most, open); res.on('close', () => open--); }
+    const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const a = m ? +m[1] : 0;
+    res.writeHead(206, { 'content-type': 'video/mp4', 'content-length': SIZE - a, 'content-range': `bytes ${a}-${SIZE - 1}/${SIZE}`, 'accept-ranges': 'bytes' });
+    let p = a; const per = Math.max(1, Math.round((speed[req.url] || 4 * MB) / 20));
+    const step = () => { if (res.destroyed) return; if (p >= SIZE) return res.end(); const n = Math.min(per, SIZE - p); res.write(data.subarray(p, p + n)); p += n; setTimeout(step, 50); };
+    step();
+  });
+  await new Promise((ok) => prov.listen(0, '127.0.0.1', ok));
+  const P = prov.address().port;
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'relay5-'));
+  const relay = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_CACHE_DIR: cache, RELAY_BLOCK_MB: '1', RELAY_BACK_S: '2', RELAY_AHEAD_S: '4', RELAY_SWAP_S: '2', RELAY_MIN_RUN_MS: '500', RELAY_TICK_MS: '100', RELAY_SWEEP_MS: '300', RELAY_STRAIN_AFTER_MS: '1000' });
+  const film = (f, extra) => relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}${f}`, {}, 3600, { w: 1, i: f.slice(1, -4), ...extra });
+  const downloads = async (budget, since) => {
+    const t = String(Math.floor(Date.now() / 1000));
+    const sig = (x) => crypto.createHmac('sha256', SECRET).update(x + ':' + t).digest('base64url').slice(0, 32);
+    let q = `t=${t}&s=${sig('downloads:')}`;
+    if (budget !== undefined) q += `&budget=${encodeURIComponent(budget)}&bs=${sig('budget:' + budget)}`;
+    if (since !== undefined) q += `&since=${since}`;
+    return (await fetch(`${relay.base}/downloads?${q}`)).json();
+  };
+  // A pretend player: reads at `rate` bytes a second (from `from`), noting its longest wait for data.
+  const play = (u, rate, from, ms) => new Promise((ok) => {
+    const t0 = Date.now(); let got = 0, last = Date.now(), longest = 0, first = 0;
+    const req = http.get(u, { headers: { range: `bytes=${from}-` } }, (res) => {
+      const bufs = [];
+      res.on('data', (c) => {
+        const now = Date.now(); if (!first) first = now - t0;
+        longest = Math.max(longest, now - last); last = now;
+        bufs.push(c); got += c.length;
+        // Faster than playback: pause until "the picture" catches up.
+        const ahead = got / rate * 1000 - (now - t0);
+        if (ahead > 300) { res.pause(); setTimeout(() => { last = Date.now(); res.resume(); }, ahead - 200); }
+        if (now - t0 > ms) { req.destroy(); ok({ got, longest, first, buf: Buffer.concat(bufs) }); }
+      });
+      res.on('end', () => ok({ got, longest, first, buf: Buffer.concat(bufs) }));
+    });
+    req.on('error', () => {});
+  });
+  const blocks = (key) => fs.readdirSync(cache).filter((f) => f.startsWith(key + '.')).map((f) => +f.split('.')[1]).sort((x, y) => x - y);
+  try {
+    // The account allows one connection: the server says so. Two people start films (each 24 MB, 60 s long → 400 KB/s).
+    await downloads('acc1:1');
+    const A = play(film('/a.mp4', { a: 'acc1', d: 60 }), SIZE / 60, 0, 9000);
+    await wait(1500);
+    const B = play(film('/b.mp4', { a: 'acc1', d: 60 }), SIZE / 60, 0, 7000);
+    const [ra, rb] = await Promise.all([A, B]);
+    assert.strictEqual(most, 1, 'never more than the account’s one connection');
+    assert.strictEqual(refused, 0, 'never refused by the provider');
+    assert.ok(ra.buf.equals(data.subarray(0, ra.got)) && rb.buf.equals(data.subarray(0, rb.got)), 'every byte right');
+    assert.ok(rb.first < 4000, `the second film started in ${rb.first} ms (the first one had enough ready to spare the connection)`);
+    assert.ok(ra.got >= SIZE / 60 * 8 && rb.got >= SIZE / 60 * 6, `both kept playing (${(ra.got / MB).toFixed(1)} MB and ${(rb.got / MB).toFixed(1)} MB)`);
+    assert.ok(ra.longest < 2500 && rb.longest < 2500, `no long waits (${ra.longest} ms, ${rb.longest} ms)`);
+    let d = await downloads();
+    assert.strictEqual(d.version, '5');
+    assert.strictEqual(d.accounts.acc1.budget, 1);
+    assert.ok(!d.strain.some((e) => e.a === 'acc1'), 'it kept up: ' + JSON.stringify(d.strain));
+
+    // The part already watched is deleted (keeping 2 s back here, 10 minutes normally), the first and last pieces stay;
+    // seeking back fetches it again.
+    const key = crypto.createHash('sha256').update(`http://127.0.0.1:${P}/t.mp4`).digest('hex').slice(0, 32);
+    const T = film('/t.mp4', { d: 24 }); // 1 MB a second
+    const rt = await play(T, 3 * MB, 0, 5000);
+    assert.ok(rt.buf.equals(data.subarray(0, rt.got)));
+    const tail = play(T, 1 * MB, rt.got, 3000); // (still watching, further on)
+    await wait(1500);
+    const left = blocks(key);
+    assert.ok(left.includes(0), 'the first piece stays');
+    assert.ok(!left.includes(2) && !left.includes(3), 'watched pieces are gone: ' + left.join(','));
+    const back = await (await fetch(T, { headers: { Range: `bytes=${2 * MB}-${3 * MB - 1}` } })).arrayBuffer();
+    assert.ok(Buffer.from(back).equals(data.subarray(2 * MB, 3 * MB)), 'seeking back fetches it again');
+    await tail;
+
+    // A film is kept for at most twice its length once nobody watches it (x: 2 s long).
+    const X = film('/x.mp4', { d: 2 });
+    await (await fetch(X, { headers: { Range: 'bytes=0-99' } })).arrayBuffer();
+    assert.ok((await downloads()).films.some((f) => f.ids.includes('x')));
+    await wait(5500);
+    assert.ok(!(await downloads()).films.some((f) => f.ids.includes('x')), 'gone after twice its length');
+
+    // Too slow to keep up (each film 400 KB/s, the provider sends 200 KB/s, one connection between them): reported.
+    await downloads('acc2:1');
+    d = await downloads();
+    const before = d.seq;
+    const s1 = play(film('/s1.mp4', { a: 'acc2', d: 60 }), SIZE / 60, 0, 7000);
+    const s2 = play(film('/s2.mp4', { a: 'acc2', d: 60 }), SIZE / 60, 0, 7000);
+    await Promise.all([s1, s2]);
+    d = await downloads(undefined, before);
+    const ev = d.strain.filter((e) => e.a === 'acc2');
+    assert.ok(ev.length >= 1, 'it says it couldn’t keep up: ' + JSON.stringify(d.strain));
+    assert.ok(ev[0].viewers >= 1 && ev[0].budget === 1 && ev[0].t > 0);
+    assert.ok(!d.strain.some((e) => e.seq <= before), 'only what’s new');
+  } finally { relay.p.kill(); prov.close(); }
+});
+
+test('relay 5 on the server: films it shares connections for count once; budgets and struggling reach the relay and Statistics', async () => {
+  const { listUsage } = require('../lib/usage');
+  const conns = [{ id: 'a', playing: { k: 'f1' } }, { id: 'b', playing: { k: 'live1' } }, { id: 'c', playing: { k: 'f2' } }, { id: 'd', playing: { k: 'f3' } }];
+  const use = listUsage(conns, { listOf: () => 'L', freed: (pl) => pl.k === 'f3', pooled: (pl) => /^f/.test(pl.k) });
+  const L = use.get('L');
+  assert.deepStrictEqual(L.map((c) => c.id), ['a', 'b'], 'f1 and f2 together once, f3 not at all (the relay has it)');
+  assert.ok(L[0].relayShared);
+  assert.deepStrictEqual(L[0].viewers, ['a', 'c']);
+  // The relay is told each account's share, signed, and answers with what it couldn't do.
+  const crypto = require('crypto');
+  const { relayDownloads, acctId } = require('../lib/streamrelay');
+  let asked = '';
+  const fake = async (u) => { asked = u; return { ok: true, json: async () => ({ ok: true, version: '5', films: [], accounts: { [acctId('L')]: { runs: 2 } }, strain: [{ seq: 4, t: 1, a: acctId('L'), viewers: 3 }], seq: 4 }) }; };
+  const j = await relayDownloads('https://relay.example', SECRET, ['x'], fake, { budget: { [acctId('L')]: 2 }, since: 3, full: true });
+  const q = new URL(asked).searchParams;
+  assert.strictEqual(q.get('budget'), acctId('L') + ':2');
+  assert.strictEqual(q.get('bs'), crypto.createHmac('sha256', SECRET).update('budget:' + q.get('budget') + ':' + q.get('t')).digest('base64url').slice(0, 32));
+  assert.strictEqual(q.get('since'), '3');
+  assert.strictEqual(j.strain[0].viewers, 3);
+  assert.deepStrictEqual(await relayDownloads('https://relay.example', SECRET, [], fake), [], 'the old answer when not asked for more');
+  // Statistics keep the times it couldn't keep up.
+  const { Concurrency } = require('../lib/concurrency');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conc-strain-'));
+  const cc = new Concurrency(dir, { usage: () => new Map([['L', [{ id: 'a' }]]]), lists: () => [{ id: 'L', name: 'Main' }], limitOf: () => 2, extra: () => 1 }, { every: 0 });
+  assert.deepStrictEqual(cc.sample(), { L: 2 }, 'the relay’s extra connection counts');
+  cc.relayStrain('L', { t: Date.now(), viewers: 3, films: 2, runs: 2, budget: 2, least: 12, need: 1e6, rate: 5e5 });
+  const r = cc.report(7);
+  assert.strictEqual(r.strain.length, 1);
+  assert.strictEqual(r.strain[0].name, 'Main');
+  assert.strictEqual(r.providers[0].strain, 1);
 });

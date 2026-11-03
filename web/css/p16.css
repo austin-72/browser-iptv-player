@@ -1,0 +1,70 @@
+/* The player: no page scrollbar behind it; "Hide the controls"; the settings as a big panel with a picture for each
+   setting (player.js). */
+
+/* ---- no scrollbar behind the player (the page underneath keeps its place) */
+body.watching { overflow: hidden; }
+.vp:fullscreen { overflow: hidden; }
+.vp:-webkit-full-screen { overflow: hidden; }
+
+/* ---- "Hide the controls": only where there's a mouse (a tap on the picture does it on touch screens) */
+@media (hover: none) { .vp-ctrl [data-a=hidectl] { display: none; } }
+
+/* ---- the settings panel */
+.vp-menu.big { left: 50%; right: auto; top: auto; bottom: 5.5rem; transform: translateX(-50%); width: min(30rem, calc(100% - 32px)); min-width: 0; max-width: none; max-height: calc(100% - 7.5rem); padding: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 18px; border: 1px solid rgba(255,255,255,.12); background: rgba(16,18,24,.96); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 24px 80px rgba(0,0,0,.6); font-size: clamp(1rem, .9vw + .4rem, 1.35rem); }
+.vp-menu.big[hidden] { display: none; }
+.vp-menu.big.wide { width: min(88%, 84em); }
+.vp-menu.big.radio { width: min(36em, calc(100% - 32px)); }
+
+.vp-menu.big .mh { display: flex; align-items: center; gap: .6rem; position: relative; margin: 0; padding: .65em .65em .6em 1.1em; background: none; border-bottom: 1px solid rgba(255,255,255,.1); flex: none; }
+.vp-menu.big .mh-t { flex: 1; min-width: 0; display: flex; align-items: center; gap: .55rem; font-weight: 800; font-size: 1.1em; color: #fff; }
+.vp-menu.big .mh-ic { display: inline-flex; color: var(--accent); }
+.vp-menu.big .mh-ic .i { width: 1.3em; height: 1.3em; }
+.vp-menu.big .mh-x, .vp-menu.big .mh .mi.back { width: 2.5em; height: 2.5em; min-height: 0; padding: 0; margin: 0; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.08); color: #fff; cursor: pointer; }
+.vp-menu.big .mh .mi.back { margin-left: -.45em; }
+.vp-menu.big .mh-x:hover, .vp-menu.big .mh-x:focus-visible, .vp-menu.big .mh .mi.back:hover, .vp-menu.big .mh .mi.back:focus { background: rgba(255,255,255,.22); outline: none; }
+
+.vp-menu.big .mb { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: .55em .7em .8em; scrollbar-width: thin; }
+.vp-menu.big .mb.cols { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 0 1.2em; padding: .4em 1.1em 1.1em; }
+.vp-menu.big .mcol { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vp-menu.big .mg { padding: .7em .6em .4em; font-size: .72em; }
+.vp-menu.big .mi + .mi { border-top: 0; }
+
+/* a setting: its picture, its name, what it's set to */
+.vp-menu.big .mi.tile { gap: .7em; min-height: 0; padding: .45em .6em; border-radius: .65em; font-size: inherit; }
+.mi .mic { width: 2.3em; height: 2.3em; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: .6em; background: rgba(255,255,255,.08); color: #fff; transition: background .12s; }
+.mi .mic .i { width: 1.25em; height: 1.25em; }
+.mi.tile:focus .mic { background: var(--accent); color: #fff; }
+@media (hover: hover) { .mi.tile:hover .mic { background: var(--accent); color: #fff; } }
+.mi .mtx { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.vp-menu.big .mi .mtx .ml { font-weight: 600; font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vp-menu.big .mi .mtx .mv { font-size: .8em; max-width: none; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi .mnx { width: 1em; height: 1em; opacity: .45; }
+
+/* a setting's choices: side by side */
+.vp-menu.big .mb.opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5em, 1fr)); gap: .45em; padding: .8em; }
+.vp-menu.big .mi.opt { min-height: 2.9em; padding: .55em .7em; border-radius: .65em; border: 1px solid rgba(255,255,255,.12); font-size: .95em; }
+.vp-menu.big .mi.opt .ml { font-weight: 600; }
+.vp-menu.big .mi.opt.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.vp-menu.big .mb.list .mi.tile { padding: .5em .6em; }
+
+/* TV: the highlighted setting is white */
+.tv .vp-menu.big .mi.tile:focus .mic { background: rgba(0,0,0,.1); color: #000; }
+.tv .vp-menu.big .mi:focus .mtx .mv, .tv .vp-menu.big .mi:focus .mv { color: #333; }
+
+/* phones: a sheet from the bottom, the settings two to a row */
+@media (max-width: 700px), (pointer: coarse) and (max-height: 520px) {
+  .vp-menu.big, .vp-menu.big.wide, .vp-menu.big.radio { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; max-height: min(94%, 48rem); border-radius: 18px 18px 0 0; border-width: 1px 0 0; padding: 0 0 env(safe-area-inset-bottom); background: #16181f; box-shadow: 0 -10px 40px rgba(0,0,0,.5); font-size: .92rem; }
+  .vp-menu.big .mh { padding: 16px 8px 8px 16px; }
+  .vp-menu.big .mb.cols { display: block; padding: .2rem .5rem .8rem; }
+  .vp-menu.big .mcol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .vp-menu.big .mcol .mg { grid-column: 1 / -1; }
+  .vp-menu.big .mi.tile { min-height: 0; padding: .45em; gap: .55em; background: rgba(255,255,255,.04); }
+  .vp-menu.big .mg { padding: .6em .4em .3em; }
+  .vp-menu.big .mb.list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .vp-menu.big .mi .mnx { display: none; }
+  .vp-menu.big .mb.opts { grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); }
+}
+@media (max-width: 359px) { .vp-menu.big .mcol, .vp-menu.big .mb.list { grid-template-columns: 1fr; } }
+@media (max-height: 520px) and (orientation: landscape) {
+  .vp-menu.big, .vp-menu.big.wide, .vp-menu.big.radio { left: auto; right: 0; width: min(30rem, 100%); max-height: 92%; border-radius: 18px 0 0 0; }
+}

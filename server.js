@@ -53,7 +53,7 @@ const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
-const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId } = require('./lib/streamrelay');
+const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId, acctId } = require('./lib/streamrelay');
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
@@ -910,7 +910,7 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
     const finite = it.t === 'movie' || it.t === 'episode' || it.t === 'catchup' || !!(info && info.finite);
     // Films and episodes (one file, not HLS): the relay fetches them whole onto its disk and plays them from there, so
     // seeking is instant and the provider connection is free again once it's all there (see relayFinished below).
-    const whole = (it.t === 'movie' || it.t === 'episode') && kind !== 'hls' ? { whole: true, k: it.k, alt } : null;
+    const whole = (it.t === 'movie' || it.t === 'episode') && kind !== 'hls' ? { whole: true, k: it.k, alt, list: srcList(it, alt), len: it.d || 0 } : null;
     const out = { kind, finite, mse: true, url: relayOf.wrap(raw, headers, whole), blocked: '', split: false, splitUrl: '', relay: true, alt: null };
     // Xtream live channels in MPEG-TS are also served as HLS (better on phones and TVs): that through the relay too.
     const xh = it.t === 'live' && kind === 'ts' ? xtreamHls(raw) : '';
@@ -935,53 +935,98 @@ const dvrHooks = { dvrConns: null, dvrItem: null, dvrOwnerOk: null };
 function listUsage() {
   // (Recordings running now hold a provider connection too.)
   const conns = dvrHooks.dvrConns ? [...hub.conns, ...dvrHooks.dvrConns()] : hub.conns;
-  return usageOf(conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed });
+  return usageOf(conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed, pooled: relayFinished.pooled });
 }
 // Connections in use per provider, every minute (Admin → Statistics → Watching at once).
 const concurrency = new Concurrency(D, {
   usage: () => listUsage(),
   lists: () => lists.all().filter((l) => l.type !== 'folder').map((l) => ({ id: l.id, name: l.name })),
   limitOf: (id) => { const l = lists.store.data.lists.find((x) => x.id === id); const m = measuredLimit(l, 'live'); if (m !== null) return m; const n = parseInt(l && l.account && l.account.maxConnections, 10); return n > 0 ? n : 0; },
+  extra: (id) => relayFinished.extra(id),
 });
 /**
- * Films and episodes the stream relay already has whole on its disk: their viewers no longer use a provider connection,
- * so those don't count towards the list's limit. Every 10 s while anything plays through the relay, the server asks the
- * relay which are finished — and tells it what's still being played, so it stops fetching films nobody watches.
+ * Films and episodes through the stream relay. Every 10 s (5 s while any play) the server asks the relay which it has
+ * whole on its disk — their viewers no longer use a provider connection, so those don't count towards the list's limit
+ * — and tells it what's still being played, so it stops fetching films nobody watches.
+ *
+ * A relay 5 also shares each provider account's connections between the films of that account: the server tells it
+ * how many it may use (the account's limit, less what everyone else is watching from it — at least one), and the relay
+ * switches between the films so that every viewer has 10 minutes ready. Together those films then count as one
+ * connection here (lib/usage.js), so another film of the same account can start instead of being "busy". The times the
+ * relay couldn't keep up are kept for Admin → Statistics.
  */
 const relayFinished = (() => {
-  let done = new Set(), busy = false, downloading = false;
+  let done = new Set(), busy = false, downloading = false, v5 = false, seq = 0, runs = new Map(), timer = null;
+  const isFilm = (pl) => {
+    if (!pl || !pl.k) return null;
+    const it = catalog.get(pl.k);
+    const alt = Number.isInteger(pl.alt) ? pl.alt : -1;
+    return it && (it.t === 'movie' || it.t === 'episode') && relayOf.uses(srcList(it, alt)) ? { it, alt } : null;
+  };
   const playingIds = () => {
     const ids = new Set();
-    const add = (pl) => {
-      if (!pl || !pl.k) return;
-      const it = catalog.get(pl.k);
-      const alt = Number.isInteger(pl.alt) ? pl.alt : -1;
-      if (it && (it.t === 'movie' || it.t === 'episode') && relayOf.uses(srcList(it, alt))) ids.add(playId(pl.k, alt));
-    };
+    const add = (pl) => { const f = isFilm(pl); if (f) ids.add(playId(pl.k, f.alt)); };
     for (const c of hub.conns) { add(c.playing); for (const t of c.multi || []) add(t); }
     return ids;
   };
+  /** The connections each list's films may share: its limit less everyone else watching from it (at least 1). */
+  const budgets = () => {
+    const out = {};
+    let use = null;
+    for (const l of lists.all()) {
+      if (l.type === 'folder' || !relayOf.uses(l.id)) continue;
+      const ms = [measuredLimit(l, 'movie'), measuredLimit(l, 'episode')].filter((x) => x !== null);
+      const lim = ms.length ? (ms.includes(0) ? Math.max(...ms) : Math.min(...ms)) : (parseInt(l.account && l.account.maxConnections, 10) || 0);
+      if (!(lim > 0)) continue;
+      if (!use) use = listUsage();
+      const others = (use.get(l.id) || []).filter((c) => !c.relayShared).length;
+      out[acctId(l.id)] = Math.max(1, lim - others);
+    }
+    return out;
+  };
   const poll = async () => {
     const r = relayOf.conf();
-    if (busy || !r) { if (!r) done = new Set(); return; }
+    if (busy || !r) { if (!r) { done = new Set(); runs = new Map(); } return; }
     const ids = playingIds();
-    if (!ids.size && !downloading) { done = new Set(); return; }
+    if (!ids.size && !downloading) { done = new Set(); runs = new Map(); return; }
     busy = true;
     try {
-      const films = await relayDownloads(r.url, r.secret, [...ids], fetch);
-      if (!films) return;
+      const j = await relayDownloads(r.url, r.secret, [...ids], fetch, { budget: budgets(), since: seq, full: true });
+      if (!j) return;
       const next = new Set();
-      for (const f of films) if (f.done) for (const i of f.ids || []) next.add(i);
+      for (const f of j.films) if (f.done) for (const i of f.ids || []) next.add(i);
       done = next;
-      downloading = films.some((f) => f.downloading);
+      downloading = j.films.some((f) => f.downloading);
+      v5 = Number(j.version) >= 5;
+      // Which list each account id is (the relay only knows the ids).
+      const byAcct = new Map(lists.all().map((l) => [acctId(l.id), l.id]));
+      runs = new Map();
+      for (const [a, x] of Object.entries(j.accounts || {})) if (byAcct.has(a)) runs.set(byAcct.get(a), Number(x.runs) || 0);
+      for (const e of j.strain) {
+        if (e.seq <= seq) continue;
+        const lid = byAcct.get(e.a) || '';
+        concurrency.relayStrain(lid, e);
+        log(`The stream relay couldn’t keep up${lid ? ' with ' + ((lists.all().find((l) => l.id === lid) || {}).name || 'a list') : ''}: ${e.viewers} watching, ${e.runs}${e.budget ? ' of ' + e.budget : ''} connections.`);
+      }
+      seq = Math.max(seq, j.seq || 0);
     } finally { busy = false; }
   };
-  setInterval(() => { poll().catch(() => {}); }, 10000).unref();
+  const tick = () => { timer = setTimeout(() => { poll().catch(() => {}).finally(tick); }, playingIds().size ? 5000 : 10000); timer.unref(); };
+  tick();
+  let poked = null;
   return {
     freed: (pl) => {
       if (!done.size || !pl || !pl.k) return false;
       return done.has(playId(pl.k, Number.isInteger(pl.alt) ? pl.alt : -1));
     },
+    /** A film the relay 5 fetches whole (it shares the account's connections with the others). */
+    pooled: (pl) => v5 && !!isFilm(pl),
+    /** Whether a new film from this list would join the relay's shared connections. */
+    joins: (it, alt) => v5 && (it.t === 'movie' || it.t === 'episode') && relayOf.uses(srcList(it, alt)),
+    /** Connections the relay uses for a list beyond the one its films count as. */
+    extra: (listId) => Math.max(0, (runs.get(listId) || 0) - 1),
+    /** Something started or stopped: tell the relay soon (a live channel on the same account takes a connection). */
+    poke: () => { if (poked || !relayOf.conf()) return; poked = setTimeout(() => { poked = null; poll().catch(() => {}); }, 3000); poked.unref(); },
   };
 })();
 /** Filled in by feature modules (lib/routes-p2.js): watch-party connection sharing. */
@@ -1061,7 +1106,8 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
     const l = lid && lists.all().find((x) => x.id === lid);
     const url = alt >= 0 ? it.alts[alt].u : it.u;
     const limit = connLimit(it, alt);
-    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn && !c.tile)); // (this device's multiview tiles do count)
+    const joins = relayFinished.joins(it, alt); // (a film the relay shares connections for: the others don't hold it up)
+    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn && !c.tile) && !(joins && c.relayShared)); // (this device's multiview tiles do count)
     let busy = limit > 0 && users.length >= limit;
     const who = (c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, k: c.playing.k, tile: !!c.tile, mine: c.pid === prof.id, priority: isPri(c) });
     let bump = [], locked = false;
@@ -1375,6 +1421,7 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   if (c && c.pid === prof.id) {
     const was = c.playing;
     c.playing = b.playing && b.playing.k ? { k: String(b.playing.k), pos: Number(b.playing.pos) || 0, at: was && was.k === String(b.playing.k) ? was.at : Date.now(), n: String(b.playing.n || '').slice(0, 200), alt: Number.isInteger(b.playing.alt) ? b.playing.alt : -1, hidden: !!b.playing.hidden } : null;
+    if ((was && was.k) !== (c.playing && c.playing.k)) relayFinished.poke(); // (what plays changed: the relay's share of the account may too)
     // Multiview: every tile uses a provider connection of its own.
     if ('multi' in b) {
       const old = new Map((c.multi || []).map((t) => [t.k, t.at]));

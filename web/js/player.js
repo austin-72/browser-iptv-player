@@ -112,6 +112,7 @@ V.Player = function (host) {
     '    <button class="pbtn" data-a="cc" aria-label="Subtitles and audio" title="Subtitles and audio">' + V.icon('cc') + '</button>' +
     '    <button class="pbtn" data-a="bookmark" aria-label="Bookmark this moment" title="Bookmark">' + V.icon('bookmark') + '</button>' +
     '    <button class="pbtn" data-a="gear" aria-label="Playback settings" title="Settings">' + V.icon('gear') + '</button>' +
+    '    <button class="pbtn" data-a="hidectl" aria-label="Hide the controls" title="Hide the controls (U) · move the mouse to bring them back">' + V.icon('eyeoff') + '</button>' +
     '    <button class="pbtn" data-a="pip" aria-label="Picture in picture" title="Picture in picture">' + V.icon('pip') + '</button>' +
     '    <button class="pbtn" data-a="fs" aria-label="Full screen" title="Full screen">' + V.icon('fs') + '</button>' +
     '  </div>' +
@@ -1564,7 +1565,21 @@ PP._menuPages = function (kind) {
   return pages;
 };
 
-var MENU_GROUP = { Quality: 0, Speed: 0, Source: 0, 'Sleep timer': 0, 'Sound only': 0, Reload: 0, 'Autoplay next episode': 0, Picture: 1, Zoom: 1, 'Brightness & colour': 1, 'Volume boost': 2, 'Clear dialogue': 2, 'Night mode': 2, 'Audio sync': 2 };
+var MENU_GROUP = { Quality: 0, Speed: 0, Source: 0, 'Sleep timer': 0, 'Sound only': 0, Reload: 0, 'Autoplay next episode': 0, Picture: 1, Zoom: 1, 'Brightness & colour': 1, 'Mark intro / credits': 1, Screenshot: 1, 'Volume boost': 2, 'Clear dialogue': 2, 'Night mode': 2, 'Audio sync': 2 };
+// A small picture for each setting, so it's quick to see what's what.
+var MENU_ICON = {
+  Quality: 'hd', Speed: 'gauge', Source: 'server', 'Sleep timer': 'timer', 'Sound only': 'headphones', Reload: 'refresh', 'Autoplay next episode': 'skipnext',
+  Picture: 'aspect', Zoom: 'zoom', 'Brightness & colour': 'sun', Brightness: 'sun', Contrast: 'contrast', Colour: 'palette', Reset: 'restart',
+  'Volume boost': 'vol', 'Clear dialogue': 'mic', 'Night mode': 'moon', 'Audio sync': 'sync',
+  'Mark intro / credits': 'pin', Screenshot: 'camera', 'Stream info': 'info', 'Your queue': 'playlist', 'Report a problem': 'help', 'Open in another app': 'openapp',
+  'Control from your phone': 'remote', 'Add to multiview': 'multi',
+  Subtitles: 'cc', Audio: 'globe', 'Subtitle style': 'edit', 'Find subtitles…': 'search', 'Subtitle timing': 'sync',
+};
+var menuIcon = function (it) { return it.icon || MENU_ICON[it.label] || (/record/i.test(it.label) ? 'rec' : /open/i.test(it.label) ? 'openapp' : 'sliders'); };
+/* The settings: a big panel over the picture (above the buttons), its settings in four columns — Playback, Picture,
+   Sound, More — each with a picture, its name and what it's set to, so it all fits without scrolling. A setting's
+   choices open in the same panel. The gear (or the close button, Back, or a click outside) closes it again. On
+   phones it's a sheet from the bottom (p12.css, p16.css). */
 PP._openMenu = function (page, kind) {
   var m = V.$('.vp-menu', this.host);
   kind = kind || this._menuKind || 'gear';
@@ -1573,29 +1588,36 @@ PP._openMenu = function (page, kind) {
   var items = pages[page] || pages.main;
   // The same page drawn again (a step in a setting, new tracks): keep the highlighted line where it was.
   var keep = (page || 'main') === this._menuPage && !m.hidden && document.activeElement && m.contains(document.activeElement) ? document.activeElement.getAttribute('data-i') : null;
+  var scrollWas = keep !== null && V.$('.mb', m) ? V.$('.mb', m).scrollTop : 0;
   this._menuPage = page || 'main';
   m.hidden = false;
   var parent = this._menuPage.indexOf('adj-') === 0 ? 'adjust' : 'main';
-  var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '">' + V.icon('back') + '<span>Back</span></button>' : '';
   var radio = this._menuPage !== 'main' && this._menuPage !== 'adjust';
-  // (On phones the menu is a sheet from the bottom, with a title and a close button: player.css / p12.css.)
   var from = (pages[parent] || pages.main || []).filter(function (x) { return x.page === page; })[0];
   var title = this._menuPage === 'main' ? (kind === 'cc' ? 'Subtitles & audio' : 'Settings') : from ? from.label : 'Settings';
-  var head = '<div class="mh"><span class="mh-t">' + V.esc(title) + '</span><button class="mh-x" data-close aria-label="Close">' + V.icon('x') + '</button></div>';
+  var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '" aria-label="Back">' + V.icon('back') + '</button>' : '';
+  var head = '<div class="mh">' + back + '<span class="mh-t">' + (from && radio ? '<span class="mh-ic">' + V.icon(menuIcon(from)) + '</span>' : '') + V.esc(title) + '</span>' +
+    '<button class="mh-x" data-close aria-label="Close" title="Close">' + V.icon('x') + '</button></div>';
   var row = function (it, i) {
-    return '<button class="mi" data-i="' + i + '" role="' + (radio ? 'menuitemradio' : 'menuitem') + '"' + (radio ? ' aria-checked="' + !!it.on + '"' : '') + '>' + (radio ? '<span class="dot">' + (it.on ? V.icon('check') : '') + '</span>' : '') + '<span class="ml">' + V.esc(it.label) + '</span>' + (it.value !== undefined && it.value !== '' ? '<span class="mv">' + V.esc(it.value) + '</span>' : '') + (it.page ? V.icon('next') : '') + '</button>';
+    if (radio) return '<button class="mi opt' + (it.on ? ' on' : '') + '" data-i="' + i + '" role="menuitemradio" aria-checked="' + !!it.on + '"><span class="dot">' + (it.on ? V.icon('check') : '') + '</span><span class="ml">' + V.esc(it.label) + '</span>' + (it.value ? '<span class="mv">' + V.esc(it.value) + '</span>' : '') + '</button>';
+    var val = it.value !== undefined && it.value !== '' ? '<span class="mv">' + V.esc(it.value) + '</span>' : '';
+    return '<button class="mi tile" data-i="' + i + '" role="menuitem"><span class="mic">' + V.icon(menuIcon(it)) + '</span><span class="mtx"><span class="ml">' + V.esc(it.label) + '</span>' + val + '</span>' + (it.page ? V.icon('next', 'mnx') : '') + '</button>';
   };
-  var body;
+  var body, wide = false;
   if (this._menuPage === 'main' && kind !== 'cc' && items.length > 7) {
-    // The long settings list in sections (Playback, Picture, Sound, More), so it's quicker to find things.
+    // In sections (Playback, Picture, Sound, More), side by side.
     var groups = [['Playback', []], ['Picture', []], ['Sound', []], ['More', []]];
     items.forEach(function (it, i) {
       var g = MENU_GROUP[it.label] !== undefined ? MENU_GROUP[it.label] : /record/i.test(it.label) ? 0 : 3;
       groups[g][1].push(row(it, i));
     });
-    body = groups.filter(function (g) { return g[1].length; }).map(function (g) { return '<div class="mg" role="presentation">' + g[0] + '</div>' + g[1].join(''); }).join('');
-  } else body = items.map(row).join('');
-  m.innerHTML = head + back + body;
+    groups = groups.filter(function (g) { return g[1].length; });
+    wide = true;
+    body = '<div class="mb cols" style="--cols:' + groups.length + '">' + groups.map(function (g) { return '<div class="mcol" role="group" aria-label="' + g[0] + '"><div class="mg" role="presentation">' + g[0] + '</div>' + g[1].join('') + '</div>'; }).join('') + '</div>';
+  } else body = '<div class="mb' + (radio ? ' opts' + (items.length > 6 ? ' many' : '') : ' list') + '">' + items.map(row).join('') + '</div>';
+  m.className = 'vp-menu big' + (wide ? ' wide' : '') + (radio ? ' radio' : '');
+  m.setAttribute('aria-label', title);
+  m.innerHTML = head + body;
   var self = this;
   m.onclick = function (e) {
     e.stopPropagation();
@@ -1609,11 +1631,13 @@ PP._openMenu = function (page, kind) {
     it.fn();
     if (self._menuPage === 'main') self._closeMenu(); else self._openMenu(it.back || parent);
   };
-  var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mi', m);
+  var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mb .mi', m);
   // (Not on touch screens: there the highlight just looks like a stuck tap. Remotes and keyboards still get it.)
   var touch = !V.tvMode && window.matchMedia && matchMedia('(hover: none)').matches;
-  if (first && (!touch || keep !== null)) first.focus();
-  if (!keep) m.scrollTop = 0;
+  if (first && (!touch || keep !== null)) first.focus({ preventScroll: true });
+  var mb = V.$('.mb', m);
+  if (mb) mb.scrollTop = scrollWas;
+  m.scrollTop = 0;
 };
 PP._menuRefresh = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) this._openMenu(this._menuPage); this._ccButton(); };
 PP._closeMenu = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) { m.hidden = true; var b = V.$('[data-a=' + (this._menuKind === 'cc' ? 'cc' : 'gear') + ']', this.host); if (b && this.el.contains(document.activeElement)) b.focus(); } };
@@ -1781,6 +1805,9 @@ PP._bind = function () {
   var h = this.host, self = this;
   h.addEventListener('click', function (e) {
     var b = e.target.closest('[data-a]');
+    // The settings panel is open: a click anywhere else closes it (and does nothing else).
+    var menu = V.$('.vp-menu', h);
+    if (!menu.hidden && !(b && (b.dataset.a === 'gear' || b.dataset.a === 'cc'))) { self._closeMenu(); if (!b) return; }
     if (!b) {
       if ((e.target === self.video || e.target.closest('.vp-art') || e.target === self.el) && self.started && !self._swiped) {
         if (V.device.touch && !self._recentWake) { self._wake(); return; }
@@ -1800,6 +1827,7 @@ PP._bind = function () {
     else if (a === 'pip') self.togglePip();
     else if (a === 'golive') self.goLive();
     else if (a === 'stats-x') self.toggleStats(false);
+    else if (a === 'hidectl') { self.hideControls(); return; }
     else if (a === 'gear' || a === 'cc') { var m = V.$('.vp-menu', h); if (m.hidden || self._menuKind !== a) { self._menuKind = a; self._openMenu('main', a); } else self._closeMenu(); }
     else if (self.onButton) self.onButton(a, b);
     self._wake();
@@ -1875,21 +1903,41 @@ PP._bind = function () {
     }
   });
   var wake = function () { self._wake(); };
-  this.el.addEventListener('mousemove', wake);
+  // Only a real move of the mouse brings the controls back: browsers also send "moves" when what's under a still
+  // pointer changes (the controls fading out, the clock ticking), which kept them from ever hiding. Just after
+  // "Hide the controls" it takes a bigger move, so the hand still on the mouse doesn't bring them straight back.
+  var mx = -1, my = -1;
+  this.el.addEventListener('mousemove', function (e) {
+    var d = Math.abs(e.clientX - mx) + Math.abs(e.clientY - my);
+    if (d < (self._hiddenAt && Date.now() - self._hiddenAt < 3000 ? 40 : 6)) return;
+    mx = e.clientX; my = e.clientY;
+    self._wake();
+  });
   this.el.addEventListener('touchstart', wake, { passive: true });
   this.el.addEventListener('focusin', wake);
   this.el.addEventListener('mouseleave', function () { if (!self.video.paused && V.$('.vp-menu', h).hidden) self.el.classList.add('idle'); });
 };
 
+/** "Hide the controls": everything goes until the mouse moves, the screen is touched or a key is pressed. */
+PP.hideControls = function () {
+  this._closeMenu();
+  clearTimeout(this._idleT);
+  this._hiddenAt = Date.now();
+  this._recentWake = false;
+  this.el.classList.add('idle');
+  if (this.el.contains(document.activeElement) && document.activeElement !== this.el) { try { this.el.focus(); } catch (e) {} }
+};
 PP._wake = function (sticky) {
   var self = this;
+  if (this._hiddenAt && Date.now() - this._hiddenAt < 900) return; // (the click or key that hid them)
+  this._hiddenAt = 0;
   var wasIdle = this.el.classList.contains('idle');
   this.el.classList.remove('idle');
   this._recentWake = !wasIdle;
   clearTimeout(this._idleT);
   this._idleT = setTimeout(function () {
     if (!self.video.paused && V.$('.vp-menu', self.host).hidden && V.$('.vp-side', self.host).hidden && self.started && !(document.activeElement && document.activeElement.classList.contains('vol'))) { self.el.classList.add('idle'); self._recentWake = false; }
-  }, sticky ? 5000 : 3200);
+  }, sticky ? 4500 : 2500);
 };
 
 // ---------------------------------------------------------------- sleep timer

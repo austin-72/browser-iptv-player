@@ -57,10 +57,12 @@ When someone plays a film or an episode through the relay, the relay fetches **t
 
 - **Seeking is instant** for every part that's already on the relay. Jumping ahead of the download makes the relay fetch from there first, then fill in the rest.
 - **The provider connection is free again** as soon as the whole file is on the relay. This server checks with the relay every 10 seconds, and a finished film stops counting towards the list's connection limit, so someone else can watch live TV on it.
-- **One provider connection per film** while it downloads, as before. The relay stops downloading a film when nobody is playing it any more.
-- Live channels and HLS streams are relayed as they come, as before.
+- **Films share the account's connections** (relay 5). An account that allows, say, one connection can still have several people watching films through the relay: this server tells the relay how many connections each account's films may use (the account's limit, less what everyone else is watching from it — live TV, recordings — and always at least one), and the relay switches the connection between the films so that **everyone has at least 10 minutes ready** on the relay. A film that has more than that gives its connection to one that has less; spare connections keep fetching ahead. On this server, the films of one account then count as one connection, so another film from the same account isn't "busy". (The limit comes from the list's connection test, or what the provider says: run the test in Admin → Lists for the best result. With no limit known, every film gets its own connection, as before.)
+- **When it can't keep up** — more being watched at once than the provider sends, or someone waiting to start because every connection is busy — the relay says so, and it shows in **Admin → Statistics → Watching at once**, with the time, how many were watching and how many connections they had. That's when the account is too small for what the household watches.
+- **The part already watched is deleted** as people watch: the relay keeps at most 10 minutes behind the furthest-back viewer (plus the very start and end of the file, where players read the film's index). Seeking back further simply fetches that part again.
+- The relay stops downloading a film when nobody is playing it any more. Live channels and HLS streams are relayed as they come, as before.
 
-The films are kept in `RELAY_CACHE_DIR` (with Docker, a volume called `cache`) and use at most `RELAY_CACHE_GB`, or all the free disk space but 5 GB. Films nobody is watching are deleted when room is needed, and after 6 hours unused. A bigger disk keeps more films around. If a film is bigger than the free space, it's simply relayed as it comes.
+The films are kept in `RELAY_CACHE_DIR` (with Docker, a volume called `cache`) and use at most `RELAY_CACHE_GB`, or all the free disk space but 5 GB. A film is kept for **at most twice its length** once nobody is watching it (and never more than 6 hours unused); films nobody is watching are also deleted when room is needed. If a film is bigger than the free space, it's simply relayed as it comes.
 
 ## Updating the relay
 

@@ -50,6 +50,17 @@
           '<td class="r num' + (p.away ? ' warn' : '') + '">' + (p.away || 0) + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       '<p class="dim small">“At the limit”: every connection the account allows was in use. “Turned away”: someone pressed play and every copy was busy. Pick a provider to see when.</p>';
+    // The stream relay: the times it couldn't keep up with the films being watched (relay 5).
+    if (d.strain && d.strain.length) {
+      var mbit = function (b) { return b > 0 ? (Math.round(b * 8 / 1e5) / 10) + ' Mbit/s' : '?'; };
+      html += '<h3>When the stream relay couldn’t keep up</h3><div class="tbl-wrap"><table class="st-table cc-strain"><thead><tr><th>When</th><th>Provider</th><th class="r">Watching</th><th class="r">Connections</th><th class="r hide-sm">Least ready</th><th class="r hide-sm">Needed / got</th></tr></thead><tbody>' +
+        d.strain.map(function (e) {
+          return '<tr><td>' + esc(when(e.t)) + '</td><td class="truncate">' + esc(e.name) + '</td><td class="r num">' + e.viewers + (e.stalled ? '<br><small class="dim">' + e.stalled + ' waiting to start</small>' : '') + '</td>' +
+            '<td class="r num">' + e.runs + (e.budget ? ' of ' + e.budget : '') + '</td><td class="r num hide-sm">' + (e.least >= 0 ? (e.least < 60 ? e.least + ' s' : Math.round(e.least / 60) + ' min') : '–') + '</td>' +
+            '<td class="r num hide-sm">' + (e.need > 0 ? mbit(e.need) + ' / ' + mbit(e.rate) : '–') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="dim small">The relay shares each provider account’s connections between the films being watched, aiming to have 10 minutes ready for everyone. These are the times it couldn’t: more was being watched at once than the provider sends (“Needed / got”), or someone waited to start because every connection was busy. More connections on the account (or fewer films at once) helps.</p>';
+    }
     // The chart and the week grid for one provider.
     html += '<div class="cc-one"><h3>' + esc(cur.name) + '</h3>' +
       '<div class="st-legend" aria-hidden="true"><span><i class="sw s1"></i>Most at once</span><span><i class="sw cc-full"></i>At the limit</span>' + (cur.limit ? '<span><i class="cc-lim-key"></i>Limit (' + cur.limit + ')</span>' : '') + '<span><i class="cc-avg-key"></i>On average</span></div>' +
