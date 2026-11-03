@@ -1,0 +1,33 @@
+/* Admin → Overview: providers (account, connections) with who's watching from each. */
+.pv-sec .sec-h { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.pv-sec .sec-h h2 { margin: 0; }
+.pv-sec .sec-h .sp { flex: 1; }
+.pv-quiet { margin: -.2rem 0 .7rem; }
+.pv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr)); gap: .75rem; }
+.pv { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .8rem .95rem; min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
+.pv.busy { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); box-shadow: inset 3px 0 0 var(--ok); }
+.pv-loose { margin-top: .75rem; }
+.pv-h { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; min-width: 0; }
+.pv-h .sp { flex: 1; }
+.pv-name { font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.pv-st { font-size: .74rem; font-weight: 700; letter-spacing: .02em; padding: .12rem .5rem; border-radius: 999px; background: var(--card2); color: var(--dim); white-space: nowrap; }
+.pv-st.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.pv-st.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.pv-st.bad { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.pv-conn { display: inline-flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--dim); white-space: nowrap; }
+.pv-conn.full { color: var(--warn); }
+.pv-dots { display: inline-flex; gap: 3px; }
+.pv-dots i { width: 9px; height: 9px; border-radius: 3px; background: var(--card2); border: 1px solid var(--line); }
+.pv-dots i.on { background: var(--ok); border-color: var(--ok); }
+.pv-conn.full .pv-dots i.on { background: var(--warn); border-color: var(--warn); }
+.pv-meta { line-height: 1.4; }
+.pv-none { padding-top: .1rem; }
+.pv-list { list-style: none; margin: .25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.pv-row { display: flex; gap: .55rem; align-items: flex-start; padding-top: .5rem; border-top: 1px solid var(--line); min-width: 0; }
+.pv-who { min-width: 0; overflow-wrap: anywhere; }
+.pv-dot { flex: none; width: .6rem; height: .6rem; border-radius: 50%; margin-top: .42rem; background: var(--faint); }
+.pv-dot.good { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.pv-dot.fair { background: var(--warn); }
+.pv-dot.poor { background: var(--danger); }
+.pv-row .aw-stats { margin-top: .2rem; }
+html.tv .pv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

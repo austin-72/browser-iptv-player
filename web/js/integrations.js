@@ -169,6 +169,9 @@
   V.playbackStats = function () {
     var p = V.player, v = p.video, a = p.attempt || {};
     var out = { route: a.helper ? 'helper' : a.via === 'browser' || p.mb ? 'browser' : a.via === 'direct' || a.via === 'split' ? 'direct' : a.via === 'relay' ? 'relay' : a.via === 'local' ? 'local' : a.via ? 'convert' : '', w: v.videoWidth || 0, h: v.videoHeight || 0 };
+    // (Straight from the provider, or through the stream relay; and why the server carries it when it does.)
+    if ((out.route === 'direct' || out.route === 'browser') && p.reachInfo && p.reachInfo.relay) out.sr = 1;
+    if (out.route === 'convert' || out.route === 'relay') { try { out.why = p._routeReason(out.route); } catch (e) {} if (a.mode) out.mode = a.mode; }
     var b = v.buffered, ahead = 0;
     for (var i = 0; i < b.length; i++) if (b.start(i) <= v.currentTime + 0.5 && b.end(i) > v.currentTime) ahead = b.end(i) - v.currentTime;
     out.buf = Math.round(ahead * 10) / 10;
@@ -380,33 +383,87 @@
 
   // ------------------------------------------------------------ Admin → Overview: watching now, live
   var fmtK = function (kbps) { return kbps >= 1000 ? (Math.round(kbps / 100) / 10) + ' Mbit/s' : kbps ? kbps + ' kbit/s' : '–'; };
-  var ROUTE = { local: 'Your own file (from this server)', direct: 'Direct', browser: 'Converted in the browser', relay: 'Through the server', convert: 'Converted on the server', helper: 'Direct (helper)' };
+  var ROUTE = { local: 'Your own file (from this server)', direct: 'Direct from the provider', browser: 'Converted in the browser', relay: 'Through this server', convert: 'Converted on this server', helper: 'Direct (helper)' };
+  // Why this server carries a stream (Admin → Statistics has the same words).
+  var WHY = { format: 'a format this device can’t play', picture: 'no picture the direct way', 'direct-failed': 'the direct way didn’t start', chosen: 'quality chosen by the viewer', headers: 'needs headers browsers can’t send', https: 'plain http on an https page', setting: 'admin setting', blocked: 'the provider blocks web players', library: 'your own file' };
+  var routeText = function (s) {
+    if (!s || !s.route) return '';
+    if ((s.route === 'direct' || s.route === 'browser') && s.sr) return s.route === 'browser' ? 'Converted in the browser · through the stream relay' : 'Direct · through the stream relay';
+    var t = ROUTE[s.route] || s.route;
+    if (s.route === 'convert' && s.mode) t += ' (' + (s.mode === 'transcode' ? 'transcoding' : 'repackaging') + ')';
+    if (WHY[s.why]) t += ' — ' + WHY[s.why];
+    return t;
+  };
+  var acctState = function (l) {
+    var a = l.account;
+    if (!l.hasAccount) return { cls: '', label: 'Playlist link', note: 'No account details for this kind of list' };
+    if (!a) return { cls: '', label: 'Not checked yet', note: '' };
+    var days = a.expires ? Math.floor((a.expires - Date.now()) / 86400e3) : null;
+    var st = String(a.status || '').toLowerCase();
+    var bad = (st && st !== 'active') || (days !== null && days < 0);
+    var cls = bad ? 'bad' : days !== null && days <= 14 ? 'warn' : a.error && !a.checkedAt ? 'warn' : 'ok';
+    var bits = [];
+    if (a.expires) bits.push((days < 0 ? 'expired ' : 'expires ') + new Date(a.expires).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + (days >= 0 ? ' (' + V.plural(days, 'day') + ')' : ''));
+    if (a.trial) bits.push('trial');
+    if (a.active !== '' && a.active !== undefined) bits.push('provider says ' + a.active + ' in use');
+    if (a.checkedAt) bits.push('checked ' + V.fmtAgo(a.checkedAt));
+    var note = bits.join(' · ');
+    return { cls: cls, label: a.status ? a.status.charAt(0).toUpperCase() + a.status.slice(1) : a.error ? 'Couldn’t check' : '?', note: note.charAt(0).toUpperCase() + note.slice(1), error: a.error };
+  };
+  var viewerRow = function (r) {
+    var s = r.stats;
+    var chips = s ? [routeText(s), s.h ? s.h + 'p' : '', s.bitrate ? 'stream ' + fmtK(s.bitrate) : '', s.bandwidth ? 'connection ' + fmtK(s.bandwidth) : '', 'buffer ' + s.buffer + ' s',
+      s.stalls ? V.plural(s.stalls, 'pause') + ' to load (' + s.stallSecs + ' s) in ' + V.plural(s.minutes, 'min') : '', s.droppedPct ? s.droppedPct + '% frames dropped' : ''].filter(Boolean) : [];
+    return '<li class="pv-row"><span class="pv-dot ' + (s ? r.health : 'wait') + '" title="' + (s ? (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') : 'Waiting for the first report') + '"></span>' +
+      '<div class="pv-who"><div><b>' + V.esc(r.profile) + '</b> · ' + (r.hidden ? '<span class="dim">(private)</span>' : V.esc(r.n)) + ' <span class="dim">on ' + V.esc(r.device) + ' · ' + V.fmtAgo(r.at) + '</span></div>' +
+      (s ? '<div class="aw-stats small"><span class="aw-h ' + r.health + '">' + (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') + '</span>' + chips.map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</div></li>';
+  };
+  /** Admin → Overview: each provider with its account and connections, and who's watching from it — live. */
   V.adminWatching = function (sec) {
     if (!sec) return;
     var draw = function () {
       if (!document.body.contains(sec)) return;
       V.api('/api/admin/watching').then(function (w) {
-        var rows = w.rows.map(function (r) {
-          var s = r.stats;
-          return '<li class="aw-row"><div><b>' + V.esc(r.profile) + '</b> · ' + (r.hidden ? '<span class="dim">(private)</span>' : V.esc(r.n)) + ' <span class="dim">on ' + V.esc(r.device) + (r.list ? ' · ' + V.esc(r.list) : '') + ' · ' + V.fmtAgo(r.at) + '</span></div>' +
-            (s ? '<div class="aw-stats small"><span class="aw-h ' + r.health + '">' + (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') + '</span>' +
-              [ROUTE[s.route] || s.route, s.h ? s.h + 'p' : '', s.bitrate ? 'stream ' + fmtK(s.bitrate) : '', s.bandwidth ? 'connection ' + fmtK(s.bandwidth) : '', 'buffer ' + s.buffer + ' s',
-                s.stalls ? V.plural(s.stalls, 'pause') + ' to load (' + s.stallSecs + ' s) in ' + V.plural(s.minutes, 'min') : 'no pauses to load', s.droppedPct ? s.droppedPct + '% frames dropped' : ''].filter(Boolean).map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</li>';
+        var byList = {};
+        w.rows.forEach(function (r) { (byList[r.lid || ''] = byList[r.lid || ''] || []).push(r); });
+        var cards = w.lists.map(function (l) {
+          var st = acctState(l), rows = byList[l.id] || [];
+          var limit = l.limit || 0, used = l.used || 0;
+          var dots = limit && limit <= 12 ? '<span class="pv-dots" aria-hidden="true">' + Array.from({ length: limit }, function (_, i) { return '<i class="' + (i < used ? 'on' : '') + '"></i>'; }).join('') + '</span>' : '';
+          return '<article class="pv' + (rows.length || used ? ' busy' : '') + '"><header class="pv-h"><b class="pv-name">' + V.esc(l.name) + '</b><span class="pv-st ' + st.cls + '">' + V.esc(st.label) + '</span><span class="sp"></span>' +
+            '<span class="pv-conn' + (limit && used >= limit ? ' full' : '') + '">' + dots + (limit ? used + ' of ' + V.plural(limit, 'connection') : used ? V.plural(used, 'connection') + ' in use' : 'idle') + '</span></header>' +
+            (st.note ? '<div class="pv-meta small dim">' + V.esc(st.note) + '</div>' : '') +
+            (st.error ? '<div class="pv-meta small err">Last check: ' + V.esc(st.error) + '</div>' : '') +
+            (rows.length ? '<ul class="pv-list">' + rows.map(viewerRow).join('') + '</ul>' : '') +
+            (l.other && l.other.length ? '<div class="pv-meta small">' + l.other.map(function (o) { return V.esc((o.who ? o.who + ' · ' : '') + (o.device || '') + (o.n ? ': ' + o.n : '')); }).join('<br>') + '</div>' : '') +
+            (!rows.length && !(l.other && l.other.length) ? '<div class="pv-none small dim">Nobody watching</div>' : '') + '</article>';
         });
-        var html = '<div class="sec-h"><h2>Watching now</h2><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div>' +
-          (rows.length ? '<ul class="simple aw-list">' + rows.join('') + '</ul>' : '<p class="dim">Nobody is watching right now.</p>') +
-          (w.lists.length ? '<p class="small"><b>Provider connections in use:</b> ' + w.lists.map(function (l) { return V.esc(l.name) + ' ' + l.used + (l.limit ? ' of ' + l.limit : ''); }).join(' · ') + '</p>' : '');
+        var loose = byList[''] || [];
+        // (Lists that are gone or off, or one's own files: still shown, apart.)
+        Object.keys(byList).forEach(function (k) { if (k && !w.lists.some(function (l) { return l.id === k; })) loose = loose.concat(byList[k]); });
+        var html = '<div class="sec-h"><h2>Providers and watching now</h2><span class="sp"></span><div class="btn-row"><button class="btn sm" data-acct>' + V.icon('refresh') + ' Check accounts</button><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div></div>' +
+          (w.rows.length ? '' : '<p class="dim small pv-quiet">Nobody is watching right now.</p>') +
+          (cards.length ? '<div class="pv-grid">' + cards.join('') + '</div>' : '<p class="dim">No provider lists.</p>') +
+          (loose.length ? '<article class="pv pv-loose"><header class="pv-h"><b class="pv-name">Not from a provider</b></header><ul class="pv-list">' + loose.map(viewerRow).join('') + '</ul></article>' : '');
         // (Every 5 seconds: redraw only when something changed, and keep focus on the button — a TV remote is often on it.)
         if (html !== sec._html) {
-          var had = document.activeElement && sec.contains(document.activeElement);
+          var fa = document.activeElement, had = fa && sec.contains(fa) ? (fa.hasAttribute('data-acct') ? '[data-acct]' : '[data-a=speedtest]') : '';
           sec._html = html;
           sec.innerHTML = html;
-          V.$('[data-a=speedtest]', sec).onclick = function () { V.speedTest({ admin: true }); };
-          if (had) try { V.$('[data-a=speedtest]', sec).focus({ preventScroll: true }); } catch (e) {}
+          if (had) try { V.$(had, sec).focus({ preventScroll: true }); } catch (e) {}
         }
         clearTimeout(sec._t);
         sec._t = setTimeout(draw, 5000);
       }).catch(function () { clearTimeout(sec._t); sec._t = setTimeout(draw, 15000); });
+    };
+    sec.onclick = function (e) {
+      if (e.target.closest('[data-a=speedtest]')) V.speedTest({ admin: true });
+      var c = e.target.closest('[data-acct]');
+      if (c && !c.disabled) {
+        c.disabled = true;
+        c.innerHTML = '<span class="spinner sm"></span> Checking…';
+        V.api('/api/admin/accounts/check', { method: 'POST' }).then(function () { sec._html = ''; draw(); }).catch(V.fail);
+      }
     };
     draw();
   };

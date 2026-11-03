@@ -29,8 +29,10 @@ V.codecs = (function () {
     var MS = window.ManagedMediaSource || window.MediaSource;
     var v = document.createElement('video');
     var ok = function (t) { try { return (MS && MS.isTypeSupported(t)) || v.canPlayType(t) === 'probably'; } catch (e) { return false; } };
-    // (Some browsers say they play HEVC and then show no picture: once that happened here, it's converted instead.)
-    if (!V.ls.get('noHevc', 0) && (ok('video/mp4; codecs="hvc1.1.6.L93.B0"') || ok('video/mp4; codecs="hev1.1.6.L93.B0"'))) c.push('hevc');
+    // (Some browsers say they play HEVC and then show no picture: once that happened here, it's converted instead —
+    // for two weeks, then tried again: a browser or graphics driver update often fixes it.)
+    var noHevc = +V.ls.get('noHevc', 0);
+    if (!(noHevc > 1e12 && Date.now() - noHevc < 14 * 86400e3) && (ok('video/mp4; codecs="hvc1.1.6.L93.B0"') || ok('video/mp4; codecs="hev1.1.6.L93.B0"'))) c.push('hevc');
     if (ok('video/mp4; codecs="av01.0.05M.08"')) c.push('av1');
     if (ok('video/webm; codecs="vp9"')) c.push('vp9');
     return c;
@@ -1102,7 +1104,7 @@ PP._badPicture = function (why) {
     this._picConverted = true;
     // (A conversion that only repackaged the picture: this browser can't decode that picture — it's HEVC more often
     // than not. From now on this device has such pictures converted.)
-    if (a.via === 'session' && a.mode === 'remux' && V.codecs().indexOf('hevc') >= 0) { V.ls.set('noHevc', 1); V.codecs.forget(); }
+    if (a.via === 'session' && a.mode === 'remux' && V.codecs().indexOf('hevc') >= 0) { V.ls.set('noHevc', Date.now()); V.codecs.forget(); }
     this._healthFail(err, true);
     this.osd('No picture from this copy — converting it on the server…', 3500);
     setTimeout(function () { if (tok === self.token) self.load(it, { force: 'transcode', quiet: true, alt: self.alt, startAt: at0 || undefined }); }, 400);
@@ -1159,7 +1161,9 @@ PP._routeName = function (a) {
   /** Why a stream went through the server. */
 PP._routeReason = function (route) {
   if (route === 'local') return 'library';
-  if (route === 'convert') return this._forced || this._quality() ? 'chosen' : 'format';
+  // (Converting because the picture didn't show the direct way; because a direct way was tried and didn't start; or
+  // because this browser can't play the format at all.)
+  if (route === 'convert') return this._forced || this._quality() ? 'chosen' : this._picConverted ? 'picture' : this._triedDirect ? 'direct-failed' : 'format';
   if (route !== 'relay') return '';
   var info = this.reachInfo;
   if ((S.settings.routing || '') === 'server') return 'setting';

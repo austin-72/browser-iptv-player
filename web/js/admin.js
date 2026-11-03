@@ -66,7 +66,6 @@ V.adminNum = function (el, saved) {
 V.adminTabs.overview = function (body, A) {
   var st = A.status;
   var pname = function (id) { var p = A.profiles.filter(function (x) { return x.id === id; })[0]; return p ? p.name : '?'; };
-  var xt = A.lists.filter(function (l) { return l.type === 'xtream' && l.account; });
   body.innerHTML = (st.alerts || []).map(function (a) { return '<div class="note warn">' + V.icon('bell') + ' <span>' + (a.kind === 'expiry' ? '<b>' + V.esc(a.list) + '</b> ' + (a.days < 0 ? 'has expired.' : a.days === 0 ? 'expires today.' : 'expires in ' + V.plural(a.days, 'day') + '.') : '<b>' + V.esc(a.list) + '</b>: the provider says the account is “' + V.esc(a.status) + '”.') + '</span></div>'; }).join('') +
     (st.needsRestart ? '<div class="note">' + V.icon('refresh') + ' <span>An update to the server is on disk. It takes effect the next time you restart the server. <a href="#/admin/apps">Details</a></span></div>' : '') +
     (st.errors && st.errors.open ? '<div class="note">' + V.icon('info') + ' <span>' + V.plural(st.errors.open, 'problem') + ' reported by devices or the server, the latest ' + V.fmtAgo(st.errors.last) + '. <a href="#/admin/errors">See the error reports</a>.</span></div>' : '') +
@@ -75,14 +74,13 @@ V.adminTabs.overview = function (body, A) {
     (!st.ffmpeg ? '<div class="note warn">' + V.icon('info') + ' ffmpeg isn’t installed, so MKV/AVI/HEVC/RTMP etc. can’t be converted and downloads can’t be converted to MP4. The Docker image includes it.</div>' : '') +
     (!A.lists.length ? '<div class="note">' + V.icon('info') + ' <span>No lists yet. <a href="#/admin/lists">Add your first playlist</a> — everyone sees it right away.</span></div>' : '') +
     '<div class="stats">' + [['Channels', st.catalog.counts.live || 0], ['Movies', st.catalog.counts.movie || 0], ['Series', st.catalog.counts.show || 0], ['Episodes', st.catalog.counts.episode || 0], ['Radio', st.catalog.counts.radio || 0], ['Guide programmes', st.epg.programmes || 0], ['Profiles', A.profiles.length], ['Signed-in devices', A.devices.length]].filter(function (x) { return x[0] !== 'Episodes' || x[1]; }).map(function (x) { return '<div class="stat"><b class="num">' + Number(x[1]).toLocaleString() + '</b><span>' + x[0] + '</span></div>'; }).join('') + '</div>' +
-    (xt.length ? '<section class="card-sec"><div class="sec-h"><h2>Provider accounts</h2><button class="btn sm" data-acct>' + V.icon('refresh') + ' Check now</button></div><ul class="simple">' + xt.map(function (l) { return '<li>' + V.adminAccountLine(l) + '</li>'; }).join('') + '</ul></section>' : '') +
-    '<section class="card-sec" data-watching><h2>Watching now</h2>' + (A.watching.length ? '<ul class="simple">' + A.watching.map(function (w) { return '<li><b>' + V.esc(pname(w.pid)) + '</b> · ' + V.esc(w.n) + ' <span class="dim">on ' + V.esc(w.device) + ' · ' + V.fmtAgo(w.at) + '</span></li>'; }).join('') + '</ul>' : '<p class="dim">Nobody is watching right now.</p>') + '</section>' +
+    // Providers (their accounts and connections) and who's watching from each: filled in live (integrations.js).
+    '<section class="card-sec pv-sec" data-watching><div class="sec-h"><h2>Providers and watching now</h2></div>' + (A.watching.length ? '<ul class="simple">' + A.watching.map(function (w) { return '<li><b>' + V.esc(pname(w.pid)) + '</b> · ' + V.esc(w.n) + ' <span class="dim">on ' + V.esc(w.device) + ' · ' + V.fmtAgo(w.at) + '</span></li>'; }).join('') + '</ul>' : '<div class="spinner sm"></div>') + '</section>' +
     '<section class="card-sec"><h2>Server conversions</h2>' + (st.sessions.length ? '<ul class="simple">' + st.sessions.map(function (s) { return '<li>' + V.esc(s.label) + ' <span class="dim">· ' + (s.transcode ? 'transcoding' + (s.hw ? ' (' + s.hw + ')' : '') + (s.height ? ' ' + s.height + 'p' : '') : 'remuxing') + ' · ' + V.esc(pname(s.owner)) + ' · ' + V.fmtAgo(s.startedAt) + '</span> <button class="btn sm" data-stop="' + s.id + '">Stop</button></li>'; }).join('') + '</ul>' : '<p class="dim">None running.</p>') + '</section>' +
     '<section class="card-sec"><h2>Server</h2><dl class="kv"><dt>Version</dt><dd>' + V.esc(st.version) + '</dd><dt>ffmpeg</dt><dd>' + (st.ffmpeg ? V.esc(st.ffmpegVersion) + (st.hw ? ' · hardware: ' + st.hw : '') : 'not found') + '</dd><dt>Intro detection</dt><dd>' + (st.intro ? 'available' : 'unavailable') + '</dd><dt>TMDB</dt><dd>' + (st.tmdb.enabled ? 'on · ' + st.tmdb.matched + ' titles matched' + (st.tmdb.error ? ' · ' + V.esc(st.tmdb.error) : '') : 'off') + '</dd><dt>Data folder</dt><dd><code>' + V.esc(st.dataDir) + '</code></dd><dt>Listening on</dt><dd>' + V.esc(st.listen) + '</dd><dt>System</dt><dd>' + V.esc(st.platform + ' · Node ' + st.node) + '</dd><dt>Up for</dt><dd>' + V.fmtLen(st.uptime) + '</dd>' + (st.mem ? '<dt>Memory</dt><dd>' + V.fmtSize(st.mem) + (st.items ? ' · ' + V.plural(st.items, 'catalogue entry', 'catalogue entries') : '') + '</dd>' : '') + '</dl></section>';
   if (V.adminWatching) V.adminWatching(V.$('[data-watching]', body)); // live: quality, route, connections (integrations.js)
   body.onclick = function (e) {
     var b = e.target.closest('[data-stop]'); if (b) { b.disabled = true; V.del('/api/admin/sessions/' + b.dataset.stop).then(function () { V.router.refresh(); }).catch(function (x) { b.disabled = false; V.fail(x); }); }
-    var c = e.target.closest('[data-acct]'); if (c) { c.disabled = true; V.api('/api/admin/accounts/check', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(function (x) { c.disabled = false; V.fail(x); }); }
   };
 };
 /** "EVESTV · active · expires 30 Oct 2027 (364 days) · 1 connection · in use by Mom (Living Room TV)" */
@@ -461,12 +459,80 @@ V.adminTabs.recs = function (body, A) {
     '<label class="field"><span>TMDB key</span><div class="inline"><input class="input" data-key value="' + V.esc(s.tmdbKey || '') + '" placeholder="Paste the key"><button class="btn" data-save>Save</button><button class="btn" data-test>Test</button></div></label>' +
     '<p class="dim small">Status: ' + (A.status.tmdb.enabled ? 'on · ' + A.status.tmdb.matched + ' titles have details' + (A.status.tmdb.error ? ' · <span class="err">' + V.esc(A.status.tmdb.error) + '</span>' : '') : 'off') + '</p>' +
     '<div class="tmdb-fetch"></div></section>' +
+    (A.status.tmdb.enabled ? V.tmdbOptionsHtml(s) + '<section class="card-sec"><h2>Episode details</h2><p class="dim">Each episode’s own title, plot, picture and first air date from TMDB, for series your lists describe only as “Episode 3” or with no plots and pictures. Shown on each series’ page; the provider’s own titles and plots stay where they’re good.</p><div class="tmdb-eps"></div></section>' : '') +
     '<section class="card-sec"><h2>How recommendations work</h2><p class="dim">Each profile’s picks are worked out on the server and saved on disk. They use what the profile watched (more weight for finished and recent things), thumbs up/down, My List and chosen interests; TMDB’s related titles; actors and directors you keep watching; titles several of your favourites point to; and what others in the household watch. Titles that keep being shown without being opened make way for new ones, and rows are re-ranked for variety.</p></section>';
   body.onclick = function (e) {
     if (e.target.closest('[data-save]')) V.adminSave({ tmdbKey: V.$('[data-key]', body).value }).then(function () { V.router.refresh(); });
     if (e.target.closest('[data-test]')) V.api('/api/admin/tmdb/test', { method: 'POST' }).then(function (j) { V.toast(j.ok ? 'TMDB works' : 'TMDB: ' + j.error, { error: !j.ok }); }).catch(V.fail);
   };
-  if (A.status.tmdb.enabled) V.tmdbFetchPanel(V.$('.tmdb-fetch', body));
+  if (A.status.tmdb.enabled) { V.tmdbFetchPanel(V.$('.tmdb-fetch', body)); V.tmdbEpisodesPanel(V.$('.tmdb-eps', body)); V.tmdbOptionsWire(body); }
+};
+
+/** Admin → Recommendations → Options: what TMDB fills in, and how. */
+V.TMDB_LANGS = [['', 'English (TMDB’s default)'], ['en-GB', 'English (UK)'], ['es-ES', 'Spanish (Spain)'], ['es-MX', 'Spanish (Latin America)'], ['fr-FR', 'French'], ['fr-CA', 'French (Canada)'], ['de-DE', 'German'], ['it-IT', 'Italian'], ['pt-BR', 'Portuguese (Brazil)'], ['pt-PT', 'Portuguese (Portugal)'], ['nl-NL', 'Dutch'], ['sv-SE', 'Swedish'], ['da-DK', 'Danish'], ['nb-NO', 'Norwegian'], ['fi-FI', 'Finnish'], ['pl-PL', 'Polish'], ['tr-TR', 'Turkish'], ['ar-SA', 'Arabic'], ['hi-IN', 'Hindi'], ['ja-JP', 'Japanese'], ['ko-KR', 'Korean'], ['zh-CN', 'Chinese']];
+V.tmdbOptionsHtml = function (s) {
+  var sw = function (k, on, title, hint) { return '<label class="switch"><input type="checkbox" data-opt="' + k + '"' + (on ? ' checked' : '') + '><span class="sw"></span><span><b>' + title + '</b><small>' + hint + '</small></span></label>'; };
+  return '<section class="card-sec tmdb-opts"><h2>Options</h2>' +
+    sw('tmdbAuto', s.tmdbAuto !== false, 'Look up new titles by themselves', 'A minute after the lists change, titles nobody has looked up yet get their posters, plots and genres. Off: only when you press a button above.') +
+    sw('tmdbTitles', s.tmdbTitles !== false, 'Use TMDB’s titles', 'When the match is sure, every copy of a film or series is called what TMDB calls it (“Spider-Man: Into the Spider-Verse” instead of “Spider Man Into The Spiderverse”). Changing this puts the catalogue together again.') +
+    '<label class="field"><span>Episode details</span><select class="input" data-opt-sel="tmdbEpisodes"><option value="open"' + (s.tmdbEpisodes !== 'off' ? ' selected' : '') + '>Fetched when someone opens a series (and with the buttons below)</option><option value="off"' + (s.tmdbEpisodes === 'off' ? ' selected' : '') + '>Only with the buttons below</option></select></label>' +
+    '<label class="field"><span>Language of titles and plots</span><select class="input" data-opt-sel="tmdbLang">' + V.TMDB_LANGS.map(function (o) { return '<option value="' + o[0] + '"' + ((s.tmdbLang || '') === o[0] ? ' selected' : '') + '>' + V.esc(o[1]) + '</option>'; }).join('') + '</select><small class="dim">Where TMDB has them in that language (it falls back to English). Details already fetched change when they’re fetched again (“Update everything”).</small></label>' +
+    '</section>';
+};
+V.tmdbOptionsWire = function (body) {
+  var box = V.$('.tmdb-opts', body);
+  if (!box) return;
+  box.addEventListener('change', function (e) {
+    var t = e.target, patch = {};
+    if (t.dataset.opt) patch[t.dataset.opt] = t.checked;
+    else if (t.dataset.optSel) patch[t.dataset.optSel] = t.value;
+    else return;
+    V.adminSave(patch, t.dataset.opt === 'tmdbTitles' ? 'Saved — the catalogue is being put together again' : 'Saved').catch(function () { if (t.dataset.opt) t.checked = !t.checked; });
+  });
+};
+
+/** Admin → Recommendations → Episode details: how many series have them, and fetching them for many at once. */
+V.tmdbEpisodesPanel = function (box) {
+  var info = null, timer = null, groups = null, picked = new Set(), groupF = '';
+  var draw = function () {
+    var j = info.job, c = info.counts, last = info.last;
+    var pct = j && j.total ? j.done / j.total : 0;
+    box.innerHTML = '<div class="stats small-stats">' + [['Series with details', c.shows], ['With episode details', c.withEps], ['Episodes described', c.episodes]].map(function (x) { return '<div class="stat"><b class="num">' + Number(x[1]).toLocaleString() + '</b><span>' + x[0] + '</span></div>'; }).join('') + '</div>' +
+      (j ? '<div class="tf-job"><div class="tf-h"><b>Fetching episode details</b><span class="sp"></span><button class="btn sm" data-te-stop>Stop</button></div><div class="bar big"><i style="width:' + (pct * 100).toFixed(1) + '%"></i></div><div class="dim small">' + j.done.toLocaleString() + ' of ' + V.plural(j.total, 'series', 'series') + ' · ' + (j.episodes || 0).toLocaleString() + ' episodes' + (j.current ? '<br>Now: ' + V.esc(j.current) : '') + '</div></div>'
+        : last && last.finished && Date.now() - last.finished < 3600e3 ? '<p class="dim small">' + (last.stopped ? 'Stopped' : 'Finished') + ' ' + V.fmtAgo(last.finished) + ': ' + V.plural(last.found || 0, 'series', 'series') + ', ' + (last.episodes || 0).toLocaleString() + ' episodes.</p>' : '') +
+      '<div class="btn-row"' + (j ? ' hidden' : '') + '><button class="btn primary" data-te="mine">' + V.icon('download') + ' Series the household watches (' + Number(c.household).toLocaleString() + ')</button><button class="btn" data-te="all">Every series with details</button><button class="btn" data-te="fresh">' + V.icon('refresh') + ' Fetch the household’s again</button></div>' +
+      '<details class="tf-groups" data-te-groups' + (picked.size ? ' open' : '') + '><summary>By category</summary>' + (groups ? '<div class="inline"><input class="input" type="search" data-te-filter placeholder="Filter categories" value="' + V.esc(groupF) + '"><button class="btn" data-te="groups"' + (j || !picked.size ? ' disabled' : '') + '>Fetch ' + (picked.size ? V.plural(picked.size, 'category', 'categories') : 'selected') + '</button></div><div class="tf-glist">' + groups.filter(function (g) { return !groupF || V.norm(g.name).indexOf(V.norm(groupF)) >= 0; }).slice(0, 400).map(function (g) { return '<label class="check"><input type="checkbox" value="' + V.esc(g.id) + '"' + (picked.has(g.id) ? ' checked' : '') + '><span>' + V.esc(g.name) + ' <small class="dim">' + V.plural(g.total, 'series', 'series') + '</small></span></label>'; }).join('') + '</div>' : '<div class="spinner sm"></div>') + '</details>';
+  };
+  var load = function () {
+    clearTimeout(timer);
+    return V.api('/api/admin/tmdb/episodes').then(function (r) {
+      info = r;
+      var f = document.activeElement && document.activeElement.matches && document.activeElement.matches('[data-te-filter]');
+      draw();
+      if (f) { var inp = V.$('[data-te-filter]', box); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      if (r.job && box.isConnected) timer = setTimeout(load, 2000);
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  box.addEventListener('toggle', function (e) {
+    if (!e.target.matches || !e.target.matches('[data-te-groups]') || !e.target.open || groups) return;
+    V.api('/api/admin/tmdb/enrich').then(function (r) { groups = r.groups.filter(function (g) { return g.t === 'show'; }); draw(); V.$('[data-te-groups]', box).open = true; }).catch(V.fail);
+  }, true);
+  box.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-te]');
+    if (b && !b.disabled) {
+      var m = b.dataset.te, req = { mode: m === 'fresh' ? 'mine' : m, fresh: m === 'fresh' };
+      if (m === 'groups') req.groups = Array.from(picked);
+      var go = function () { V.api('/api/admin/tmdb/episodes', { body: req }).then(function (j) { if (j.nothing) V.toast('They all have episode details already'); picked.clear(); load(); }).catch(V.fail); };
+      if (m === 'all') V.confirm('Fetch episode details for all ' + Number(info.counts.shows).toLocaleString() + ' series with details? That’s one request per season — it takes a while, and everything keeps working meanwhile.', { ok: 'Fetch them' }).then(function (ok) { if (ok) go(); });
+      else go();
+    }
+    if (e.target.closest('[data-te-stop]')) V.del('/api/admin/tmdb/episodes').then(load);
+  });
+  box.addEventListener('change', function (e) { if (e.target.closest('.tf-glist')) { if (e.target.checked) picked.add(e.target.value); else picked.delete(e.target.value); var gb = V.$('[data-te=groups]', box); gb.disabled = !picked.size; gb.textContent = 'Fetch ' + (picked.size ? V.plural(picked.size, 'category', 'categories') : 'selected'); } });
+  box.addEventListener('input', V.debounce(function (e) { if (e.target.matches('[data-te-filter]')) { groupF = e.target.value; draw(); var inp = V.$('[data-te-filter]', box); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } }, 200));
+  load();
+  var prevCleanup = V.pageCleanup;
+  V.pageCleanup = function () { clearTimeout(timer); if (prevCleanup) prevCleanup(); };
 };
 
 /** Admin → Recommendations: fetch TMDB details (what's missing, everything again, or chosen categories) with progress. */

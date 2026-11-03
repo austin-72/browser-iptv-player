@@ -23,6 +23,7 @@
     'direct-failed': 'A direct route was tried but didn’t load',
     setting: 'Admin setting: always through this server',
     format: 'A format the browser can’t play, so it was converted',
+    picture: 'No picture showed the direct way (a video format the device can’t show), so it was converted',
     chosen: 'The viewer chose conversion or a lower quality',
     library: 'Your own files (always served by this server)',
     unknown: 'The server couldn’t check the provider',

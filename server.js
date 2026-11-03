@@ -195,7 +195,7 @@ const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().f
 /** Does video from this list have to go through the server (its proxy is set to carry video)? */
 const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
 const tmdbT0 = Date.now();
-const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase });
+const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase, getLang: () => settings().tmdbLang || '' });
 const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 
@@ -213,7 +213,7 @@ function applyMeta(it, m) {
   // TMDB's title, the same for every copy ("Spider Man Into The Spiderverse" → "Spider-Man: Into the Spider-Verse") —
   // when the match is sure: picked by hand, or a name that's clearly the same title
   // (a match found by searching the name could be another film of a similar name: then the provider's name stays).
-  if (m.title && it.n !== m.title && (force || sameTitle(it, m))) it.n = m.title;
+  if (m.title && it.n !== m.title && settings().tmdbTitles !== false && (force || sameTitle(it, m))) it.n = m.title;
   if (!it.logo && m.poster) it.logo = m.poster;
   if (m.poster) it.poster = m.poster;
 }
@@ -691,7 +691,13 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const out = { ...Catalog.compact(it), plot: it.plot || '', cast: it.cast || '', dir: it.dir || '', tr: it.tr || '', poster: it.poster || '', markers: it.t === 'episode' || it.t === 'movie' ? markers.get(it.k) : null, col: it.col || 0, fixed: !!(mt && mt.manual) };
   if (it.t === 'show') {
     const eps = await catalog.episodes(it.k).catch((e) => { out.epsError = 'The provider didn’t send the episodes just now.'; log(`Episodes of “${it.n}”: ${e.message}`); return []; });
-    out.episodes = eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) }));
+    // Each episode's own details from TMDB (titles, plots, pictures, air dates): fetched now when they aren't here
+    // yet (a few seconds at most; otherwise they're there next time).
+    if (eps.length && tmdb.enabled() && settings().tmdbEpisodes !== 'off') {
+      const seasons = [...new Set(eps.map((e) => e.s).filter((n) => Number.isInteger(n)))];
+      await Promise.race([tmdb.episodes(it, { seasons }).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
+    }
+    out.episodes = withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
   }
   if (it.sk) { const show = catalog.get(it.sk); if (show) out.show = { k: show.k, n: show.n, i: show.logo || '' }; }
   // Others in the household who watched it.
@@ -705,8 +711,28 @@ route('GET', '/api/show/:k/episodes', async (req, res, p, q, ctx) => {
     // The provider didn't answer: say so plainly (the page offers to try again).
     throw new HttpError(502, `The provider didn’t send this series’ episodes (${String(e.message || e).replace(/^Couldn’t download it: /, '')}). Try again in a moment.`);
   }
-  return eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) }));
+  return withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
 });
+/** A name that says nothing ("Episode 3", "S01E03", the series' own name): TMDB's episode title is better. */
+const plainEpTitle = (t, show) => !t || /^(?:(?:episode|ep\.?|e|folge|cap[ií]tulo|[ée]pisode)\s*\d+|s\d+\s*[ex]\s*\d+|\d+)$/i.test(String(t).trim()) || catalogNorm(t) === catalogNorm(show.n);
+/** Episodes (as sent to devices) with TMDB's details of each filled in where the provider's are missing or plain. */
+function withEpisodeMeta(show, list) {
+  const m = tmdb.eps.data.m[show.k]; // (also with automatic fetching off: what was fetched here)
+  if (!m || !m.s) return list;
+  return list.map((o) => {
+    const x = m.s[o.s] && m.s[o.s][o.e];
+    if (!x) return o;
+    const [t, plot, still, air, mins, r] = x;
+    const out = { ...o, tm: 1 };
+    if (t && plainEpTitle(o.et, show)) out.et = t;
+    if (plot && !o.plot) out.plot = plot.slice(0, 400);
+    if (still && (!o.i || o.i === show.logo || o.i === show.poster)) out.i = still;
+    if (air) out.air = air;
+    if (mins && !o.d) out.d = mins * 60;
+    if (r && !o.r) out.r = r;
+    return out;
+  });
+}
 route('GET', '/api/recs', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const r = await recs.fresh(prof.id, q.get('force') ? 0 : 6 * 3600e3);
@@ -1069,14 +1095,14 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
     // Xtream live channels in MPEG-TS are also served as HLS (better on phones and TVs): that through the relay too.
     const xh = it.t === 'live' && kind === 'ts' ? xtreamHls(raw) : '';
     if (xh) out.alt = { url: relayOf.wrap(xh, headers), mse: true, split: false };
-    if (kind === 'ffmpeg' || kind === 'native') { const cx = await copyCodecs(it, alt).catch(() => null); if (cx) out.codecs = cx; }
+    if (kind === 'ffmpeg' || kind === 'native') { const cx = (await copyCodecs(it, alt).catch(() => null)) || (kind === 'ffmpeg' && (it.t === 'movie' || it.t === 'episode') ? await sniffCodecs(it, alt) : null); if (cx) out.codecs = cx; }
     return out;
   }
   if (videoViaProxy(srcList(it, alt))) return { kind: '', url: src.input, blocked: 'proxy' };
   const out = await reach.check(src.input, { h: src.headers }, origin, typeof b.ua === 'string' ? b.ua.slice(0, 300) : '', { limit: connLimit(it, alt), formats: listFormats(it, alt), mixedOk: !!b.mixedOk });
   // Films and episodes: Chrome and Edge play many MKV files themselves when the codecs suit — the provider says which.
   if (out.kind === 'ffmpeg' || out.kind === 'native') {
-    const cx = await copyCodecs(it, alt).catch(() => null);
+    const cx = (await copyCodecs(it, alt).catch(() => null)) || (out.kind === 'ffmpeg' && (it.t === 'movie' || it.t === 'episode') && !out.blocked ? await sniffCodecs(it, alt) : null);
     if (cx) out.codecs = cx;
   }
   return out;
@@ -1248,6 +1274,48 @@ const p9Hooks = { played: null, rank: null };
  * (episodes carry it from the series details; films ask get_vod_info once, cached for a week). null when unknown.
  */
 const codecMemo = new Map();
+// Matroska's names for what's inside (the track list is near the start of the file).
+const MKV_V = [['V_MPEGH/ISO/HEVC', 'hevc'], ['V_MPEG4/ISO/AVC', 'h264'], ['V_AV1', 'av1'], ['V_VP9', 'vp9'], ['V_VP8', 'vp8'], ['V_MPEG2', 'mpeg2video'], ['V_MPEG4/ISO/', 'mpeg4']];
+const MKV_A = [['A_EAC3', 'eac3'], ['A_AC3', 'ac3'], ['A_DTS', 'dts'], ['A_TRUEHD', 'truehd'], ['A_AAC', 'aac'], ['A_OPUS', 'opus'], ['A_VORBIS', 'vorbis'], ['A_FLAC', 'flac'], ['A_MPEG/L3', 'mp3'], ['A_MPEG/L2', 'mp2'], ['A_PCM', 'pcm']];
+/** An MKV's picture and (first) sound codec from its first bytes: { v, a, pix: '' }, or null when they aren't there. */
+function mkvCodecs(buf) {
+  const s = buf.toString('latin1');
+  const first = (list) => { let best = null; for (const [id, name] of list) { const i = s.indexOf(id); if (i >= 0 && (!best || i < best.i)) best = { i, name }; } return best ? best.name : ''; };
+  const v = first(MKV_V);
+  return v ? { v, a: first(MKV_A), pix: '' } : null;
+}
+/**
+ * An MKV whose provider doesn't say what's inside (a playlist's episodes, most films): its first 256 KB are read —
+ * through the stream relay when the list uses it — to see. Then a browser that plays such files itself (Chrome, Edge)
+ * can play it straight from the relay instead of having it converted on this server. Remembered per address.
+ */
+async function sniffCodecs(it, alt = -1) {
+  const src = inputOf(it, alt);
+  if (!src || src.local || !isUrl(src.input) || !/\.(mkv|webm)(?:[?#]|$)/i.test(src.input)) return null;
+  const key = 'sniff:' + src.input;
+  if (codecMemo.has(key)) return codecMemo.get(key);
+  const viaRelay = relayOf.uses(srcList(it, alt));
+  const url = viaRelay ? relayOf.wrap(src.input, src.headers || {}) : src.input;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 6000);
+  let cx = null, read = false;
+  try {
+    const r = await fetchAny(url, { headers: { ...(viaRelay ? {} : src.headers || {}), Range: 'bytes=0-262143' }, signal: ac.signal });
+    if (r.ok && r.body) {
+      const parts = [];
+      let n = 0;
+      for await (const c of r.body) { parts.push(Buffer.from(c)); n += c.length; if (n >= 262144) break; }
+      cx = mkvCodecs(Buffer.concat(parts));
+      read = n >= 65536;
+    }
+  } catch {} finally { clearTimeout(timer); ac.abort(); }
+  // (Not remembered when it couldn't be read — the account busy, say: asked again next time.)
+  if (codecMemo.size > 5000) codecMemo.clear();
+  if (cx || read) codecMemo.set(key, cx);
+  // (A one-connection account: give the provider a moment to free that connection before the device opens its own.)
+  if (cx && oneConnection(it, alt)) await new Promise((ok) => setTimeout(ok, 1200));
+  return cx;
+}
 async function copyCodecs(it, alt = -1) {
   const a = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt] : null;
   if (it.t === 'episode') return (a ? a.cx : it.cx) || null;
@@ -1886,7 +1954,10 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles']) if (k in b) s[k] = !!b[k];
+  // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
+  if (['open', 'off'].includes(b.tmdbEpisodes)) s.tmdbEpisodes = b.tmdbEpisodes;
+  if (typeof b.tmdbLang === 'string' && /^([a-z]{2}(-[A-Z]{2})?)?$/.test(b.tmdbLang)) s.tmdbLang = b.tmdbLang;
   if (Array.isArray(b.hiddenGroups)) s.hiddenGroups = b.hiddenGroups.map(String);
   if (Array.isArray(b.hiddenKeys)) s.hiddenKeys = b.hiddenKeys.map(String);
   if (typeof b.transcodePreset === 'string' && /^(ultrafast|superfast|veryfast|faster|fast|medium)$/.test(b.transcodePreset)) s.transcodePreset = b.transcodePreset;
@@ -1936,14 +2007,15 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (Array.isArray(b.groupRules)) s.groupRules = b.groupRules.slice(0, 300).map((r) => ({ match: String(r.match || '').trim().slice(0, 120), to: String(r.to || '').trim().slice(0, 60), hide: !!r.hide, types: Array.isArray(r.types) ? r.types.filter((t) => ['live', 'movie', 'show', 'radio'].includes(t)) : [] })).filter((r) => r.match);
   num('backupDays', 0, 60);
   settingsStore.save();
-  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b) scheduleRebuild(100);
+  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b) scheduleRebuild(100);
   hub.toAll('settings', publicSettings());
   return adminSettingsView();
 });
 route('POST', '/api/admin/accounts/check', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const out = [];
-  for (const l of lists.all().filter((x) => x.type === 'xtream' && x.enabled)) out.push({ id: l.id, account: await lists.accountStatus(l.id, 0) });
+  // (Every list with an account: Xtream, a playlist link from an Xtream panel, a portal — at the same time.)
+  await Promise.all(lists.all().filter((x) => x.enabled && (lists.xtAccountOf(x) || x.type === 'stalker')).map(async (l) => out.push({ id: l.id, account: await lists.accountStatus(l.id, 0).catch(() => null) })));
   return out;
 });
 /** Provider accounts that run out soon (shown to the admin). */
@@ -1958,7 +2030,9 @@ function accountAlerts() {
   return out;
 }
 // Account details once a day (expiry, connections), without waiting for the next list refresh.
-setInterval(() => { for (const l of lists.all()) if (l.type === 'xtream' && l.enabled && (!l.account || Date.now() - (l.account.checkedAt || 0) > 20 * 3600e3)) lists.accountStatus(l.id, 0).catch(() => {}); }, 3600e3).unref();
+// (Each list's account a few times a day; a new list's within a few minutes.)
+const checkAccounts = () => { for (const l of lists.all()) if (l.enabled && (lists.xtAccountOf(l) || l.type === 'stalker') && (!l.account || !l.account.checkedAt || Date.now() - l.account.checkedAt > 20 * 3600e3) && !(l.account && l.account.errorAt && Date.now() - l.account.errorAt < 3600e3)) lists.accountStatus(l.id, 0).catch(() => {}); };
+setInterval(checkAccounts, 5 * 60e3).unref();
 // The stream relay: its secret (to copy onto the relay machine) and a test that it's there with the same secret.
 route('GET', '/api/admin/relay/secret', (req, res, p, q, ctx) => { requireAdmin(ctx); return { secret: (settings().relay || {}).secret || '' }; });
 route('POST', '/api/admin/relay/test', async (req, res, p, q, ctx) => {
@@ -2106,6 +2180,7 @@ let enrichCounts = null; // (Admin → Recommendations: the counts, kept for a m
  */
 function startEnrich(auto = false, opts = {}) {
   if (enrichJob || !tmdb.enabled()) return enrichJob ? enrichJob.status : null;
+  if (auto && settings().tmdbAuto === false) return null; // (Admin → Recommendations: new titles only when asked)
   const mode = auto ? 'visible' : opts.mode || 'visible';
   const types = new Set(Array.isArray(opts.types) && opts.types.length ? opts.types : ['movie', 'show']);
   const groups = new Set((opts.groups || []).map(String));
@@ -2179,6 +2254,61 @@ route('GET', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => {
   return { job: enrichJob ? enrichJob.status : null, last: lastEnrich, counts, groups: sorted };
 });
 route('DELETE', '/api/admin/tmdb/enrich', (req, res, p, q, ctx) => { requireAdmin(ctx); if (enrichJob) { enrichJob.status.stopped = true; lastEnrich = enrichJob.status; } enrichJob = null; return { ok: true }; });
+
+// ---- each episode's details from TMDB, for many series at once (Admin → Recommendations)
+let epsJob = null, lastEps = null;
+/** The series a choice means: the household's (watched, in My List, followed), every series with TMDB details, or chosen categories. */
+function seriesFor(mode, groups) {
+  const shows = catalog.items.filter((it) => it.t === 'show');
+  if (mode === 'groups') { const g = new Set((groups || []).map(String)); return shows.filter((it) => g.has(`show|${it.g}`)); }
+  if (mode === 'all') return shows.filter((it) => tmdb.meta.data.m[it.k]);
+  const mine = new Set();
+  for (const pr of accounts.profiles) {
+    const d = userdata.of(pr.id).data;
+    for (const h of d.history) mine.add(h.sk || h.k);
+    for (const k of d.list) mine.add(k);
+    for (const k of followsOf(pr.id)) mine.add(k);
+  }
+  return shows.filter((it) => mine.has(it.k));
+}
+function epsCounts() {
+  const m = tmdb.eps.data.m;
+  let shows = 0, withEps = 0, episodes = 0;
+  for (const it of catalog.items) {
+    if (it.t !== 'show' || !tmdb.meta.data.m[it.k]) continue;
+    shows++;
+    const e = m[it.k];
+    if (e && e.s) { withEps++; for (const n in e.s) episodes += Object.keys(e.s[n]).length; }
+  }
+  return { shows, withEps, episodes, household: seriesFor('mine').length };
+}
+route('GET', '/api/admin/tmdb/episodes', (req, res, p, q, ctx) => { requireAdmin(ctx); return { job: epsJob ? epsJob.status : null, last: lastEps, counts: epsCounts() }; });
+route('POST', '/api/admin/tmdb/episodes', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  if (!tmdb.enabled()) throw new HttpError(400, 'Add a TMDB key first.');
+  if (epsJob) return epsJob.status;
+  const b = await readJSON(req).catch(() => ({}));
+  const mode = ['mine', 'all', 'groups'].includes(b.mode) ? b.mode : 'mine';
+  const fresh = !!b.fresh;
+  const todo = seriesFor(mode, b.groups).filter((it) => fresh || !tmdb.eps.data.m[it.k] || Date.now() - (tmdb.eps.data.m[it.k].at || 0) > 14 * 86400e3);
+  if (!todo.length) return { running: false, nothing: true };
+  const job = epsJob = { status: { running: true, mode, total: todo.length, done: 0, found: 0, episodes: 0, current: '', started: Date.now() } };
+  log(`TMDB: fetching episode details for ${todo.length} series`);
+  (async () => {
+    for (const it of todo) {
+      if (epsJob !== job) break;
+      job.status.current = it.n;
+      try { const r = await tmdb.episodes(it, { fresh }); if (r && r.s) { job.status.found++; for (const n in r.s) job.status.episodes += Object.keys(r.s[n]).length; } } catch (e) { if (/key/i.test(e.message)) { job.status.error = e.message; break; } }
+      job.status.done++;
+    }
+  })().finally(() => {
+    job.status.running = false; job.status.finished = Date.now(); job.status.current = '';
+    lastEps = job.status;
+    if (epsJob === job) epsJob = null;
+  });
+  return job.status;
+});
+route('DELETE', '/api/admin/tmdb/episodes', (req, res, p, q, ctx) => { requireAdmin(ctx); if (epsJob) { epsJob.status.stopped = true; lastEps = epsJob.status; } epsJob = null; return { ok: true }; });
 route('DELETE', '/api/admin/sessions/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); media.stopSession(p.id); return { ok: true }; });
 route('GET', '/api/admin/fs', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);

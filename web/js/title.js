@@ -108,7 +108,14 @@ V.route('title', function (view, r) {
       if (names.length) V.$('.tp-social', view).innerHTML = '<span class="dim">Also watched by</span> ' + names.join(' ');
     }
     if (isShow) {
-      var eps = (d.episodes || []).map(function (e) { var ex = V.entry(e.k); if (!ex) { S.extra.set(e.k, e); ex = e; } if (e.plot && !ex.plot) ex.plot = e.plot; return ex; });
+      var eps = (d.episodes || []).map(function (e) {
+        var ex = V.entry(e.k);
+        if (!ex) { S.extra.set(e.k, e); ex = e; }
+        if (e.plot && !ex.plot) ex.plot = e.plot;
+        // (Each episode's own title, picture and air date from TMDB, when the provider's were missing or plain.)
+        if (e.tm && ex !== e) { if (e.et) ex.et = e.et; if (e.i) ex.i = e.i; if (e.air) ex.air = e.air; if (e.d && !ex.d) ex.d = e.d; }
+        return ex;
+      });
       it._eps = eps;
       if (!eps.length && d.epsError) {
         V.$('.eps', view).innerHTML = '<p class="dim">' + V.esc(d.epsError) + '</p><button class="btn" data-eps-retry>' + V.icon('refresh') + ' Try again</button>';
@@ -140,7 +147,7 @@ V.route('title', function (view, r) {
         var isNew = V.isNewEpisode(it.k, e.k);
         // (The number before the title shows only on phones, where the number column is hidden: "3 · Low Tide".)
         return '<div class="ep' + (rp.ep && rp.ep.k === e.k ? ' cur' : '') + '" data-k="' + V.esc(e.k) + '"><button class="ep-play" data-ep="play" aria-label="Play ' + V.esc(V.epLabel(e) + ' ' + (e.et || '')) + '"><span class="ep-n num">' + e.e + '</span><span class="ep-art" style="--tint:' + V.tint(e.n) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '<span class="ep-pl">' + V.icon('play') + '</span>' + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span></button>' +
-          '<div class="ep-body"><div class="ep-t"><b>' + (e.et && e.e != null ? '<span class="ep-tn num">' + e.e + ' · </span>' : '') + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + (e.d ? V.fmtLen(e.d) : '') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
+          '<div class="ep-body"><div class="ep-t"><b>' + (e.et && e.e != null ? '<span class="ep-tn num">' + e.e + ' · </span>' : '') + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + [e.air ? V.epAirDate(e.air) : '', e.d ? V.fmtLen(e.d) : ''].filter(Boolean).join(' · ') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
           '<button class="icon-btn" data-ep="menu" aria-label="More for this episode">' + V.icon('dots') + '</button></div>';
       }).join('');
     };
@@ -249,4 +256,11 @@ V.fixDetails = function (it, d) {
       V.$('.fix-q', dlg).onsubmit = function (e) { e.preventDefault(); load(dlg, V.$('.fix-q input', dlg).value.trim()); };
     },
   });
+};
+
+/** "2008-02-10" → "10 Feb 2008" (an episode's first showing, from TMDB). */
+V.epAirDate = function (d) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''));
+  if (!m) return '';
+  try { return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return d; }
 };
