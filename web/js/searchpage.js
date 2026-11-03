@@ -7,7 +7,7 @@ V.route('search', function (view, r) {
     '<input type="search" class="input" data-q placeholder="Movies, series, channels, people…" aria-label="Search" autocomplete="off" enterkeyhint="search" value="' + V.esc(q0) + '">' +
     (voice ? '<button type="button" class="icon-btn" data-voice aria-label="Search by voice">' + V.icon('mic') + '</button>' : '') + '</form><div class="search-out"></div></div>';
   var input = V.$('[data-q]', view), out = V.$('.search-out', view);
-  var epgReq = 0, peopleReq = 0, rec = null;
+  var epgReq = 0, peopleReq = 0, rec = null, partial = false, ranLen = 0;
   // Voice input still listening when the page is left: stop it (a late result would search on another page).
   V.pageCleanup = function () { epgReq++; peopleReq++; if (rec) { try { rec.abort(); } catch (e) {} rec = null; } };
   var run = function (q) {
@@ -25,6 +25,7 @@ V.route('search', function (view, r) {
       return;
     }
     var all = V.search.find(q, { limit: 300, episodes: true });
+    partial = !!all.partial; ranLen = S.items ? S.items.length : 0;
     var by = { movie: [], show: [], live: [], radio: [], episode: [] };
     all.forEach(function (it) { if (by[it.t]) by[it.t].push(it); });
     var top = all.filter(function (it) { return it.t !== 'episode'; }).slice(0, 18);
@@ -98,14 +99,27 @@ V.route('search', function (view, r) {
     }, 500);
   };
   // A search is remembered when it's used (Enter, or opening a result) — not every half-typed word.
-  input.addEventListener('input', V.debounce(function () { run(input.value); }, 120));
-  V.$('form', view).onsubmit = function (e) { e.preventDefault(); V.addSearch(input.value.trim()); input.blur(); };
+  // Results follow typing after a short pause (and only the latest counts); the suggestions under the box sooner.
+  var typeT = null, lastRun = null;
+  var runSoon = function () { clearTimeout(typeT); typeT = setTimeout(function () { typeT = null; if (input.value !== lastRun) { lastRun = input.value; run(input.value); } }, 120); };
+  input.addEventListener('input', runSoon);
+  var ac = V.autocomplete(input, {});
+  V.$('form', view).onsubmit = function (e) { e.preventDefault(); clearTimeout(typeT); if (input.value !== lastRun) { lastRun = input.value; run(input.value); } V.addSearch(input.value.trim()); ac.close(); input.blur(); };
+  // The search index was still being built when this was typed (or more of a big catalogue has come since): the full
+  // answer, now it's ready — unless you've moved on into the results.
+  var offReady = V.on('search-ready', function () {
+    if (!document.contains(view)) { offReady(); return; }
+    var ae = document.activeElement;
+    if (input.value.trim() && (partial || (S.items && S.items.length !== ranLen)) && (ae === input || !out.contains(ae))) run(input.value);
+  });
+  var cleanup0 = V.pageCleanup;
+  V.pageCleanup = function () { clearTimeout(typeT); offReady(); ac.destroy(); if (cleanup0) cleanup0(); };
   out.addEventListener('click', function (e) {
     var d = e.target.closest('[data-del-s]');
     if (d) { e.stopPropagation(); e.preventDefault(); V.removeSearch(d.dataset.delS); run(''); return; }
     if (e.target.closest('[data-clear-s]')) { V.removeSearch(null); run(''); return; }
     var b = e.target.closest('[data-s]');
-    if (b) { input.value = b.dataset.s; run(b.dataset.s); return; }
+    if (b) { input.value = b.dataset.s; lastRun = input.value; run(b.dataset.s); return; }
     if (e.target.closest('[data-k]') && input.value.trim().length > 1) V.addSearch(input.value.trim());
   }, true);
   var vb = V.$('[data-voice]', view);
@@ -122,6 +136,7 @@ V.route('search', function (view, r) {
     rec.onerror = function (ev) { if (me !== rec) return; vb.classList.remove('listening'); if (ev.error !== 'no-speech') V.toast('Voice search: ' + ev.error, { error: true }); };
     rec.start();
   };
+  lastRun = q0;
   run(q0);
   if (!V.device.tv) setTimeout(function () { input.focus(); }, 50);
 });

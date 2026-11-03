@@ -132,7 +132,8 @@ V.route('home', function (view) {
       var recent = V.recentChannels().filter(function (x) { return x.t === 'live'; });
       var seen = new Set(), items = [];
       favs.concat(recent).forEach(function (c) { if (!seen.has(c.k)) { seen.add(c.k); items.push(c); } });
-      if (items.length < 12) S.live.filter(function (c) { return V.epg.nowNext(c).now; }).slice(0, 40).forEach(function (c) { if (!seen.has(c.k)) { seen.add(c.k); items.push(c); } });
+      // (The first 40 with something on: not a look at every channel.)
+      if (items.length < 12) for (var i = 0, got = 0; got < 40 && i < S.live.length; i++) { var c = S.live[i]; if (V.epg.nowNext(c).now) { got++; if (!seen.has(c.k)) { seen.add(c.k); items.push(c); } } }
       if (!items.length) items = S.live.slice(0, 30);
       add({ id: 'live', title: 'On now', items: items.slice(0, 40), more: '#/live', play: true });
     },
@@ -237,25 +238,39 @@ V.ON_TV = [
   { id: 'kids', label: 'Kids’ TV on now', cat: /kids|children|animation|cartoon|preschool|family/i, grp: /kids|cartoon|disney junior|nick jr|nickelodeon|boomerang|baby/i },
   { id: 'news', label: 'News on now', cat: /news|current affairs/i, grp: /news|cnn|msnbc|fox news|bbc news|sky news|cnbc|bloomberg/i },
 ];
+// All four kinds in one pass over the channels (tens of thousands of them), kept for the minute: the home page is drawn
+// several times as things load.
+var onTvMemo = null;
+V.on('epg', function () { onTvMemo = null; });
 V.onTvNow = function (kind) {
-  var k = V.ON_TV.filter(function (x) { return x.id === kind; })[0];
-  if (!k) return [];
-  var out = [];
-  var favs = new Set(S.data.favs), hidden = new Set(S.data.hidden); // (a Set: thousands of channels × the hidden list, four rows)
+  if (!V.ON_TV.some(function (x) { return x.id === kind; })) return [];
+  var stamp = [Math.floor(Date.now() / 60000), S.catalogStamp, S.live.length, S.data.favs.length, S.data.favs[0], S.data.hidden.length, S.data.hidden[0]].join('|');
+  if (!onTvMemo || onTvMemo.stamp !== stamp) onTvMemo = { stamp: stamp, by: onTvAll() };
+  return onTvMemo.by[kind].slice();
+};
+function onTvAll() {
+  var by = {};
+  V.ON_TV.forEach(function (k) { by[k.id] = []; });
+  var favs = new Set(S.data.favs), hidden = new Set(S.data.hidden); // (a Set: thousands of channels × the hidden list)
   for (var i = 0; i < S.live.length; i++) {
     var c = S.live[i];
     if (hidden.has(c.k)) continue;
-    var now = V.epg.nowNext(c).now;
+    // (No guide for it: nothing on, without making up the placeholder blocks to find that out.)
+    var now = V.epg.has(c) ? V.epg.nowNext(c).now : null;
     if (now && now.ph) now = null; // (a placeholder block isn't a programme)
+    if (!now && c.es !== 'live') continue; // (nothing on: in none of them)
     var cats = now && now.c ? [].concat(now.c).join(' ') : '';
-    var hit = false;
-    if (cats) hit = k.cat.test(cats);
-    else if (!k.needCat) hit = (now || c.es === 'live') && k.grp.test(c.g + ' ' + c.n) && (kind !== 'kids' || c.kd || /kids|cartoon|junior|nick/i.test(c.g + ' ' + c.n));
-    if (hit) out.push([c, (favs.has(c.k) ? 2 : 0) + (now ? 1 : 0)]);
+    var gn = cats ? '' : c.g + ' ' + c.n;
+    for (var j = 0; j < V.ON_TV.length; j++) {
+      var k = V.ON_TV[j], hit = false;
+      if (cats) hit = k.cat.test(cats);
+      else if (!k.needCat) hit = k.grp.test(gn) && (k.id !== 'kids' || c.kd || /kids|cartoon|junior|nick/i.test(gn));
+      if (hit) by[k.id].push([c, (favs.has(c.k) ? 2 : 0) + (now ? 1 : 0)]);
+    }
   }
-  out.sort(function (a, b) { return b[1] - a[1]; });
-  return out.map(function (x) { return x[0]; });
-};
+  Object.keys(by).forEach(function (id) { by[id] = by[id].sort(function (a, b) { return b[1] - a[1]; }).map(function (x) { return x[0]; }); });
+  return by;
+}
 
 // ---------------------------------------------------------------- surprise me
 V.surprise = function () {

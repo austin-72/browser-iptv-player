@@ -11,7 +11,7 @@ V.loadCatalog = function (force, tries) {
   var cached = null;
   // (A newer load replaces this one: the pages still coming for this one stop.)
   var token = S.catalogLoad = (S.catalogLoad || 0) + 1;
-  var start = force ? Promise.resolve(null) : V.idb.get(cacheKey);
+  var start = force ? Promise.resolve(null) : V.readCatalogCache(cacheKey);
   return start.then(function (c) {
     cached = c;
     var h = {};
@@ -38,7 +38,7 @@ V.loadCatalog = function (force, tries) {
         V.catalogRest(token, pid, cacheKey, etag, data);
         return data;
       }
-      V.idb.set(cacheKey, { etag: etag, data: data });
+      V.saveCatalogCache(cacheKey, etag, data);
       return data;
     });
   }, function (e) {
@@ -47,10 +47,37 @@ V.loadCatalog = function (force, tries) {
   }).then(function (data) {
     if (token !== S.catalogLoad && S.items) return data; // (a newer load already drew)
     S.catalogVersion = data.base || data.version;
-    V.index(data.items || []);
+    var items = data.items || [];
+    // A big copy from this device: the first part now (the page can be drawn), the rest in slices just after.
+    if (items.length > 150000 && !data.pages) indexInParts(token, items);
+    else V.index(items);
     V.emit('catalog');
     return data;
   });
+};
+function indexInParts(token, items) {
+  // (Opened on a title or channel that's in the later part: all of it now, rather than "not found" for a moment.)
+  var m = /^#\/(title|channel)\/([^?]+)/.exec(location.hash), want = null;
+  if (m) { try { want = decodeURIComponent(m[2]); } catch (e) { want = m[2]; } }
+  if (want) for (var w = 100000; w < items.length; w++) if (items[w].k === want) { V.index(items); return; }
+  var all = items.slice(0, 100000), i = all.length;
+  V.index(all);
+  var step = function () {
+    if (token !== S.catalogLoad || S.items !== all) return;
+    if (i >= items.length) { V.catalogComplete(); return; }
+    for (var end = Math.min(items.length, i + 25000); i < end; i++) all.push(items[i]);
+    V.indexMore(all).then(step);
+  };
+  setTimeout(step, 50);
+}
+/** All of a big catalogue is in: everything that uses it hears, and the page is drawn again if that won't get in the way. */
+V.catalogComplete = function () {
+  V.emit('catalog');
+  V.renderShell();
+  // (Re-drawn only when it won't get in the way: not while typing, in a dialog, or watching full screen.)
+  var ae = document.activeElement;
+  var busy = (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) || V.$('dialog[open]') || (V.watch && V.watch.it && !V.watch.mini);
+  if (!busy) V.router.refresh();
 };
 
 /** A refused answer, as a readable error (a proxy's own error page isn't JSON: say what it means instead). */
@@ -63,9 +90,106 @@ V.catalogError = function (r) {
   });
 };
 
-/** The other pages of a big catalogue, one after another; the pages already on screen are re-drawn once it's all here. */
+// The copy of the catalogue kept on this device, in parts of 5,000: one put or get of half a million titles holds
+// the page up for a second or more (several on a TV); parts are written in idle moments and read one at a time.
+var CACHE_PART = 5000;
+V.saveCatalogCache = function (key, etag, data) {
+  var items = (data && data.items) || [];
+  var parts = Math.ceil(items.length / CACHE_PART);
+  var go = function () {
+    if (parts <= 1) return V.idb.set(key, { etag: etag, data: data });
+    var head = { etag: etag, data: { version: data.version, base: data.base, items: null, parts: parts, total: items.length } };
+    var i = 0;
+    var next = function () {
+      if (i >= parts) return V.idb.set(key, head).then(function () {
+        // (Parts left from a bigger catalogue before.)
+        return V.idb.keys().then(function (ks) { ks.forEach(function (k) { var m = typeof k === 'string' && k.indexOf(key + '#') === 0 ? +k.slice(key.length + 1) : -1; if (m >= parts) V.idb.del(k); }); });
+      });
+      var p = i++;
+      return new Promise(function (ok) { V.idle(ok, { timeout: 1500 }); }).then(function () { return V.idb.set(key + '#' + p, items.slice(p * CACHE_PART, (p + 1) * CACHE_PART)); }).then(next);
+    };
+    // (The old copy's head goes first, so a copy half written is never taken for a whole one.)
+    return V.idb.del(key).then(next);
+  };
+  try { var w = go(); if (w && w.catch) w.catch(function () {}); return w; } catch (e) { return Promise.resolve(); }
+};
+V.readCatalogCache = function (key) {
+  return V.idb.get(key).then(function (c) {
+    if (!c || !c.data || !c.data.parts) return c || null;
+    var items = [], i = 0;
+    var next = function () {
+      if (i >= c.data.parts) {
+        if (items.length !== c.data.total) return null;
+        return { etag: c.etag, data: { version: c.data.version, base: c.data.base, items: items } };
+      }
+      return V.idb.get(key + '#' + i++).then(function (part) {
+        if (!part || !part.length) return null; // (a part missing: no copy, then)
+        for (var j = 0; j < part.length; j++) items.push(part[j]);
+        return next();
+      });
+    };
+    return next();
+  }).catch(function () { return null; });
+};
+
+/**
+ * One page of a big catalogue. The answer is read in a worker and handed over a few thousand titles at a time: reading
+ * 100,000 titles at once holds the page up for a quarter of a second here, and seconds on a TV. (Browsers without
+ * workers, or where one can't start, read it here.)
+ */
+V.fetchCatalogPage = (function () {
+  var w = null, broken = false, seq = 0, waiting = {};
+  var SRC = 'onmessage=function(e){var id=e.data.id;try{fetch(e.data.url,{credentials:"same-origin"}).then(function(r){if(!r.ok){postMessage({id:id,status:r.status});return;}' +
+    'return r.json().then(function(d){var it=d.items||[];for(var i=0;i<it.length;i+=2000)postMessage({id:id,part:it.slice(i,i+2000)});postMessage({id:id,status:200});});})' +
+    '.catch(function(err){postMessage({id:id,error:String(err&&err.message||err)});});}catch(err){postMessage({id:id,error:String(err&&err.message||err),nofetch:true});}};';
+  var here = function (url) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) return { status: r.status, items: [] };
+      return r.json().then(function (d) { return { status: 200, items: d.items || [] }; });
+    });
+  };
+  var fallback = function () {
+    broken = true;
+    if (w) { try { w.terminate(); } catch (e) {} w = null; }
+    var ws = waiting; waiting = {};
+    Object.keys(ws).forEach(function (id) { here(ws[id].url).then(ws[id].ok, ws[id].no); });
+  };
+  var worker = function () {
+    if (w || broken) return w;
+    try {
+      if (!window.Worker || !window.Blob || !window.URL || !URL.createObjectURL) { broken = true; return null; }
+      w = new Worker(URL.createObjectURL(new Blob([SRC], { type: 'text/javascript' })));
+      w.onmessage = function (e) {
+        var m = e.data, job = waiting[m.id];
+        if (!job) return;
+        if (m.part) { for (var i = 0; i < m.part.length; i++) job.items.push(m.part[i]); return; }
+        if (m.nofetch) { fallback(); return; }
+        delete waiting[m.id];
+        if (m.error) job.no(new Error(m.error));
+        else job.ok({ status: m.status, items: job.items });
+      };
+      w.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); fallback(); };
+    } catch (e) { broken = true; w = null; }
+    return w;
+  };
+  var fn = function (url) {
+    var wk = worker();
+    if (!wk) return here(url);
+    return new Promise(function (ok, no) {
+      var id = ++seq;
+      waiting[id] = { ok: ok, no: no, items: [], url: url };
+      wk.postMessage({ id: id, url: location.protocol + '//' + location.host + url });
+    });
+  };
+  /** Done with pages for now (the worker isn't kept around). */
+  fn.done = function () { if (w && !Object.keys(waiting).length) { try { w.terminate(); } catch (e) {} w = null; } };
+  return fn;
+})();
+
+/** The other pages of a big catalogue, one after another. Each is indexed as it comes (a little at a time), so search
+ *  finds it straight away; the pages already on screen are re-drawn once it's all here. */
 V.catalogRest = function (token, pid, cacheKey, etag, first) {
-  var all = first.items.slice(), page = 1, tries = 0;
+  var all = first.items, page = 1, tries = 0, indexing = Promise.resolve();
   var stale = function () { return token !== S.catalogLoad || !S.profile || S.profile.id !== pid; };
   var show = function () {
     var el = V.$('#cat-more');
@@ -75,36 +199,30 @@ V.catalogRest = function (token, pid, cacheKey, etag, first) {
   };
   S.catalogLoading = { got: all.length, total: first.total || all.length };
   show();
+  var finish = function () {
+    if (stale()) return;
+    var data = { version: first.version, base: first.base, items: all };
+    S.catalogLoading = null; show();
+    V.fetchCatalogPage.done();
+    S.catalogVersion = data.base || data.version;
+    V.catalogComplete();
+    // (A very big catalogue may not fit in this browser's storage: then it's fetched again next time.)
+    V.saveCatalogCache(cacheKey, etag, data);
+  };
   var next = function () {
     if (stale()) return;
-    if (page >= first.pages) {
-      var data = { version: first.version, base: first.base, items: all };
-      S.catalogLoading = null; show();
-      S.catalogVersion = data.base || data.version;
-      V.index(all);
-      V.emit('catalog');
-      V.renderShell();
-      // (Re-drawn only when it won't get in the way: not while typing, in a dialog, or watching full screen.)
-      var ae = document.activeElement;
-      var busy = (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) || V.$('dialog[open]') || (V.watch && V.watch.it && !V.watch.mini);
-      if (!busy) V.router.refresh();
-      // (A very big catalogue may not fit in this browser's storage: then it's fetched again next time.)
-      try { var w = V.idb.set(cacheKey, { etag: etag, data: data }); if (w && w.catch) w.catch(function () {}); } catch (e) {}
-      return;
-    }
-    return fetch('/api/catalog?page=' + page + '&v=' + encodeURIComponent(etag || ''), { credentials: 'same-origin' }).then(function (r) {
+    if (page >= first.pages) { indexing.then(finish); return; }
+    return V.fetchCatalogPage('/api/catalog?page=' + page + '&v=' + encodeURIComponent(etag || '')).then(function (r) {
       if (stale()) return;
       // The catalogue changed meanwhile: start again with the new one.
       if (r.status === 409) { S.catalogLoading = null; show(); return V.loadCatalog(true).catch(function () {}); }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json().then(function (d) {
-        if (stale()) return;
-        for (var i = 0; i < d.items.length; i++) all.push(d.items[i]);
-        page++; tries = 0;
-        S.catalogLoading.got = all.length;
-        show();
-        return next();
-      });
+      if (r.status !== 200) throw new Error('HTTP ' + r.status);
+      for (var i = 0; i < r.items.length; i++) all.push(r.items[i]);
+      page++; tries = 0;
+      S.catalogLoading.got = all.length;
+      show();
+      indexing = indexing.then(function () { if (!stale()) return V.indexMore(all); });
+      return next();
     }).catch(function () {
       if (stale()) return;
       // (A dropped connection or a busy server: wait and ask for the same page again, a few times.)
@@ -125,40 +243,79 @@ V.applyCatalogDelta = function (old, d) {
   return { version: d.version, base: d.base, items: items };
 };
 
+// ---------------------------------------------------------------- the catalogue, sorted out by kind
+var epCmp = function (a, b) { return (a.s || 0) - (b.s || 0) || (a.e || 0) - (b.e || 0); };
+var chCmp = function (a, b) { return (a.so || a.no || 0) - (b.so || b.no || 0); };
+/** Sorts items[from..to) into the lists by kind (episodes into their series, in order). True if channels were added. */
+function indexRange(items, from, to) {
+  var groups = S.groups, chans = false;
+  for (var i = from; i < to; i++) {
+    var it = items[i];
+    S.byKey.set(it.k, it);
+    var t = it.t;
+    if (t === 'live') { S.live.push(it); chans = true; }
+    else if (t === 'radio') { S.radio.push(it); chans = true; }
+    else if (t === 'movie') S.movies.push(it);
+    else if (t === 'show') S.shows.push(it);
+    else if (t === 'episode') {
+      S.episodes.push(it);
+      var l = S.epsByShow.get(it.sk);
+      if (!l) S.epsByShow.set(it.sk, (l = []));
+      // (They nearly always come in order: then it's just the end of the list.)
+      if (!l.length || epCmp(l[l.length - 1], it) <= 0) l.push(it);
+      else { var lo = 0, hi = l.length; while (lo < hi) { var mid = (lo + hi) >> 1; if (epCmp(l[mid], it) <= 0) lo = mid + 1; else hi = mid; } l.splice(lo, 0, it); }
+    }
+    var gm = groups[t];
+    if (gm) { var g = gm.get(it.g); if (!g) gm.set(it.g, (g = [])); g.push(it); }
+    if ((t === 'movie' || t === 'show') && it.gn) for (var j = 0; j < it.gn.length; j++) { var arr = S.genres.get(it.gn[j]); if (!arr) S.genres.set(it.gn[j], (arr = [])); arr.push(it); }
+  }
+  S.indexedN = to;
+  return chans;
+}
+function sortChannels() {
+  // (so: the admin's place for a channel in its category, Admin → Channels; otherwise the channel number.)
+  S.live.sort(chCmp);
+  S.radio.sort(chCmp);
+}
 V.index = function (items) {
   S.items = items;
   S.byKey = new Map();
   S.extra = S.extra || new Map();
   S.live = []; S.radio = []; S.movies = []; S.shows = []; S.episodes = [];
   S.epsByShow = new Map();
-  var groups = { live: new Map(), radio: new Map(), movie: new Map(), show: new Map() };
-  for (var i = 0; i < items.length; i++) {
-    var it = items[i];
-    S.byKey.set(it.k, it);
-    if (it.t === 'live') S.live.push(it);
-    else if (it.t === 'radio') S.radio.push(it);
-    else if (it.t === 'movie') S.movies.push(it);
-    else if (it.t === 'show') S.shows.push(it);
-    else if (it.t === 'episode') {
-      S.episodes.push(it);
-      var l = S.epsByShow.get(it.sk);
-      if (!l) S.epsByShow.set(it.sk, (l = []));
-      l.push(it);
-    }
-    var gm = groups[it.t];
-    if (gm) { var g = gm.get(it.g); if (!g) gm.set(it.g, (g = [])); g.push(it); }
-  }
-  // (so: the admin's place for a channel in its category, Admin → Channels; otherwise the channel number.)
-  S.live.sort(function (a, b) { return (a.so || a.no || 0) - (b.so || b.no || 0); });
-  S.radio.sort(function (a, b) { return (a.so || a.no || 0) - (b.so || b.no || 0); });
-  S.epsByShow.forEach(function (l) { l.sort(function (a, b) { return a.s - b.s || a.e - b.e; }); });
-  S.groups = groups;
+  S.groups = { live: new Map(), radio: new Map(), movie: new Map(), show: new Map() };
   S.genres = new Map();
-  for (var j = 0; j < items.length; j++) {
-    var x = items[j];
-    if ((x.t === 'movie' || x.t === 'show') && x.gn) x.gn.forEach(function (gname) { var arr = S.genres.get(gname); if (!arr) S.genres.set(gname, (arr = [])); arr.push(x); });
-  }
+  S.indexedN = 0;
+  S.catalogStamp = (S.catalogStamp || 0) + 1; // (for lists worked out from the catalogue and kept: browse.js)
+  indexRange(items, 0, items.length);
+  sortChannels();
   if (V.search) V.search.reset();
+};
+/**
+ * More of the catalogue now on screen (its later pages, added to the end of the same list): sorted in a few
+ * milliseconds at a time, between key presses. Resolves once it's all in.
+ */
+V.indexMore = function (items) {
+  if (items !== S.items) {
+    if (!S.items || !S.byKey || !items.length || items[0] !== S.items[0] || items.length < S.items.length) { V.index(items); return Promise.resolve(); }
+    S.items = items;
+  }
+  var chans = false;
+  return new Promise(function (done) {
+    var tick = function (dl) {
+      if (S.items !== items) { done(); return; } // (another catalogue by now)
+      while (S.indexedN < items.length) {
+        if (indexRange(items, S.indexedN, Math.min(items.length, S.indexedN + 500))) chans = true;
+        if (dl.timeRemaining() <= 0) break;
+      }
+      if (S.indexedN < items.length) { V.idle(tick, { timeout: 300 }); return; }
+      if (chans) sortChannels();
+      S.catalogStamp = (S.catalogStamp || 0) + 1;
+      if (V.search) V.search.reset(true);
+      done();
+    };
+    V.idle(tick, { timeout: 300 });
+  });
 };
 
 /** Groups for a type, biggest first, as [{name, items}]. */
@@ -180,7 +337,7 @@ V.loadEpisodes = function (show) {
   if (!show.x && local.length) { show._eps = local; return Promise.resolve(local); }
   return V.api('/api/show/' + encodeURIComponent(show.k) + '/episodes').then(function (eps) {
     eps.forEach(function (e) { if (!S.byKey.has(e.k)) S.extra.set(e.k, e); });
-    if (V.search) V.search.reset();
+    if (V.search) V.search.changed();
     show._eps = eps.map(function (e) { return V.entry(e.k) || e; });
     return show._eps;
   });

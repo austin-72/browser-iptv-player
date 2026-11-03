@@ -28,6 +28,19 @@ V.topN = function (lists, n, score) {
 };
 V.debounce = function (fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; };
 V.throttle = function (fn, ms) { var last = 0, t; return function () { var a = arguments, now = Date.now(); clearTimeout(t); if (now - last >= ms) { last = now; fn.apply(null, a); } else t = setTimeout(function () { last = Date.now(); fn.apply(null, a); }, ms - (now - last)); }; };
+/** Runs fn when the browser has a moment (requestIdleCallback; a short timeout on older TV browsers). fn gets a
+ *  deadline with timeRemaining(), at most `max` ms (default 12) so a long job split this way never holds up a key press. */
+V.now = function () { return window.performance && performance.now ? performance.now() : Date.now(); };
+V.idle = function (fn, o) {
+  o = o || {};
+  var max = o.max || 12;
+  var wrap = function (dl) {
+    var end = V.now() + Math.min(max, dl && dl.timeRemaining ? Math.max(4, dl.timeRemaining()) : max);
+    fn({ timeRemaining: function () { return Math.max(0, end - V.now()); } });
+  };
+  if (window.requestIdleCallback && !o.soon) return requestIdleCallback(wrap, { timeout: o.timeout || 400 });
+  return setTimeout(wrap, o.soon ? 0 : 16);
+};
 V.clamp = function (x, a, b) { return Math.min(b, Math.max(a, x)); };
 V.pick = function (o, k, d) { return o && o[k] != null ? o[k] : d; };
 V.hash = function (str, seed) {

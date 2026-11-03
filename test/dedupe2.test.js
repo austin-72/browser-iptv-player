@@ -84,3 +84,34 @@ test('patterns from real lists: country tags, "_msub", numbered event channels',
   assert.deepStrictEqual(espn.map((x) => x.ev).sort(), ['Pacific vs. Denver', 'Toledo vs. Ohio']);
   assert.ok(of(c, 'live').some((x) => x.n === 'FLINT FIREBIRDS'));
 });
+
+test('the same TMDB entry is one title, whatever each provider calls it', () => {
+  const lists = [
+    { id: 'A', items: [movie('EN - Spirited Away - 2001', '|EN| ANIMATION'), movie('EN - Heat - 1995', '|EN| CRIME'), show('Ask ve Gozyasi (2024)', '|EN| SERIES')] },
+    { id: 'B', items: [movie('Sen to Chihiro no Kamikakushi (2001)', 'Movies'), movie('Heat (2013)', 'Movies'), show('Queen of Tears (2024)', 'Series')] },
+  ];
+  const parsed = new Map(lists.map((l) => [l.id, { items: l.items, epgUrls: [] }]));
+  const mk = (ids) => {
+    const c = new Catalog({ lists: { all: () => lists.map((l) => ({ id: l.id, name: l.id, enabled: true, type: 'xtream' })), parsed }, epg: { has: () => false, resolve: () => null }, getSettings: () => ({ tidyGroups: true, groupRules: [], hiddenGroups: [], hiddenKeys: [] }) });
+    c.keepLangs = () => ({ langs: new Set(['en']), unknown: true });
+    c.tmdbOf = (k) => ids[k] || null;
+    c.build();
+    return c;
+  };
+  const first = mk({});
+  const byName = (c, n) => c.items.find((i) => i.n === n);
+  // The matches TMDB found for each copy (by key), as the server keeps them.
+  const ids = {};
+  ids[byName(first, 'Spirited Away').k] = { id: 129, type: 'movie' };
+  ids[byName(first, 'Sen to Chihiro no Kamikakushi').k] = { id: 129, type: 'movie' };
+  ids[byName(first, 'Ask ve Gozyasi').k] = { id: 219887, type: 'tv' };
+  ids[byName(first, 'Queen of Tears').k] = { id: 219887, type: 'tv' };
+  // (Heat 1995 / 2013: one match given the wrong id — years far apart stay apart.)
+  for (const h of first.items.filter((i) => i.n === 'Heat')) ids[h.k] = { id: 949, type: 'movie' };
+  const c = mk(ids);
+  assert.strictEqual(of(c, 'movie').filter((i) => /spirited|chihiro/i.test(i.n)).length, 1);
+  assert.strictEqual(of(c, 'movie').find((i) => /spirited|chihiro/i.test(i.n)).alts.length, 1, 'the other is its backup');
+  assert.strictEqual(of(c, 'show').length, 1);
+  assert.strictEqual(of(c, 'show')[0].xts.length, 2, 'both providers\' episodes');
+  assert.strictEqual(of(c, 'movie').filter((i) => i.n === 'Heat').length, 2);
+});

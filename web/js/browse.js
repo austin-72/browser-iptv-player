@@ -4,16 +4,41 @@
 // (One collator for every comparison: localeCompare makes one each time, which takes seconds over 100,000 titles on a TV.)
 var nameCmp = (function () { try { var c = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }); return function (x, y) { return c.compare(x, y); }; } catch (e) { return function (x, y) { return String(x).localeCompare(y); }; } })();
 V.nameCmp = nameCmp;
+// A–Z by a key worked out once per title (plain letters, numbers padded so "2" comes before "10"), the collator only
+// for ties: comparing keys is many times quicker than the collator over 50,000 titles.
+var NONASCII = /[^\x00-\x7f]/, DIGIT = /\d/;
+var azKey = function (n) {
+  n = String(n || '');
+  var k = NONASCII.test(n) ? V.norm(n) : n.toLowerCase();
+  return DIGIT.test(k) ? k.replace(/\d+/g, function (d) { return d.length >= 10 ? d : ('0000000000' + d).slice(-10); }) : k;
+};
+var azSort = function (items, desc) {
+  var keys = new Array(items.length), ix = new Array(items.length);
+  for (var i = 0; i < items.length; i++) { keys[i] = azKey(items[i].n); ix[i] = i; }
+  ix.sort(function (p, q) { var a = keys[p], b = keys[q], c = a < b ? -1 : a > b ? 1 : nameCmp(items[p].n, items[q].n); return (desc ? -c : c) || p - q; });
+  var out = new Array(items.length);
+  for (var j = 0; j < ix.length; j++) out[j] = items[ix[j]];
+  return out;
+};
 V.sortItems = function (items, sort) {
+  if (sort === 'az' || sort === 'za') return azSort(items, sort === 'za');
   var a = items.slice();
-  if (sort === 'az') a.sort(function (x, y) { return nameCmp(x.n, y.n); });
-  else if (sort === 'za') a.sort(function (x, y) { return nameCmp(y.n, x.n); });
-  else if (sort === 'new') a.sort(function (x, y) { return (y.ad || 0) - (x.ad || 0); });
+  if (sort === 'new') a.sort(function (x, y) { return (y.ad || 0) - (x.ad || 0); });
   else if (sort === 'year') a.sort(function (x, y) { return (y.y || 0) - (x.y || 0); });
   else if (sort === 'rating') a.sort(function (x, y) { return (y.r || 0) - (x.r || 0); });
   else if (sort === 'num') a.sort(function (x, y) { return (x.no || 0) - (y.no || 0); });
   else if (sort === 'genre') a.sort(function (x, y) { var gx = (x.gn && x.gn[0]) || '\uffff', gy = (y.gn && y.gn[0]) || '\uffff'; return nameCmp(gx, gy) || nameCmp(x.n, y.n); });
   return a;
+};
+
+// What a Movies / Series page works out from the whole catalogue, kept until the catalogue changes: going back to the
+// page, or changing a filter, doesn't sort 50,000 titles again.
+var browseMemo = { stamp: -1, m: {} };
+V.browseMemo = function (key, fn) {
+  if (browseMemo.stamp !== S.catalogStamp) browseMemo = { stamp: S.catalogStamp, m: {} };
+  var m = browseMemo.m;
+  if (!(key in m)) m[key] = fn();
+  return m[key];
 };
 
 function vodPage(view, r, type, title) {
@@ -22,9 +47,11 @@ function vodPage(view, r, type, title) {
   var genre = r.q.get('genre') || '';
   var sort = r.q.get('sort') || (V.ls.get('sort.' + type) || 'default');
   var groups = V.groupsOf(type).sort(function (a, b) { return a.name.localeCompare(b.name); });
-  var genres = [];
-  S.genres.forEach(function (list, name) { var n = list.filter(function (x) { return x.t === type && (!g || x.g === g); }).length; if (n >= 1) genres.push({ name: name, n: n }); });
-  genres.sort(function (a, b) { return b.n - a.n; });
+  var genres = V.browseMemo('genres|' + type + '|' + g, function () {
+    var out = [];
+    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || list[i].g === g)) n++; if (n >= 1) out.push({ name: name, n: n }); });
+    return out.sort(function (a, b) { return b.n - a.n; });
+  });
   var hidden = new Set(S.data.hidden);
   var dec = r.q.get('dec') || '', minR = +(r.q.get('rmin') || 0), maxLen = +(r.q.get('len') || 0);
   var decOk = function (x) {
@@ -35,8 +62,11 @@ function vodPage(view, r, type, title) {
     var d = +dec; return x.y >= d && x.y < d + 10;
   };
   var lenOk = function (x) { if (!maxLen || type !== 'movie') return true; if (!x.d) return false; return maxLen > 0 ? x.d <= maxLen * 60 : x.d >= -maxLen * 60; };
-  var items = all.filter(function (x) { return !hidden.has(x.k) && (!g || x.g === g) && (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
-  items = V.sortItems(items, sort === 'default' ? (g || genre ? 'az' : 'new') : sort);
+  // (Sorted once, then filtered: the same order as filtering first, as the sorts keep ties in catalogue order.)
+  var sortBy = sort === 'default' ? (g || genre ? 'az' : 'new') : sort;
+  var base = g ? (S.groups[type] && S.groups[type].get(g)) || [] : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
+  var sorted = V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy, function () { return V.sortItems(base, sortBy); });
+  var items = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || x.g === g) && (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
   var setQ = function (k, v) { var q = new URLSearchParams(r.q); if (v) q.set(k, v); else q.delete(k); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
   view.innerHTML = V.pageHead(title, '<div class="page-tools">' +
     '<label class="sel"><span class="sr-only">Category</span><select class="input" data-f="g"><option value="">All categories</option>' + groups.map(function (x) { return '<option value="' + V.esc(x.name) + '"' + (x.name === g ? ' selected' : '') + '>' + V.esc(x.name) + ' (' + x.items.length + ')</option>'; }).join('') + '</select></label>' +
@@ -93,7 +123,7 @@ function channelsPage(view, r, type) {
     box.innerHTML = '';
     var more = function () {
       var html = '';
-      for (var end = Math.min(items.length, n + 80); n < end; n++) html += V.channelRow(items[n]);
+      for (var end = Math.min(items.length, n + (n ? 80 : 40)); n < end; n++) html += V.channelRow(items[n]);
       box.insertAdjacentHTML('beforeend', html);
     };
     more();

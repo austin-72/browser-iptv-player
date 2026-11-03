@@ -68,13 +68,41 @@ V.renderShell = function () {
   V.$('#brand').setAttribute('aria-label', (b.name || 'Home') + ' — home');
   V.$('#me-btn').innerHTML = V.avatar(S.profile.avatar, 'sm') + '<span class="sr-only">' + V.esc(S.profile.name) + ' — profile menu</span>';
   V.$$('[data-admin-only]').forEach(function (x) { x.hidden = !S.profile.admin; });
-  var types = new Set(S.items.map(function (i) { return i.t; }));
+  // (Which kinds there are, from the lists already sorted by kind: not a pass over half a million items.)
+  var types = new Set();
+  if (S.live && S.live.length) types.add('live');
+  if (S.radio && S.radio.length) types.add('radio');
+  if (S.movies && S.movies.length) types.add('movie');
+  if (S.shows && S.shows.length) types.add('show');
+  if (S.episodes && S.episodes.length) types.add('episode');
+  if (!S.live && S.items) S.items.forEach(function (i) { types.add(i.t); });
   V.$$('[data-need]').forEach(function (x) { x.hidden = !x.dataset.need.split(',').some(function (t) { return types.has(t); }); });
   // Phones: the one Live TV tab opens radio when there are radio stations and no TV channels.
   var lt = V.$('#tabbar [data-nav=live]');
   if (lt) { var radioOnly = !types.has('live') && types.has('radio'); lt.setAttribute('href', radioOnly ? '#/radio' : '#/live'); V.$('span', lt).textContent = radioOnly ? 'Radio' : 'Live TV'; V.$('use', lt).setAttribute('href', radioOnly ? '#i-radio' : '#i-tv'); }
   V.updateUnread();
+  V.headerSearch();
   document.title = b.name || '';
+};
+
+/** A search box in the top bar on wide screens (not TVs: there the Search page is a press away), with suggestions as
+ *  you type. Enter without one picked shows every result on the Search page. */
+V.headerSearch = function () {
+  if (V.$('#hdr-search')) return;
+  var link = V.$('#topbar [data-nav=search]');
+  if (!link) return;
+  var f = document.createElement('form');
+  f.id = 'hdr-search';
+  f.className = 'hdr-search';
+  f.setAttribute('role', 'search');
+  f.innerHTML = '<span class="hs-i">' + V.icon('search') + '</span><input type="search" class="hs-in" placeholder="Search" aria-label="Search films, series, channels and people" enterkeyhint="search" spellcheck="false">';
+  link.parentNode.insertBefore(f, link);
+  var inp = V.$('input', f);
+  var go = function (q) { inp.value = ''; inp.blur(); V.router.go('#/search' + (q ? '?q=' + encodeURIComponent(q) : '')); };
+  V.autocomplete(inp, { onSearch: go, onPick: function () { inp.value = ''; } });
+  f.onsubmit = function (e) { e.preventDefault(); go(inp.value.trim()); };
+  // Escape with nothing to close: out of the box.
+  inp.addEventListener('keydown', function (e) { if ((e.key === 'Escape' || e.key === 'Esc') && !e.defaultPrevented) { inp.value = ''; inp.blur(); } });
 };
 V.updateUnread = function () {
   var n = (S.unread || 0) + (S.alertsUnread || 0); // (messages, and alerts in New for you)

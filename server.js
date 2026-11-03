@@ -41,6 +41,7 @@ const { Concurrency } = require('./lib/concurrency');
 const { fetchAny, setProxyResolver, testProxy, proxyFor } = require('./lib/net');
 const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
+const Titles = require('./lib/titles');
 const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
@@ -129,6 +130,18 @@ const lists = new Lists({
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
 catalog.overrides = overrides;
+// The TMDB entry each title was matched to (by its key in the last build): titles that are one entry are merged.
+// (Only a sure match: picked by hand, or TMDB's title is clearly this title — a match found by searching a name is
+// sometimes another film, and merging on it would hide one of them.)
+catalog.tmdbOf = (k, it) => {
+  try {
+    const m = tmdb.map.data.m[k];
+    if (!m || !m.id) return null;
+    if (m.manual) return m;
+    const d = tmdb.meta.data.m[k];
+    return d && d.title && String(d.tmdb) === String(m.id) && it && Titles.sameTitle(it.n, it.y, d.title, d.y) ? m : null;
+  } catch { return null; }
+};
 // The languages anyone in the household can see (each profile's own, or the server default): titles in others are
 // left out of the catalogue. null = someone sees every language, keep all.
 catalog.keepLangs = () => {
@@ -192,11 +205,15 @@ function applyMeta(it, m) {
   if ((force || !it.r) && m.r) it.r = m.r;
   if ((force || !it.d) && m.d) it.d = m.d;
   if (m.col) it.col = m.col.id; else if (force) delete it.col;
-  // An all-capitals or oddly written name that TMDB knows by the same words: use TMDB's spelling.
-  if (m.title && (force || (/[A-Z]{3}/.test(it.n) && !/[a-z]/.test(it.n) && catalogNorm(m.title) === catalogNorm(it.n)))) it.n = m.title;
+  // TMDB's title, the same for every copy ("Spider Man Into The Spiderverse" → "Spider-Man: Into the Spider-Verse") —
+  // when the match is sure: picked by hand, or a name that's clearly the same title
+  // (a match found by searching the name could be another film of a similar name: then the provider's name stays).
+  if (m.title && it.n !== m.title && (force || sameTitle(it, m))) it.n = m.title;
   if (!it.logo && m.poster) it.logo = m.poster;
   if (m.poster) it.poster = m.poster;
 }
+/** Is TMDB's entry clearly this title? (lib/titles.js) */
+const sameTitle = (it, m) => Titles.sameTitle(it.n, it.y, m.title, m.y);
 let rebuilding = null, rebuildAgain = false, catalogReady = null;
 /** Rebuild the catalogue: at start-up in one go, afterwards in slices so nobody's stream stalls while it runs. */
 function rebuildCatalog(now) {
