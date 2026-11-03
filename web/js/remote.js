@@ -78,9 +78,17 @@ function remotePad(view, conn) {
     '<button class="rm-b big" data-c="toggle" aria-label="Play or pause">' + V.icon('play') + '</button>' +
     '<button class="rm-b" data-c="skip" data-d="' + V.skipLen('fwd') + '" aria-label="Forward ' + V.skipLen('fwd') + ' seconds">' + V.skipIcon('fwd') + '</button></div>' +
     '<div class="rm-row rm-live" hidden><button class="btn" data-c="zap" data-dir="-1">' + V.icon('up') + ' Channel up</button><button class="btn" data-c="zap" data-dir="1">' + V.icon('down') + ' Channel down</button><button class="btn" data-c="live">Go live</button><button class="btn" data-c="restart">' + V.icon('restart') + ' Start over</button></div>' +
-    '<div class="rm-row"><button class="btn" data-c="next" hidden>' + V.icon('skipnext') + ' Next episode</button><button class="btn" data-c="subs">' + V.icon('cc') + ' Subtitles</button><button class="btn" data-c="audio">Audio</button><button class="btn" data-sleep>' + V.icon('moon') + ' Sleep timer</button><button class="btn danger" data-c="stop">Stop</button></div>' +
+    '<div class="rm-row"><button class="btn" data-c="prev" hidden>' + V.icon('back') + ' Previous episode</button><button class="btn" data-c="next" hidden>' + V.icon('skipnext') + ' Next episode</button><button class="btn" data-c="subs">' + V.icon('cc') + ' Subtitles</button><button class="btn" data-c="audio">Audio</button><button class="btn" data-sleep>' + V.icon('moon') + ' Sleep timer</button><button class="btn danger" data-c="stop">Stop</button></div>' +
     '<div class="rm-vol"><button class="icon-btn" data-c="mute" aria-label="Mute">' + V.icon('vol') + '</button><input type="range" min="0" max="100" value="100" data-vol aria-label="Volume"></div>' +
     '<div class="rm-msg" hidden></div>' +
+    // Working the TV's screen itself: arrows, OK, Back, the main pages, and searching by typing on the phone.
+    '<details class="rm-nav"' + (V.ls.get('rm.nav', true) ? ' open' : '') + '><summary>Move around on the TV</summary>' +
+      '<div class="rm-dpad"><button class="rm-k up" data-key="ArrowUp" aria-label="Up">' + V.icon('next') + '</button><button class="rm-k left" data-key="ArrowLeft" aria-label="Left">' + V.icon('back') + '</button>' +
+      '<button class="rm-k ok" data-key="Enter">OK</button><button class="rm-k right" data-key="ArrowRight" aria-label="Right">' + V.icon('next') + '</button><button class="rm-k down" data-key="ArrowDown" aria-label="Down">' + V.icon('next') + '</button></div>' +
+      '<div class="rm-row"><button class="btn" data-key="GoBack">' + V.icon('back') + ' Back</button><button class="btn" data-tvnav="home">' + V.icon('home') + ' Home</button><button class="btn" data-tvnav="live">' + V.icon('tv') + ' Live TV</button><button class="btn" data-tvnav="guide">' + V.icon('clock') + ' Guide</button><button class="btn" data-tvnav="movies">' + V.icon('film') + ' Movies</button><button class="btn" data-tvnav="series">' + V.icon('stack') + ' Series</button></div>' +
+      '<div class="inline"><input class="input" type="search" data-tvq placeholder="Search on the TV" enterkeyhint="search"><button class="btn" data-tvsearch>' + V.icon('search') + '</button></div>' +
+    '</details>' +
+    '<div class="rm-numpad" hidden>' + [1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, 'go'].map(function (n) { return n === '' ? '<span></span>' : '<button class="rm-k" data-num="' + n + '">' + (n === 'go' ? 'Go' : n) + '</button>'; }).join('') + '<div class="rm-numval num" aria-live="polite"></div></div>' +
     '<section class="rm-ch"><div class="inline"><input class="input" type="search" data-chq placeholder="Find a channel or type its number"><button class="btn" data-go>Go</button></div><div class="chips rm-grps" role="group" aria-label="Channel group"></div><div class="rm-chl"></div></section></div>';
   var $ = function (q) { return V.$(q, view); };
   var draw = function () {
@@ -94,6 +102,8 @@ function remotePad(view, conn) {
     if (st.vod && st.dur && !seek) { var sk = $('[data-seek]'); sk.max = st.dur; sk.value = st.pos; $('.rm-t1').textContent = V.fmtDur(st.pos); $('.rm-t2').textContent = '−' + V.fmtDur(Math.max(0, st.dur - st.pos)); }
     $('.rm-live').hidden = st.vod;
     V.$('[data-c=next]', view).hidden = !st.next;
+    V.$('[data-c=prev]', view).hidden = !st.prev;
+    V.$('.rm-numpad', view).hidden = st.vod;
     if (document.activeElement !== $('[data-vol]')) $('[data-vol]').value = Math.round((st.muted ? 0 : st.vol) * 100);
     V.$('[data-c=mute]', view).innerHTML = V.icon(st.muted ? 'mute' : 'vol');
     V.$('[data-c=subs]', view).textContent = 'Subtitles' + (st.subs ? ': ' + st.subs.value : '');
@@ -122,6 +132,19 @@ function remotePad(view, conn) {
       if (navigator.vibrate) navigator.vibrate(15);
       return;
     }
+    var kb = e.target.closest('[data-key]');
+    if (kb) { cmd('key', { key: kb.dataset.key }); if (navigator.vibrate) navigator.vibrate(10); return; }
+    var nb = e.target.closest('[data-tvnav]');
+    if (nb) { cmd('nav', { to: nb.dataset.tvnav }); return; }
+    if (e.target.closest('[data-tvsearch]')) { tvSearch(); return; }
+    var nu = e.target.closest('[data-num]');
+    if (nu) {
+      var nv = $('.rm-numval');
+      if (nu.dataset.num === 'go') { if (nv.textContent) cmd('channel', { n: +nv.textContent }); nv.textContent = ''; return; }
+      nv.textContent = (nv.textContent + nu.dataset.num).slice(-4);
+      clearTimeout(numT); numT = setTimeout(function () { if (nv.textContent) { cmd('channel', { n: +nv.textContent }); nv.textContent = ''; } }, 2000);
+      return;
+    }
     if (e.target.closest('[data-sleep]')) return V.menu(e.target.closest('[data-sleep]'), [0, 15, 30, 45, 60, 90].map(function (m) { return { label: m ? m + ' minutes' : 'Off', fn: function () { cmd('sleep', { min: m }); } }; }));
     if (e.target.closest('[data-target]')) {
       if (V.remote.target && V.remote.target.conn === conn) V.setRemoteTarget(null); else { V.setRemoteTarget({ conn: conn, name: name || 'the TV' }); V.toast('Now anything you press Play on here plays on ' + (name || 'the TV') + '.', { ms: 6000 }); }
@@ -134,6 +157,10 @@ function remotePad(view, conn) {
     if (ch) { cmd('play', { k: ch.dataset.k }); return; }
     if (e.target.closest('[data-go]')) goCh();
   });
+  var numT = 0;
+  var tvSearch = function () { var q = $('[data-tvq]').value.trim(); cmd('nav', { to: 'search', q: q }); };
+  $('[data-tvq]').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); tvSearch(); } });
+  view.addEventListener('toggle', function (e) { if (e.target.classList && e.target.classList.contains('rm-nav')) V.ls.set('rm.nav', e.target.open); }, true);
   var goCh = function () { var q = $('[data-chq]').value.trim(); if (/^\d+$/.test(q)) cmd('channel', { n: +q }); };
   $('[data-chq]').addEventListener('keydown', function (e) { if (e.key === 'Enter') goCh(); });
   var chList = function (q) {

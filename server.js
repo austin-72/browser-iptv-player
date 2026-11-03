@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 'use strict';
-// Enough memory. Node stops a program at about 4 GB unless told otherwise; a few hundred thousand catalogue entries
-// plus large TV guides, while a provider's list is being refreshed, can need more. So the server starts itself again
-// with a higher limit (60% of the machine's memory, between 4 and 12 GB; MAX_MEMORY_MB sets it), passing on stop
-// signals and its exit code. NO_RESPAWN=1 turns this off.
-{
+// Enough memory, and something on screen while restarting. Node stops a program at about 4 GB unless told otherwise;
+// a few hundred thousand catalogue entries plus large TV guides, while a provider's list is being refreshed, can need
+// more. So a small "front" process (lib/front.js) holds the web port and runs this server as a child process with a
+// higher limit (60% of the machine's memory, between 4 and 12 GB; MAX_MEMORY_MB sets it). While the server starts or
+// restarts, the front shows visitors "Back in a moment"; when it stops by itself (an update), the front starts it
+// again. NO_RESPAWN=1 (or NO_FRONT=1) turns this off and runs the server directly.
+if (!process.env.IPTV_CHILD && !process.env.NO_RESPAWN && !process.env.NO_FRONT) {
   const v8 = require('v8');
   const want = Number(process.env.MAX_MEMORY_MB) || Math.max(4096, Math.min(12288, Math.floor(require('os').totalmem() / 1048576 * 0.6)));
   const have = v8.getHeapStatistics().heap_size_limit / 1048576;
-  if (!process.env.IPTV_CHILD && !process.env.NO_RESPAWN && have < want * 0.9) {
-    const child = require('child_process').spawn(process.execPath, [...process.execArgv, `--max-old-space-size=${want}`, __filename, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, IPTV_CHILD: '1' } });
-    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { try { child.kill(sig); } catch {} });
-    child.on('exit', (code, sig) => process.exit(code === null ? (sig ? 1 : 0) : code));
-    return; // (the rest of this file runs in the child)
-  }
+  const fcfg = require('./lib/config');
+  const tlsF = fcfg.httpsCert && fcfg.httpsKey ? { cert: require('fs').readFileSync(fcfg.httpsCert), key: require('fs').readFileSync(fcfg.httpsKey) } : null;
+  require('./lib/front').startFront({
+    script: __filename, args: process.argv.slice(2), execArgv: [...process.execArgv, ...(have < want * 0.9 ? [`--max-old-space-size=${want}`] : [])],
+    port: fcfg.port, host: fcfg.host, tls: tlsF, dataDir: fcfg.dataDir,
+  });
+  return; // (the rest of this file runs in the child)
 }
 const http = require('http');
 const https = require('https');
@@ -1385,7 +1388,9 @@ route('GET', '/api/devices', (req, res, p, q, ctx) => {
   requireProfile(ctx);
   return [...hub.conns].filter((c) => canControl(ctx, c)).map((c) => ({ conn: c.id, name: c.deviceName, deviceId: c.deviceId, playing: c.playing, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || '') }));
 });
-const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover'];
+const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'prev', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover', 'key', 'nav'];
+const REMOTE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'GoBack', 'ContextMenu'];
+const REMOTE_PAGES = ['home', 'live', 'guide', 'movies', 'series', 'mine', 'search', 'recordings', 'onlater'];
 route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   const c = hub.conn(p.conn);
@@ -1404,6 +1409,9 @@ route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
   if (b.k) out.k = String(b.k);
   for (const k of ['pos', 'd', 'v', 'i', 'n', 'dir', 'min']) if (b[k] !== undefined) out[k] = Number(b[k]) || 0;
   if (typeof b.on === 'boolean') out.on = b.on;
+  // The phone as the TV's remote control: its arrow keys, OK and Back, and going to a page (with a search).
+  if (b.cmd === 'key') { if (!REMOTE_KEYS.includes(b.key)) throw new HttpError(400, 'Unknown key'); out.key = b.key; }
+  if (b.cmd === 'nav') { if (!REMOTE_PAGES.includes(b.to)) throw new HttpError(400, 'Unknown page'); out.to = b.to; if (typeof b.q === 'string') out.q = b.q.slice(0, 100); }
   hub.send(c, 'command', out);
   return { ok: true };
 });
@@ -1499,12 +1507,20 @@ function handoffLanding(req, res, token) {
 }
 
 // ---- remote control: a phone (same profile, or the one that signed the TV in) drives a TV
-function canControl(ctx, c) {
-  if (!c || !ctx.profile) return false;
-  if (c.pid === ctx.profile.id) return true;
+/**
+ * May this phone (its profile) control that screen? Its own profile's screens; screens it signed in with a code; the
+ * admin any screen in the household; and anyone but a Kids profile a Kids profile's screens (a parent working the
+ * kids' TV — it used to need the phone switched to the Kids profile first).
+ */
+function mayControl(prof, sessId, c) {
+  if (!c || !prof) return false;
+  if (c.pid === prof.id || prof.admin) return true;
+  const target = c.pid ? accounts.profile(c.pid) : null;
+  if (target && target.kids && !prof.kids) return true;
   const s = accounts.sessionById(c.sess);
-  return !!(s && s.pairedBy && s.pairedBy === ctx.sess.id);
+  return !!(s && s.pairedBy && s.pairedBy === sessId);
 }
+function canControl(ctx, c) { return mayControl(ctx.profile, ctx.sess && ctx.sess.id, c); }
 route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   const b = await readJSON(req);
@@ -1513,7 +1529,7 @@ route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
   for (const id of (Array.isArray(b.to) ? b.to : []).slice(0, 10)) {
     const c = hub.conn(String(id));
     // The receiving phone must be allowed to control this device.
-    if (c && (c.pid === me.pid || (accounts.sessionById(me.sess) || {}).pairedBy === c.sess)) hub.send(c, 'devstate', { from: me.id, state: b.state || null });
+    if (c && mayControl(accounts.profile(c.pid), c.sess, me)) hub.send(c, 'devstate', { from: me.id, state: b.state || null });
   }
   return { ok: true };
 });
@@ -1707,12 +1723,23 @@ const connTest = new ConnTest({ lists, catalog, headers: (h) => proxy.headers({ 
 route('POST', '/api/admin/lists/:id/conntest', async (req, res, p, q, ctx) => { requireAdmin(ctx); const b = await readJSON(req).catch(() => ({})); return connTest.start(p.id, { kinds: Array.isArray(b.kinds) ? b.kinds : null }); });
 route('GET', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.get(p.id); return { job: connTest.status(p.id), saved: lists.get(p.id).connTest || null }; });
 route('DELETE', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); return connTest.stop(p.id); });
-route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.refresh(p.id); });
+// A big list can take minutes (download, read, rebuild the catalogue): wait up to 45 s, then answer "still going"
+// (a page behind Cloudflare gives up after 100 s with "Server error 524"). The list's row shows when it's done.
+route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const job = lists.refresh(p.id);
+  const late = new Promise((ok) => setTimeout(() => ok({ running: true }), 45000).unref());
+  return Promise.race([job, late]);
+});
+route('POST', '/api/admin/guides/:id/refresh', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const late = new Promise((ok) => setTimeout(() => ok({ running: true }), 45000).unref());
+  return Promise.race([lists.refreshGuide(p.id), late]);
+});
 route('POST', '/api/admin/lists-order', async (req, res, p, q, ctx) => { requireAdmin(ctx); lists.reorder((await readJSON(req)).ids || []); return { ok: true }; });
 route('POST', '/api/admin/guides', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.addGuide(await readJSON(req)); });
 route('PUT', '/api/admin/guides/:id', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.updateGuide(p.id, await readJSON(req)); });
 route('DELETE', '/api/admin/guides/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.removeGuide(p.id); return { ok: true }; });
-route('POST', '/api/admin/guides/:id/refresh', (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.refreshGuide(p.id); });
 route('PUT', '/api/admin/profiles/:id', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const prof = accounts.update(p.id, await readJSON(req), { byAdmin: true });
@@ -2329,7 +2356,9 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
     .then(() => { T.catalog = (Date.now() - t) / 1000; log(`Ready ${process.uptime().toFixed(1)} s after starting (${Object.entries(T).map(([k, v]) => `${k} ${v.toFixed(1)} s`).join(', ')})`); })
     .catch((e) => log('Start-up:', e && e.stack || e))
     .then(() => { catalogReady = null; lists.startScheduler(); });
-  server.listen(cfg.port, cfg.host, () => {
+  // Under the front (lib/front.js), which holds the port and hands over each connection; otherwise on the port itself.
+  const front = require('./lib/front');
+  const announce = () => {
     log(`Answering ${process.uptime().toFixed(1)} s after starting (memory limit ${(require('v8').getHeapStatistics().heap_size_limit / 1073741824).toFixed(1)} GB)`);
     const shown = ['0.0.0.0', '::'].includes(cfg.host) ? 'localhost' : cfg.host;
     const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
@@ -2342,7 +2371,8 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
     if (accounts.presetApplied) console.log(`  ➜ Password  changed to the new one in ${process.env.SITE_PASSWORD ? "SITE_PASSWORD" : "defaults.json"} — everyone has been signed out`);
     else if (accounts.d.site.isDefault) console.log(`  ➜ Password  the site password is still the default (${defaultPassword}) — change it in Admin`);
     console.log('');
-  });
+  };
+  if (front.attachToFront(server)) { announce(); front.tellFrontReady(); } else server.listen(cfg.port, cfg.host, announce);
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') console.error(`Port ${cfg.port} is already in use. Start with --port 8081 (or set PORT).`);
     else console.error(e);

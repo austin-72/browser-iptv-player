@@ -82,7 +82,7 @@ V.route('title', function (view, r) {
     else if (a === 'share') V.shareDialog(it);
     else if (a === 'party') V.party.startDialog(it);
     else if (a === 'dl') V.downloads.start(it);
-    else if (a === 'more') V.itemMenu(b, it);
+    else if (a === 'more') V.itemMenu(b, it, { onPage: true });
     else if (a === 'bell' && V.toggleBell) V.toggleBell(it, b);
     else if (a === 'queue') V.queue.menu(b, it);
   });

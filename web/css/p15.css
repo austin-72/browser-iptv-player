@@ -1,0 +1,69 @@
+/* End cards (endcard.js): what's next when an episode or film finishes; the Autoplay switch; the phone remote's
+   d-pad and number pad (remote.js). */
+
+/* ---- the end card */
+.vp-end { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(6, 7, 10, .82); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #fff; overflow: auto; }
+.vp-end[hidden] { display: none; }
+.ve-box { width: min(46rem, 100%); display: flex; flex-direction: column; gap: 1.1rem; }
+.ve-box.wide { width: min(60rem, 100%); }
+.ve-top { display: flex; align-items: center; gap: .8rem; }
+.ve-top .dim { color: rgba(255,255,255,.7); }
+.ve-next { display: flex; gap: 1.2rem; align-items: flex-start; }
+.ve-art { flex: none; width: min(18rem, 42%); aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.08); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+.ve-art.poster { width: min(10rem, 30%); aspect-ratio: 2 / 3; }
+.ve-art .art, .ve-art img { width: 100%; height: 100%; object-fit: cover; }
+.ve-info { min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
+.ve-info .dim, .ve-h { color: rgba(255,255,255,.7); }
+.ve-t { font-size: 1.35rem; font-weight: 800; line-height: 1.2; }
+.ve-plot { margin: .1rem 0 0; color: rgba(255,255,255,.85); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ve-done .ve-t { font-size: 1.5rem; }
+.ve-acts { display: flex; flex-wrap: wrap; gap: .6rem; }
+.ve-acts .btn { background: rgba(255,255,255,.12); color: #fff; border-color: transparent; }
+.ve-acts .btn.primary { background: #fff; color: #000; }
+.ve-acts .btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.ve-row { display: flex; gap: .8rem; overflow-x: auto; padding: .2rem .1rem .6rem; scrollbar-width: thin; }
+.ve-card { flex: none; width: 8.5rem; display: flex; flex-direction: column; gap: .3rem; background: none; border: 0; padding: 0; color: #fff; text-align: left; cursor: pointer; border-radius: 10px; }
+.ve-card .ve-p { aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: rgba(255,255,255,.08); }
+.ve-card .ve-p .art, .ve-card .ve-p img { width: 100%; height: 100%; object-fit: cover; }
+.ve-card:hover .ve-p, .ve-card:focus-visible .ve-p { outline: 3px solid #fff; outline-offset: 2px; }
+.ve-card .ve-n { font-weight: 600; font-size: .9rem; }
+.ve-card .dim { color: rgba(255,255,255,.65); }
+@media (max-width: 600px) {
+  .ve-next { flex-direction: column; }
+  .ve-art { width: 100%; }
+  .ve-art.poster { width: 40%; }
+  .ve-t { font-size: 1.15rem; }
+  .ve-acts .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ---- the Autoplay switch (end card, up-next corner) */
+.ve-auto { display: inline-flex; align-items: center; gap: .5rem; font-size: .9rem; font-weight: 600; cursor: pointer; user-select: none; }
+.ve-auto input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ve-sw { position: relative; width: 2.4rem; height: 1.35rem; border-radius: 1rem; background: rgba(255,255,255,.3); transition: background .15s; flex: none; }
+.ve-sw::after { content: ''; position: absolute; top: .15rem; left: .15rem; width: 1.05rem; height: 1.05rem; border-radius: 50%; background: #fff; transition: transform .15s; }
+.ve-auto input:checked + .ve-sw { background: var(--accent); }
+.ve-auto input:checked + .ve-sw::after { transform: translateX(1.05rem); }
+.ve-auto input:focus-visible + .ve-sw { outline: 3px solid #fff; outline-offset: 2px; }
+.ve-auto.sm { font-size: .8rem; margin-left: auto; }
+.vp-upnext .un-acts { align-items: center; }
+
+/* ---- the phone remote: moving around on the TV, the number pad */
+.rm-nav { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: .4rem .9rem .9rem; }
+.rm-nav > summary { cursor: pointer; font-weight: 700; padding: .5rem 0; }
+.rm-nav .rm-row { margin: .8rem 0; }
+.rm-nav .rm-row .btn { padding: .5rem .8rem; }
+.rm-dpad { display: grid; grid-template-columns: repeat(3, 4.2rem); grid-template-rows: repeat(3, 4.2rem); gap: .4rem; justify-content: center; margin: .4rem auto 0; }
+.rm-k { border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text); font-weight: 800; font-size: 1.05rem; display: inline-flex; align-items: center; justify-content: center; touch-action: manipulation; }
+.rm-k:active { background: var(--card2); transform: scale(.96); }
+.rm-k .i { width: 1.6rem; height: 1.6rem; }
+.rm-dpad .up { grid-column: 2; grid-row: 1; }
+.rm-dpad .left { grid-column: 1; grid-row: 2; }
+.rm-dpad .ok { grid-column: 2; grid-row: 2; background: var(--accent); color: var(--on); border: 0; }
+.rm-dpad .right { grid-column: 3; grid-row: 2; }
+.rm-dpad .down { grid-column: 2; grid-row: 3; }
+.rm-numpad { display: grid; grid-template-columns: repeat(3, 4.2rem); grid-auto-rows: 3.4rem; gap: .4rem; justify-content: center; position: relative; }
+.rm-numpad[hidden] { display: none; }
+.rm-numpad .rm-k { border-radius: 12px; }
+.rm-numval { grid-column: 1 / -1; text-align: center; font-size: 1.4rem; font-weight: 800; min-height: 1.6rem; order: -1; }
+.rm-dpad .up .i { transform: rotate(-90deg); }
+.rm-dpad .down .i { transform: rotate(90deg); }

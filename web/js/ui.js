@@ -180,7 +180,10 @@ document.addEventListener('contextmenu', function (e) {
   document.addEventListener('click', function (e) { var a = e.target.closest('a.card'); if (a && a._long) { a._long = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 })();
 
-V.itemMenu = function (anchor, it) {
+/** A title's or channel's options. opts.onPage: the title's own page, whose buttons already do Play, My List, Queue,
+ *  Send, Watch together, Download and Shuffle — the menu then has only what the page doesn't. */
+V.itemMenu = function (anchor, it, opts) {
+  opts = opts || {};
   var u = V.unit(it);
   var isCh = it.t === 'live' || it.t === 'radio';
   var items = [
@@ -206,6 +209,13 @@ V.itemMenu = function (anchor, it) {
     { label: V.inList('hidden', u.k) ? 'Show it again' : 'Not interested', icon: 'eyeoff', fn: function () { V.toggle('hidden', u.k).then(function (on) { V.toast(on ? 'Hidden. You won’t be recommended this.' : 'It’ll show up again.'); V.router.refresh(); }); } },
   ];
   if (V.itemMenuExtras) V.itemMenuExtras(items, it, isCh);
+  if (opts.onPage) {
+    var onPage = { play: 1, info: 1, plus: 1, check: 1, send: 1, party: 1, download: 1, shuffle: 1, skipnext: 1, playlist: 1 };
+    items = items.filter(function (x) { return !x || x.sep || x.header || !(onPage[x.icon] || x.label === 'Remove from queue'); });
+    // (No separator first or last, nor two in a row.)
+    items = items.filter(function (x, i, a) { return x && !(x.sep && (i === 1 || i === a.length - 1 || (a[i - 1] && a[i - 1].sep))); });
+    if (items.length <= 1) { V.toast('Everything for this is on the page'); return; }
+  }
   V.menu(anchor, items, { align: 'left' });
 };
 

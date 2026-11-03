@@ -60,6 +60,7 @@
     "palette.js",
     "dvr.js",
     "easy.js",
+    "endcard.js",
     "main.js"
   ],
   "css": [
@@ -79,6 +80,7 @@
     "p6.css",
     "p12.css",
     "p13.css",
-    "p14.css"
+    "p14.css",
+    "p15.css"
   ]
 }

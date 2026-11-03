@@ -156,7 +156,11 @@ V.api = function (path, opts) {
       return r.text().then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) {}
-        if (!r.ok) { var err = new Error((j && j.error) || ('Server error ' + r.status)); err.status = r.status; throw err; }
+        if (!r.ok) {
+          // (No message from the app: a proxy in front of it — Cloudflare — answered instead. Say what that means.)
+          var plain = { 502: 'The server couldn’t be reached just now (or it’s restarting). Try again in a moment.', 503: 'The server is busy or restarting. Try again in a moment.', 504: 'The server took too long to answer. Try again in a moment.', 520: 'The server gave an unexpected answer. Try again in a moment.', 521: 'The server is down or restarting. Try again in a moment.', 522: 'The server took too long to answer. Try again in a moment.', 523: 'The server can’t be reached just now.', 524: 'The server took too long to answer (more than 100 seconds). It may still be working on it — check again in a minute.' }[r.status];
+          var err = new Error((j && j.error) || plain || ('Server error ' + r.status)); err.status = r.status; throw err;
+        }
         return j;
       });
     });

@@ -73,7 +73,7 @@
   window.addEventListener('hashchange', function () { crumb('nav', location.hash); });
   window.addEventListener('online', function () { crumb('net', 'online'); });
   window.addEventListener('offline', function () { crumb('net', 'offline'); });
-  document.addEventListener('visibilitychange', function () { crumb('app', 'page ' + document.visibilityState); if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); flush(true); } });
+  document.addEventListener('visibilitychange', function () { crumb('app', 'page ' + document.visibilityState); if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); flush(true); } else visibleAt = Date.now(); });
   window.addEventListener('pagehide', function () { flush(true); });
 
   // Server calls: method, path, status and time (not the bodies; query strings scrubbed).
@@ -159,7 +159,7 @@
   };
 
   // ------------------------------------------------------------ reporting
-  var hiddenAt = 0;
+  var hiddenAt = 0, visibleAt = 0; // (a page just back on screen had its timers slowed while hidden: not a freeze)
   /**
    * Reports a problem. kind: error | rejection | console | shown | playback | resource | startup | freeze | user.
    * err: an Error, or { message, stack, source: { file, line, col } }. extra: anything that helps (kept small).
@@ -239,6 +239,9 @@
       return;
     }
     var err = e.error;
+    // mpegts.js still adding video to a player the browser already gave up on (a decode error the player handles by
+    // reconnecting): a knock-on effect, not a fault of its own.
+    if (err && err.name === 'InvalidStateError' && /vendor\/mpegts/.test(String(err.stack || e.filename || ''))) { crumb('log', 'mpegts: ' + err.message); return; }
     if (err && err instanceof Error) report('error', err);
     else report('error', { message: e.message || 'Unknown error', source: { file: e.filename, line: e.lineno, col: e.colno } });
   }, true);
@@ -266,7 +269,7 @@
   setInterval(function () {
     var now = Date.now(), gap = now - tick, from = tick;
     tick = now;
-    if (gap <= 8000 || gap > 10 * 60e3 || document.visibilityState !== 'visible' || now - hiddenAt <= gap + 2000 || now - suspendedAt <= gap + 2000) return;
+    if (gap <= 8000 || gap > 10 * 60e3 || document.visibilityState !== 'visible' || now - hiddenAt <= gap + 2000 || now - visibleAt <= gap + 2000 || now - suspendedAt <= gap + 2000) return;
     // Something else ran during the "freeze" (a server call finished, a click was noted…): the page wasn't stuck,
     // only this timer was held back.
     // (Only after the moment this 1-second timer should have run: whatever started the freeze — the tap, a server
@@ -274,7 +277,7 @@
     for (var i = crumbs.length - 1; i >= 0; i--) { var c = crumbs[i]; if (c.at > from + 1500 && c.at < now - 50) return; if (c.at <= from) break; }
     var vid = document.querySelector('video');
     var watching = !!(vid && !vid.paused && !vid.ended);
-    if (!watching && !(inputAt && from - inputAt < 15000)) return; // nobody was there to notice
+    if (!watching && !(inputAt && inputAt <= from + 1500 && from - inputAt < 15000)) return; // nobody was there to notice
     report('freeze', { message: 'The page didn’t respond for ' + Math.round(gap / 1000) + ' seconds' }, { seconds: Math.round(gap / 1000), after: watching ? 'while playing' : Math.round((from - inputAt) / 1000) + ' s after a tap, click or key' });
   }, 1000);
 

@@ -1564,7 +1564,7 @@ PP._menuPages = function (kind) {
   return pages;
 };
 
-var MENU_GROUP = { Quality: 0, Speed: 0, Source: 0, 'Sleep timer': 0, 'Sound only': 0, Reload: 0, Picture: 1, Zoom: 1, 'Brightness & colour': 1, 'Volume boost': 2, 'Clear dialogue': 2, 'Night mode': 2, 'Audio sync': 2 };
+var MENU_GROUP = { Quality: 0, Speed: 0, Source: 0, 'Sleep timer': 0, 'Sound only': 0, Reload: 0, 'Autoplay next episode': 0, Picture: 1, Zoom: 1, 'Brightness & colour': 1, 'Volume boost': 2, 'Clear dialogue': 2, 'Night mode': 2, 'Audio sync': 2 };
 PP._openMenu = function (page, kind) {
   var m = V.$('.vp-menu', this.host);
   kind = kind || this._menuKind || 'gear';
@@ -1860,7 +1860,7 @@ PP._bind = function () {
   // Touch: double-tap sides to skip, swipe up/down on live TV to change channel.
   var sw = null, lastTap = 0;
   this.el.addEventListener('pointerdown', function (e) {
-    if (e.pointerType !== 'touch' || e.target.closest('.vp-ctrl, .vp-menu, .vp-top, .vp-msg button, .vp-side, .vp-skip, .vp-upnext')) return;
+    if (e.pointerType !== 'touch' || e.target.closest('.vp-ctrl, .vp-menu, .vp-top, .vp-msg button, .vp-side, .vp-skip, .vp-upnext, .vp-end')) return;
     sw = { x: e.clientX, y: e.clientY, t: Date.now() };
   });
   this.el.addEventListener('pointerup', function (e) {

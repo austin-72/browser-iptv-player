@@ -127,7 +127,7 @@
       if (!(t.tagName === 'SELECT' && V.tvMode) && !(t.tagName === 'INPUT' && vert) && !(vert && t.closest('.vp-seek')) && !ta) return;
     }
     var pl2 = V.$('#player-layer');
-    if (pl2 && !pl2.hidden && !pl2.classList.contains('mini') && !(t && t.closest('.vp-menu, .vp-side, .vp-ctrl, .vp-top, .vp-msg, .vp-upnext, .vp-live, .vp-skip, dialog'))) return;
+    if (pl2 && !pl2.hidden && !pl2.classList.contains('mini') && !(t && t.closest('.vp-menu, .vp-side, .vp-ctrl, .vp-top, .vp-msg, .vp-upnext, .vp-end, .vp-live, .vp-skip, dialog'))) return;
     if (t && t.closest('.vp-menu') && (dir === 'up' || dir === 'down')) {
       e.preventDefault();
       var items = V.$$('.mi', t.closest('.vp-menu'));

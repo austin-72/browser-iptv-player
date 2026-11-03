@@ -155,8 +155,11 @@ V.showUpNext = function (secs) {
     box.hidden = false;
     var what = [nx.queued ? 'from your queue' : '', V.epLabel(nx)].filter(Boolean).join(' · ');
     box.innerHTML = '<div class="un-art">' + V.art(nx.i || (V.showOf(nx) || {}).i, nx.n, 'art') + '</div><div class="un-body"><div class="dim small">Up next' + (what ? ' · ' + V.esc(what) : '') + '</div><div class="un-t">' + V.esc(nx.queued && nx.t === 'episode' ? ((V.showOf(nx) || {}).n || nx.n) + (nx.et ? ' · ' + nx.et : '') : nx.et || nx.n) + '</div>' +
-      '<div class="un-acts"><button class="btn primary" data-un="play">' + V.icon('play') + ' <span class="un-c">Play now</span></button><button class="btn" data-un="x">Not now</button></div></div>';
+      '<div class="un-acts"><button class="btn primary" data-un="play">' + V.icon('play') + ' <span class="un-c">Play now</span></button><button class="btn" data-un="x">Not now</button>' +
+      '<label class="ve-auto sm" title="Play the next episode by itself"><input type="checkbox" data-un-auto checked><span class="ve-sw" aria-hidden="true"></span><span>Autoplay</span></label></div></div>';
+    box.onchange = function (e) { if (e.target.hasAttribute('data-un-auto') && !e.target.checked) { e.stopPropagation(); if (V.setAutoplay) V.setAutoplay(false); else V.setPref('autoplayNext', false); V.watch.upnextDismissed = true; box.hidden = true; } };
     box.onclick = function (e) {
+      if (e.target.closest('.ve-auto')) { e.stopPropagation(); return; }
       var b = e.target.closest('[data-un]');
       if (!b) return;
       e.stopPropagation();
@@ -174,8 +177,17 @@ V.onEnded = function () {
   if (V._sleepAt === -1) { V._sleepAt = 0; V.toast('Sleep timer: stopped'); return; }
   if (V.watch.mych && V.mychNext) return V.mychNext();
   var nx = V.upNext(it);
-  if (nx && V.pref('autoplayNext') !== false && !V.watch.upnextDismissed) return V.autoNext(nx);
-  if (it && (it.t === 'movie' || it.t === 'episode')) V.player._msg({ title: 'Finished', sub: it.n, actions: [{ label: 'Watch again', fn: function () { V.play(it, { startAt: 0 }); } }].concat(nx ? [{ label: 'Play next: ' + (nx.t === 'episode' ? V.epLabel(nx) + ' ' + (nx.et || '') : nx.n), fn: function () { V.playUpNext(nx); } }] : []).concat([{ label: 'Close', primary: true, fn: V.closePlayer }]) });
+  var auto = V.pref('autoplayNext') !== false && !V.watch.upnextDismissed;
+  // The "up next" corner already counted down: straight on. Otherwise the end card (endcard.js) — with its own
+  // countdown when Autoplay is on.
+  var corner = V.$('.vp-upnext', V.player.host);
+  var counted = !!(corner && !corner.hidden);
+  if (corner) corner.hidden = true;
+  if (it && it.t === 'episode' && V.showEpisodeEnd) return V.showEpisodeEnd(it, nx, { count: counted ? 5 : 10 });
+  if (nx && auto && counted) return V.autoNext(nx);
+  if (it && it.t === 'movie' && nx && auto) return V.autoNext(nx);
+  if (it && it.t === 'movie' && V.showMovieEnd) return V.showMovieEnd(it);
+  if (it && (it.t === 'movie' || it.t === 'episode')) V.player._msg({ title: 'Finished', sub: it.n, actions: [{ label: 'Watch again', fn: function () { V.play(it, { startAt: 0 }); } }].concat(nx ? [{ label: 'Play next', fn: function () { V.playUpNext(nx); } }] : []).concat([{ label: 'Close', primary: true, fn: V.closePlayer }]) });
 };
 
 // ---------------------------------------------------------------- side panels (episodes, channels, party)
@@ -346,6 +358,9 @@ V.initWatch = function () {
     else if (d.cmd === 'subs') { var sb = p._tracks().subs; if (sb && sb.items[d.i]) { sb.items[d.i].fn(); p._menuRefresh(); } else p.toggleSubs(); }
     else if (d.cmd === 'audio') { var au = p._tracks().audio; if (au && au.items[d.i]) au.items[d.i].fn(); else p.cycleAudio(); }
     else if (d.cmd === 'next') p.onNext();
+    else if (d.cmd === 'prev' && V.playPrevEpisode) V.playPrevEpisode();
+    else if (d.cmd === 'key') V.remoteKey(d.key);
+    else if (d.cmd === 'nav') { V.router.go('#/' + d.to + (d.q ? '?q=' + encodeURIComponent(d.q) : '')); if (d.to === 'search' && !d.q) setTimeout(function () { var i = V.$('#view input[type=search]'); if (i) i.focus(); }, 300); }
     else if (d.cmd === 'zap' && live) V.zap(d.dir || 1);
     else if (d.cmd === 'channel') V.zapTo(d.n);
     else if (d.cmd === 'live') p.goLive();
@@ -368,6 +383,23 @@ V.initWatch = function () {
     if (!V.watch.it || V.watch.it.k !== d.k || !d.rec || p.video.paused === false) return;
     if (Math.abs((d.rec.p || 0) - p.position) > 30) V.toast('You watched further on another device', { action: { label: 'Jump to ' + V.fmtDur(d.rec.p), fn: function () { p.seek(d.rec.p); } } });
   });
+};
+
+/** A key pressed on the phone's remote: as if the TV's own remote pressed it (arrows move, OK picks, Back goes back). */
+V.remoteKey = function (key) {
+  var t = document.activeElement;
+  var inView = t && t !== document.body && t !== document.documentElement;
+  if (key === 'Enter') {
+    if (inView) { if (t.tagName === 'INPUT' && (t.type === 'checkbox' || t.type === 'radio')) t.click(); else if (typeof t.click === 'function') t.click(); return; }
+    key = 'ArrowDown'; // (nothing picked yet: the first press of OK just starts moving)
+  }
+  var codes = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Enter: 13, GoBack: 10009, ContextMenu: 93 };
+  var ev;
+  try { ev = new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true }); } catch (e) { ev = document.createEvent('Event'); ev.initEvent('keydown', true, true); ev.key = key; }
+  try { Object.defineProperty(ev, 'keyCode', { get: function () { return codes[key] || 0; } }); } catch (e) {}
+  (inView ? t : document).dispatchEvent(ev);
+  // Nothing had the focus: put it on the first thing on the page.
+  if (!inView && (key.indexOf('Arrow') === 0)) { var f = V.$('#view .card, #view button, #view a[href]'); if (f) f.focus(); }
 };
 
 V.playCatchup = function (it, prog, offset) {
@@ -552,7 +584,7 @@ V.remoteState = function () {
   return {
     k: it.t === 'catchup' ? it.catchupOf : it.k, t: it.t, n: show ? show.n : it.n, sub: it.t === 'episode' ? V.epLabel(it) + (it.et ? ' · ' + it.et : '') : nn.now ? nn.now.t : it.ev || '',
     i: it.i || (show && show.i) || '', no: it.no || 0, pos: p.started ? Math.round(p.position) : 0, dur: Math.round(p.duration || 0), vod: !!p.vod, paused: p.video.paused, started: !!p.started,
-    vol: Math.round(p.video.volume * 100) / 100, muted: p.video.muted, subs: label(tr.subs), audio: label(tr.audio), next: it.t === 'episode' && !!V.nextEpisode(it),
+    vol: Math.round(p.video.volume * 100) / 100, muted: p.video.muted, subs: label(tr.subs), audio: label(tr.audio), next: it.t === 'episode' && !!V.nextEpisode(it), prev: it.t === 'episode' && !!(V.prevEpisode && V.prevEpisode(it)),
     msg: V.$('.vp-msg', p.host).hidden ? '' : (V.$('.vp-msg .t', p.host) || {}).textContent || '', sleep: V.sleepLeft ? Math.ceil(V.sleepLeft() / 60000) : 0, profile: S.profile && S.profile.name,
   };
 };
