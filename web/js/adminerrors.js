@@ -31,7 +31,7 @@
       (s.kind === 'user' ? '<h4>The viewer said</h4>' + said(ex.choiceLabel || ex.choice, ex.note) : '<p class="er-msg">' + esc((s.name && s.message.indexOf(s.name) !== 0 ? s.name + ': ' : '') + s.message) + '</p>') +
       (s.kind === 'user' && ex.final ? '<p class="er-msg">It couldn’t be played: ' + esc(ex.final) + '</p>' : '') +
       (s.stack ? '<pre class="er-pre">' + esc(s.stack) + '</pre>' : s.where ? '<pre class="er-pre">at ' + esc(s.where.file + ':' + s.where.line + ':' + s.where.col) + (s.where.code ? '\n    > ' + esc(s.where.code) : '') + '</pre>' : '') +
-      (attempts.length ? '<h4>Ways it tried to play</h4><ol class="er-att">' + attempts.map(function (a) { return '<li><b>' + esc(a.via) + (a.kind ? ' (' + esc(a.kind) + ')' : '') + '</b>' + (a.alt >= 0 ? ' · backup ' + (a.alt + 1) : '') + ' · ' + (a.ms || 0) + ' ms — ' + esc(a.msg || '') + (a.detail ? ' <code>' + esc(JSON.stringify(a.detail)) + '</code>' : '') + '</li>'; }).join('') + '</ol>' : '') +
+      (attempts.length ? '<h4>Ways it tried to play</h4><ol class="er-att">' + attempts.map(function (a) { return '<li><b>' + esc(a.via) + (a.kind ? ' (' + esc(a.kind) + ')' : '') + '</b>' + (a.alt >= 0 ? ' · backup ' + (a.alt + 1) : '') + ' · ' + esc(a.ms || 0) + ' ms — ' + esc(a.msg || '') + (a.detail ? ' <code>' + esc(JSON.stringify(a.detail)) + '</code>' : '') + '</li>'; }).join('') + '</ol>' : '') +
       (ex.item ? '<h4>Title</h4>' + kv(ex.item) : '') +
       (Object.keys(ex).filter(function (k) { return ['attempts', 'item', 'note', 'choice', 'choiceLabel'].indexOf(k) < 0; }).length ? '<h4>Details</h4>' + kv(ex, ['attempts', 'item', 'note', 'choice', 'choiceLabel']) : '') +
       (c.player ? '<h4>Player</h4>' + kv(c.player) : '') +
@@ -52,11 +52,13 @@
         (Object.keys(is.items || {}).length ? '<p class="small dim">Titles: ' + Object.keys(is.items).map(function (d) { return esc(d) + ' (' + is.items[d] + ')'; }).join(', ') + '</p>' : '') +
         (is.samples && is.samples[0] ? sampleHtml(is.samples[0]) : '') +
         (others.length ? '<details class="er-more"><summary>' + V.plural(others.length, 'earlier report') + '</summary>' + others.map(sampleHtml).join('') + '</details>' : '');
+      // (Redrawn into this page's own list: by the time the server answers, another admin tab may be showing.)
+      var page = box.closest('.admin-body');
       box.onclick = function (e) {
         if (e.target.closest('[data-copy]')) V.copy(is.text, 'Report copied');
         var st = e.target.closest('[data-status]');
-        if (st) V.put('/api/admin/errors/' + id, { status: st.dataset.status }).then(function () { V.toast(st.dataset.status === 'fixed' ? 'Marked fixed — it reopens if it happens again on a newer version' : 'Reopened'); draw(V.$('.admin-body')); }).catch(V.fail);
-        if (e.target.closest('[data-del]')) V.del('/api/admin/errors/' + id).then(function () { draw(V.$('.admin-body')); }).catch(V.fail);
+        if (st) V.put('/api/admin/errors/' + id, { status: st.dataset.status }).then(function () { V.toast(st.dataset.status === 'fixed' ? 'Marked fixed — it reopens if it happens again on a newer version' : 'Reopened'); draw(page); }).catch(V.fail);
+        if (e.target.closest('[data-del]')) V.del('/api/admin/errors/' + id).then(function () { draw(page); }).catch(V.fail);
       };
     }).catch(function (e) { box.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; });
   };
@@ -80,7 +82,9 @@
           return '<details class="er-issue' + (x.status === 'fixed' ? ' fixed' : '') + '" data-id="' + x.id + '"><summary>' +
             '<span class="er-kind-ic">' + V.icon(ICON[x.kind] || 'info') + '</span><span class="er-sum"><span class="er-title">' + esc(x.title) + '</span>' +
             (x.kind === 'user' && x.note ? '<span class="er-note">“' + esc(x.note) + '”</span>' : '') +
-            '<span class="small dim">' + esc(x.label) + ' · <b>' + x.count + '×</b> · ' + V.plural(devs, 'device') + ' · last ' + when(x.last) + (x.where ? ' · <code>' + esc(x.where) + '</code>' : '') + (x.reopened ? ' · <span class="err">came back</span>' : '') + (x.status === 'fixed' ? ' · fixed' : '') + '</span></span></summary>' +
+            '<span class="small dim">' + esc(x.label) + ' · <b>' + x.count + '×</b> · ' + V.plural(devs, 'device') + ' · last ' + when(x.last) + (x.where ? ' · <code>' + esc(x.where) + '</code>' : '') + (x.reopened ? ' · <span class="err">came back</span>' : '') + (x.status === 'fixed' ? ' · fixed' : '') +
+            // (Only seen on versions of the app before the one devices load now: it may well be fixed already.)
+            (x.status === 'open' && x.kind !== 'server' && R.current && x.versions && x.versions.length && x.versions.indexOf(R.current) < 0 ? ' · <span class="er-old" title="Every report of this came from an older version of the app">not seen since the last update</span>' : '') + '</span></span></summary>' +
             '<div class="er-body"></div></details>';
         }).join('') + '</div>' : '<p class="dim">' + (all.length ? 'Nothing here.' : 'No problems reported yet.') + '</p>') +
         (all.length ? '<div class="btn-row">' + (fixed.length ? '<button class="btn sm" data-clear="fixed">Clear fixed</button>' : '') + '<button class="btn sm danger" data-clear="all">Clear all</button></div>' : '');
@@ -89,7 +93,7 @@
       });
       var ks = V.$('.er-kind', body);
       if (ks) ks.onchange = function () { state.kind = ks.value; draw(body); };
-      V.$('[data-on]', body).onchange = function (e) { V.put('/api/admin/errors-settings', { on: e.target.checked }).then(function (r) { V.toast(r.on ? 'Collecting error reports' : 'Error reports off'); }).catch(V.fail); };
+      V.$('[data-on]', body).onchange = function (e) { V.put('/api/admin/errors-settings', { on: e.target.checked }).then(function (r) { V.toast(r.on ? 'Collecting error reports' : 'Error reports off'); }).catch(function (er) { e.target.checked = !e.target.checked; V.fail(er); }); }; // (put back when it didn't save)
       body.onclick = function (e) {
         var c = e.target.closest('[data-show]');
         if (c) { state.show = c.dataset.show; draw(body); return; }

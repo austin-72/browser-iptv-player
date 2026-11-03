@@ -176,7 +176,11 @@
       var row = V.$('[data-k="' + (window.CSS && CSS.escape ? CSS.escape(keep.k) : keep.k) + '"]', host);
       var other = { up: 'down', down: 'up' }[keep.q];
       var b = row && (V.$('[data-q="' + keep.q + '"]:not([disabled])', row) || (other && V.$('[data-q="' + other + '"]:not([disabled])', row)) || V.$('[data-q=play]', row));
-      if (b) b.focus(); else { var f = V.$('[data-q]', host); if (f) f.focus(); }
+      if (b) b.focus(); else { var f = V.$('[data-q]', host) || V.$('a[href], button', host); if (f) f.focus(); }
+    } else if (focus) {
+      // (Play the queue or Clear: the same button, or the first one there is once it's empty.)
+      var same = focus.dataset.q && V.$('[data-q="' + focus.dataset.q + '"]', host), first = same || V.$('[data-q], a[href], button', host);
+      if (first) first.focus();
     }
     warm(function () { if (alive(host)) draw(host, compact); });
   };

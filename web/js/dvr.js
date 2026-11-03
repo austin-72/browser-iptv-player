@@ -48,7 +48,8 @@
   };
   D.cancel = function (r) {
     var running = r.state === 'recording' || r.state === 'saving';
-    return V.confirm(running ? 'Stop recording “' + r.t + '” and delete what’s been recorded?' : r.state === 'done' ? 'Delete the recording of “' + r.t + '”?' : 'Don’t record “' + r.t + '”?', { ok: running || r.state === 'done' ? 'Delete' : 'Don’t record', danger: running || r.state === 'done' }).then(function (ok) {
+    var failed = r.state === 'failed';
+    return V.confirm(running ? 'Stop recording “' + r.t + '” and delete what’s been recorded?' : r.state === 'done' ? 'Delete the recording of “' + r.t + '”?' : failed ? 'Remove “' + r.t + '” from the list?' : 'Don’t record “' + r.t + '”?', { ok: running || r.state === 'done' ? 'Delete' : failed ? 'Remove' : 'Don’t record', danger: running || r.state === 'done' }).then(function (ok) {
       if (!ok) return;
       return V.del('/api/dvr/' + r.id).then(D.load).catch(V.fail);
     });
@@ -100,9 +101,9 @@
     if (r.state === 'done') { if (r.size) meta.push(V.fmtSize(r.size)); if (r.drops) meta.push('the stream dropped ' + V.plural(r.drops, 'time')); }
     if (r.who) meta.unshift(r.who);
     var acts = '';
-    if (r.state === 'done') acts = '<button class="btn sm primary" data-d="play" data-id="' + r.id + '">' + V.icon('play') + ' Play</button><button class="icon-btn sm' + (r.keep ? ' on' : '') + '" data-d="keep" data-id="' + r.id + '" aria-pressed="' + r.keep + '" aria-label="Keep (never delete automatically)" title="Keep">' + V.icon(r.keep ? 'bookmark' : 'bookmark') + '</button>';
-    else if (r.state === 'recording') acts = '<button class="btn sm" data-d="stop" data-id="' + r.id + '">Stop</button>';
-    acts += '<button class="icon-btn sm" data-d="del" data-id="' + r.id + '" aria-label="' + (r.state === 'done' ? 'Delete' : 'Cancel') + ' ' + V.esc(r.t) + '">' + V.icon(r.state === 'done' || r.state === 'failed' ? 'trash' : 'x') + '</button>';
+    if (r.state === 'done') acts = '<button class="btn sm primary" data-d="play" data-id="' + V.esc(r.id) + '">' + V.icon('play') + ' Play</button><button class="icon-btn sm' + (r.keep ? ' on' : '') + '" data-d="keep" data-id="' + V.esc(r.id) + '" aria-pressed="' + !!r.keep + '" aria-label="Keep (never delete automatically)" title="' + (r.keep ? 'Kept' : 'Keep') + '">' + V.icon('bookmark') + '</button>';
+    else if (r.state === 'recording') acts = '<button class="btn sm" data-d="stop" data-id="' + V.esc(r.id) + '">Stop</button>';
+    acts += '<button class="icon-btn sm" data-d="del" data-id="' + V.esc(r.id) + '" aria-label="' + (r.state === 'done' ? 'Delete' : r.state === 'failed' ? 'Remove' : 'Cancel') + ' ' + V.esc(r.t) + '" title="' + (r.state === 'done' ? 'Delete' : r.state === 'failed' ? 'Remove' : 'Don’t record') + '">' + V.icon(r.state === 'done' || r.state === 'failed' ? 'trash' : 'x') + '</button>';
     return '<li class="dvr-row s-' + r.state + '">' + logo + '<div class="grow"><b>' + V.esc(r.t) + '</b>' + (r.st ? ' <span class="dim">· ' + V.esc(r.st) + '</span>' : '') +
       '<div class="dim small">' + meta.filter(Boolean).map(V.esc).join(' · ') + '</div>' +
       (stateText[r.state] ? '<div class="small dvr-st">' + (r.state === 'recording' ? '<span class="dvr-dot"></span>' : '') + V.esc(stateText[r.state]) + (r.state === 'failed' && r.err ? ': ' + V.esc(r.err) : r.state === 'waiting' && r.err && !/^Waiting/.test(r.err) ? ' (' + V.esc(r.err) + ')' : '') + '</div>' : '') +
@@ -113,7 +114,11 @@
     var body = V.$('.dvr-body', view);
     var draw = function () {
       var s = D.state;
-      if (!s) { body.innerHTML = '<p class="err">Couldn’t load your recordings.</p>'; return; }
+      if (!s) { body.innerHTML = '<p class="err">Couldn’t load your recordings. Check the connection and open this page again.</p>'; return; }
+      // (It's drawn again every 15 seconds while something records: the focus stays on the same button, or the one
+      // in the same place, so a remote isn't thrown back to the top.)
+      var ae = document.activeElement, keep = null;
+      if (ae && body.contains(ae)) keep = { d: ae.dataset.d, id: ae.dataset.id, i: V.$$('a[href], button', body).indexOf(ae) };
       var recs = s.recs.slice();
       var now = recs.filter(function (r) { return r.state === 'recording' || r.state === 'saving' || (r.state === 'waiting' && r.s <= Date.now()); });
       var next = recs.filter(function (r) { return (r.state === 'scheduled' || r.state === 'waiting') && now.indexOf(r) < 0; }).sort(function (a, b) { return a.s - b.s; });
@@ -124,20 +129,30 @@
         : !s.ffmpeg ? '<p class="note warn">' + V.icon('info') + ' <span>Recording needs ffmpeg on the server.</span></p>'
         : '<p class="dim">Record from the <a href="#/guide">TV guide</a> or a channel’s schedule (' + V.icon('recoff', 'tiny') + '), or with “Record this” in the player’s ' + V.icon('gear', 'tiny') + ' menu while you watch a channel.</p>';
       body.innerHTML = note + sec('Recording now', now) + sec('Coming up', next, s.can ? 'Nothing scheduled.' : '') +
-        (s.rules.length ? '<section class="dvr-sec"><h2>Every episode of</h2><ul class="dvr-list">' + s.rules.map(function (x) { return '<li class="dvr-row"><span class="dvr-logo dvr-ph">' + V.icon('refresh') + '</span><div class="grow"><b>' + V.esc(x.t) + '</b><div class="dim small">' + V.esc([x.who, x.ch].filter(Boolean).join(' · ')) + '</div></div><div class="dvr-acts"><button class="icon-btn sm" data-d="rule" data-id="' + x.id + '" aria-label="Stop recording every ' + V.esc(x.t) + '">' + V.icon('x') + '</button></div></li>'; }).join('') + '</ul></section>' : '') +
-        sec('Recorded', made, 'No recordings yet.') + sec('Didn’t work', bad);
+        (s.rules.length ? '<section class="dvr-sec"><h2>Every episode of</h2><ul class="dvr-list">' + s.rules.map(function (x) { return '<li class="dvr-row"><span class="dvr-logo dvr-ph">' + V.icon('refresh') + '</span><div class="grow"><b>' + V.esc(x.t) + '</b><div class="dim small">' + V.esc([x.who, x.ch].filter(Boolean).join(' · ')) + '</div></div><div class="dvr-acts"><button class="icon-btn sm" data-d="rule" data-id="' + V.esc(x.id) + '" aria-label="Stop recording every ' + V.esc(x.t) + '">' + V.icon('x') + '</button></div></li>'; }).join('') + '</ul></section>' : '') +
+        sec('Recorded', made, s.can ? 'No recordings yet. Pick a programme in the TV guide and choose Record.' : 'No recordings yet.') + sec('Didn’t work', bad);
+      if (keep) {
+        var all = V.$$('a[href], button', body);
+        var f = (keep.id && (all.filter(function (b) { return b.dataset.d === keep.d && b.dataset.id === keep.id; })[0] || all.filter(function (b) { return b.dataset.id === keep.id; })[0])) || all[Math.max(0, Math.min(keep.i, all.length - 1))];
+        if (f) f.focus({ preventScroll: true });
+      }
     };
+    var busy = false; // (one change at a time: a double click doesn't send it twice)
+    var done = function () { busy = false; draw(); };
     body.onclick = function (e) {
       var b = e.target.closest('[data-d]');
-      if (!b) return;
+      if (!b || !D.state) return;
       var id = b.dataset.id, a = b.dataset.d;
-      if (a === 'rule') { V.del('/api/dvr/rules/' + id).then(D.load).then(draw).catch(V.fail); return; }
+      if (a !== 'play' && busy) return;
+      if (a === 'rule') { busy = true; V.del('/api/dvr/rules/' + encodeURIComponent(id)).then(D.load).then(function () { V.toast('Stopped recording every episode'); }).catch(V.fail).then(done); return; }
       var r = (D.state.recs || []).filter(function (x) { return x.id === id; })[0];
       if (!r) return;
-      if (a === 'play') D.play(r);
-      else if (a === 'stop') D.stop(r).then(draw);
-      else if (a === 'del') D.cancel(r).then(draw);
-      else if (a === 'keep') V.put('/api/dvr/' + id, { keep: !r.keep }).then(function (x) { V.toast(x.keep ? 'Kept: it won’t be deleted automatically' : 'It can be deleted automatically again'); return D.load(); }).then(draw).catch(V.fail);
+      if (a === 'play') { D.play(r); return; }
+      busy = true;
+      if (a === 'stop') D.stop(r).then(done);
+      else if (a === 'del') D.cancel(r).then(done);
+      else if (a === 'keep') V.put('/api/dvr/' + encodeURIComponent(id), { keep: !r.keep }).then(function (x) { V.toast(x.keep ? 'Kept: it won’t be deleted automatically' : 'It can be deleted automatically again'); return D.load(); }).catch(V.fail).then(done);
+      else busy = false;
     };
     D.load().then(draw);
     // While something records or is saved, keep it current; and redraw whenever the recordings change (a recording
@@ -170,10 +185,12 @@
       if (e.target.name === 'dvr-access') V.put('/api/admin/dvr', { access: e.target.value }).then(function (a) { V.toast({ everyone: 'Everyone can record', priority: 'Only priority profiles can record', off: 'Recording is off' }[a.config.access]); draw(a); D.load(); }).catch(V.fail);
     };
     body.onclick = function (e) {
-      if (!e.target.closest('[data-dvr-save]')) return;
+      var sb = e.target.closest('[data-dvr-save]');
+      if (!sb || sb.disabled) return;
       var patch = {};
       V.$$('[data-dvr]', body).forEach(function (x) { patch[x.dataset.dvr] = x.dataset.dvr === 'dir' ? x.value.trim() : Number(x.value) || 0; });
-      V.put('/api/admin/dvr', patch).then(function (a) { V.toast('Saved'); draw(a); }).catch(V.fail);
+      sb.disabled = true;
+      V.put('/api/admin/dvr', patch).then(function (a) { V.toast('Saved'); draw(a); var nb = V.$('[data-dvr-save]', body); if (nb) nb.focus(); }).catch(function (err) { sb.disabled = false; V.fail(err); });
     };
     load();
   };

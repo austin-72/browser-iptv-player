@@ -7,6 +7,7 @@
   var OFFS = []; for (var h = -12; h <= 12; h += 0.5) OFFS.push(h);
   var fmtOff = function (h) { return !h ? 'No offset' : (h > 0 ? '+' : '−') + Math.abs(h) + ' h'; };
   var offOpts = function (cur) { return OFFS.map(function (h) { return '<option value="' + h + '"' + (h === (+cur || 0) ? ' selected' : '') + '>' + fmtOff(h) + '</option>'; }).join(''); };
+  var cssq = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); };
   var peekHtml = function (list) { return list && list.length ? list.map(function (p) { return '<span class="ce-peek-i"><b>' + V.fmtClock(p.s) + '</b> ' + V.esc(p.t) + '</span>'; }).join('') : '<span class="dim">No programmes in the next few hours.</span>'; };
 
   // Kept while the admin works here: the page is drawn again whenever the catalogue changes (each edit changes it).
@@ -41,10 +42,16 @@
         '<button class="btn sm" data-edit>' + V.icon('edit') + ' Edit</button></span></li>';
     };
     var draw = function () {
-      var keep = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-k]') ? [document.activeElement.closest('[data-k]').dataset.k, document.activeElement.getAttribute('data-mv') || (document.activeElement.hasAttribute('data-edit') ? 'edit' : '')] : null;
+      var ae = document.activeElement;
+      var keep = ae && ae.closest && ae.closest('[data-k]') ? [ae.closest('[data-k]').dataset.k, ae.getAttribute('data-mv') || (ae.hasAttribute('data-edit') ? 'edit' : '')] : null;
+      // The search box, the filters and the other buttons up top keep the focus too (and what's typed so far), so
+      // typing carries on and a remote isn't thrown back to the list.
+      var tool = null;
+      if (ae && !keep && body.contains(ae)) ['data-f', 'data-glock', 'data-pin', 'data-nopin', 'data-more', 'data-bulk'].forEach(function (n) { if (!tool && ae.hasAttribute(n)) tool = { sel: '[' + n + (ae.getAttribute(n) ? '="' + ae.getAttribute(n) + '"' : '') + ']', v: n === 'data-f' && ae.type === 'search' ? ae.value : null, at: ae.selectionStart }; });
+      var pinOpen = !!(V.$('.ce-pin', body) && V.$('.ce-pin', body).open);
       var gl = st.g ? groups.filter(function (x) { return x.name === st.g; })[0] : null;
       body.innerHTML =
-        '<details class="card-sec ce-pin"' + (data && !data.hasPin ? '' : '') + '><summary><b>' + V.icon('lock') + ' Parental lock</b> <span class="dim">' + (data && data.hasPin ? 'PIN set' : 'No PIN yet') + '</span></summary>' +
+        '<details class="card-sec ce-pin"' + (pinOpen ? ' open' : '') + '><summary><b>' + V.icon('lock') + ' Parental lock</b> <span class="dim">' + (data && data.hasPin ? 'PIN set' : 'No PIN yet') + '</span></summary>' +
         '<p class="dim">Locked channels and categories ask for this PIN before they play, and what’s on them stays hidden until then. A device stays unlocked for 30 minutes. Kids profiles can’t unlock them.</p>' +
         '<div class="btn-row"><button class="btn" data-pin>' + (data && data.hasPin ? 'Change the parental PIN' : 'Set a parental PIN') + '</button>' + (data && data.hasPin ? '<button class="btn danger" data-nopin>Remove the PIN</button>' : '') + '</div>' +
         '<p class="small">Lock a whole category: pick it below and use “Lock this category”. Lock single channels with Edit, or select several and use Lock.</p></details>' +
@@ -58,8 +65,13 @@
         (data ? '<p class="dim small">' + V.plural(data.total, 'channel') + (st.q || st.g || st.list || st.show || st.type ? ' match' : '') + '. Changes show on every device straight away.</p>' : '') +
         (items.length ? '<ul class="ce-list">' + items.map(row).join('') + '</ul>' : data ? V.empty('No channels here', st.show === 'hidden' ? 'Nothing is hidden.' : 'Try a different search or category.') : '<div class="spinner"></div>') +
         (data && items.length < data.total ? '<div class="btn-row"><button class="btn" data-more>Show more</button></div>' : '');
-      if (!keep && mem.focus && (!document.activeElement || document.activeElement === document.body)) keep = mem.focus;
-      if (keep) { mem.focus = keep; var b = V.$('[data-k="' + keep[0] + '"] ' + (keep[1] === 'edit' ? '[data-edit]' : keep[1] ? '[data-mv="' + keep[1] + '"]' : '[data-pick]'), body); if (b) b.focus({ preventScroll: false }); }
+      var t = tool && (V.$(tool.sel, body) || (tool.sel === '[data-nopin]' && V.$('[data-pin]', body)));
+      if (t && !t.closest('[hidden]')) {
+        if (tool.v !== null) { t.value = tool.v; try { t.setSelectionRange(tool.at, tool.at); } catch (e) {} }
+        t.focus({ preventScroll: true });
+        keep = null;
+      } else if (!keep && mem.focus && (!document.activeElement || document.activeElement === document.body)) keep = mem.focus;
+      if (keep) { mem.focus = keep; var b = V.$('[data-k="' + cssq(keep[0]) + '"] ' + (keep[1] === 'edit' ? '[data-edit]' : keep[1] ? '[data-mv="' + keep[1] + '"]' : '[data-pick]'), body); if (b) b.focus({ preventScroll: false }); }
       mem.at = Date.now();
     };
     var byK = function (k) { return items.filter(function (x) { return x.k === k; })[0]; };

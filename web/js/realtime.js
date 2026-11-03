@@ -14,7 +14,7 @@ V.rt = (function () {
     es.onopen = function () { V._epsOk = {}; }; // (re)connected: the server may have restarted
     // (A new connection — the server may have restarted and forgotten who's watching what: always say it again, so it
     // doesn't hand someone else the provider connection this device is using, and the stream relay keeps it.)
-    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; lastPresence = ''; V.net.up(); V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
+    es.addEventListener('hello', function (e) { S.conn = JSON.parse(e.data).conn; retry = 0; lastPresence = ''; V._rtEver = true; V.net.up(); V.emit('rt:connected'); V.rt.presence(S.nowPlaying || null); });
     var on = function (name, fn) { es.addEventListener(name, function (e) { var d; try { d = JSON.parse(e.data); } catch (x) { return; } fn(d); }); };
     on('message', function (m) { V.emit('message', m); });
     on('read', function (d) { V.emit('read', d); });

@@ -132,6 +132,7 @@ V.watchTick = function (pos, tot) {
   if ((it.t === 'episode' || (it.t === 'movie' && V.upNext(it))) && tot > 60 && !V.watch.upnextDismissed && !V.watch.mych && V.pref('autoplayNext') !== false) {
     var startAt = m && m.credits ? m.credits.start : tot - 25;
     if (pos >= startAt && pos < tot) V.showUpNext(Math.ceil(Math.min(15, tot - pos)));
+    else { var un = V.$('.vp-upnext', p.host); if (un && !un.hidden && pos < startAt) un.hidden = true; } // (sought back)
   }
   function doSkip(s) {
     if (s.next) { if (V.watch.skipped.byUser) V.playUpNext(s.next); else V.autoNext(s.next); return; }
@@ -183,7 +184,7 @@ V.onEnded = function () {
   var corner = V.$('.vp-upnext', V.player.host);
   var counted = !!(corner && !corner.hidden);
   if (corner) corner.hidden = true;
-  if (it && it.t === 'episode' && V.showEpisodeEnd) return V.showEpisodeEnd(it, nx, { count: counted ? 5 : 10 });
+  if (it && it.t === 'episode' && V.showEpisodeEnd) return V.showEpisodeEnd(it, nx, { count: counted ? 5 : 10, noAuto: !auto }); // ("Not now": no countdown)
   if (nx && auto && counted) return V.autoNext(nx);
   if (it && it.t === 'movie' && nx && auto) return V.autoNext(nx);
   if (it && it.t === 'movie' && V.showMovieEnd) return V.showMovieEnd(it);
@@ -191,7 +192,13 @@ V.onEnded = function () {
 };
 
 // ---------------------------------------------------------------- side panels (episodes, channels, party)
-V.closeSide = function () { var s = V.$('.vp-side', V.player.host); s.hidden = true; s.innerHTML = ''; V.watch.side = null; };
+V.closeSide = function () {
+  var s = V.$('.vp-side', V.player.host);
+  var had = s.contains(document.activeElement), b = V.watch.side && V.$('.vp-ctrl [data-a="' + V.watch.side + '"], .vp-top [data-a="' + V.watch.side + '"]', V.player.host);
+  s.hidden = true; s.innerHTML = ''; V.watch.side = null;
+  // Closed from inside (a remote's Back, its ×): back to the button that opened it, as the settings menu does.
+  if (had && b && !b.hidden) { V.player._wake(); b.focus(); }
+};
 V.openSide = function (kind) {
   var side = V.$('.vp-side', V.player.host);
   if (V.watch.side === kind) return V.closeSide();
@@ -269,6 +276,7 @@ V.initWatch = function () {
   document.addEventListener('keydown', function (e) {
     var layer = V.$('#player-layer');
     if (layer.hidden || V.watch.mini) return;
+    if (!e.target || typeof e.target.closest !== 'function') return; // (a key sent to the document itself)
     if (e.target.closest('input, textarea, select, [contenteditable], dialog')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     var it = V.watch.it;
@@ -276,13 +284,13 @@ V.initWatch = function () {
     var k = e.key;
     // On a TV, Up/Down on the seek bar move to the buttons above/below it (not the volume).
     if (V.tvMode && (k === 'ArrowUp' || k === 'ArrowDown') && e.target.closest('.vp-seek')) return;
-    var inMenu = e.target.closest('.vp-menu, .vp-side, .vp-msg, .vp-upnext, .vp-ctrl button, .vp-top button, .vp-live button, .vp-skip');
+    var inMenu = e.target.closest('.vp-menu, .vp-side, .vp-msg, .vp-upnext, .vp-end, .vp-ctrl button, .vp-top button, .vp-live button, .vp-skip');
     var handled = true;
     // TV remotes: from the picture, OK (while the buttons are hidden) or Down (films) brings up the buttons with Play
     // focused, so the subtitle and settings menus can be reached with the arrows; Menu opens the settings menu;
     // Back from the buttons hides them again (a second Back leaves the player as before).
     if (V.tvMode) {
-      var onPic = !e.target.closest('.vp-ctrl, .vp-top, .vp-live, .vp-skip, .vp-upnext, .vp-msg, .vp-menu, .vp-side');
+      var onPic = !e.target.closest('.vp-ctrl, .vp-top, .vp-live, .vp-skip, .vp-upnext, .vp-msg, .vp-menu, .vp-side, .vp-end');
       var focusPlay = function () { p._wake(true); var pb = V.$('.vp-ctrl [data-a=play]', p.host); if (pb) pb.focus(); };
       var back = k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461;
       if (onPic && k === 'Enter' && p.el.classList.contains('idle')) { e.preventDefault(); focusPlay(); return; }
@@ -292,7 +300,7 @@ V.initWatch = function () {
     }
     if (k === 'Info' || e.keyCode === 457) k = 'i';
     if (k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461) {
-      if (!V.$('.vp-menu', p.host).hidden) p._closeMenu();
+      if (!V.$('.vp-menu', p.host).hidden) p._menuBack(); // (in a setting's choices: back to the settings first)
       else if (V.watch.side) V.closeSide();
       else if (document.fullscreenElement) document.exitFullscreen();
       else V.setMini(true);
@@ -398,9 +406,12 @@ V.remoteKey = function (key) {
   var ev;
   try { ev = new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true }); } catch (e) { ev = document.createEvent('Event'); ev.initEvent('keydown', true, true); ev.key = key; }
   try { Object.defineProperty(ev, 'keyCode', { get: function () { return codes[key] || 0; } }); } catch (e) {}
-  (inView ? t : document).dispatchEvent(ev);
+  (inView ? t : document.body).dispatchEvent(ev); // (an element: key handlers look at e.target.closest — the document has none)
   // Nothing had the focus: put it on the first thing on the page.
-  if (!inView && (key.indexOf('Arrow') === 0)) { var f = V.$('#view .card, #view button, #view a[href]'); if (f) f.focus(); }
+  // (Not when the key already moved it somewhere — inside the full-screen player, say — nor to a page behind it.)
+  var pl = V.$('#player-layer'), behind = pl && !pl.hidden && !pl.classList.contains('mini');
+  var moved = document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement;
+  if (!inView && !moved && key.indexOf('Arrow') === 0) { var f = behind ? V.$('.vp-ctrl [data-a=play]', pl) : V.$('#view .card, #view button, #view a[href]'); if (f) { if (behind && V.player) V.player._wake(true); f.focus(); } }
 };
 
 V.playCatchup = function (it, prog, offset) {
@@ -518,9 +529,14 @@ V.chromecast = function () {
   var go = function (pq, type) { return V.api('/api/cast/link', { body: { path: pq } }).then(function (r) { return send(location.origin + r.url, type); }); };
   var viaServer = function () {
     if (p.sessionId) return go('/api/session/' + p.sessionId + '/index.m3u8', 'application/x-mpegURL');
+    var convert = function () { return V.api('/api/play/session', { body: { k: it.k, alt: p.alt, mode: 'remux', seek: p.vod ? p.position : 0, live: !p.vod, codecs: ['h264'] } }).then(function (s) { return go(s.url, 'application/x-mpegURL'); }); };
+    // A media-folder or recorded file: the Chromecast opens it from this server, or a converted copy if it can't
+    // (the server doesn't relay its own files).
+    var la = p.attempt;
+    if (la && la.via === 'local' && /^\/api\/local\//.test(la.url || '')) return go(la.url, 'video/mp4').catch(convert);
     // Not converting right now: ask the server to relay it (receivers can't send headers or get past CORS).
     return V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: p.alt, url: it.t === 'catchup' ? it.u : undefined, sniff: true } }).then(function (r) {
-      if (r.kind === 'ffmpeg' || r.kind === 'ts') return V.api('/api/play/session', { body: { k: it.k, alt: p.alt, mode: 'remux', seek: p.vod ? p.position : 0, live: !p.vod, codecs: ['h264'] } }).then(function (s) { return go(s.url, 'application/x-mpegURL'); });
+      if (r.kind === 'ffmpeg' || r.kind === 'ts') return convert();
       return go(r.url, r.kind === 'hls' ? 'application/x-mpegURL' : r.kind === 'dash' ? 'application/dash+xml' : 'video/mp4');
     });
   };

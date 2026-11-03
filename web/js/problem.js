@@ -25,12 +25,14 @@
   var nameOf = function (it) { return it.t === 'episode' ? ((V.showOf(it) || {}).n || it.n) + ' ' + V.epLabel(it) : it.n; };
 
   /** What's useful to know about the title and the player's sound for this report. */
-  var details = function (p, choice, failed) {
-    var it = p.it, v = p.video || {};
+  var details = function (p, it, choice, failed) {
+    var v = p.video || {};
     var o = {
       item: { k: it.k, t: it.t, n: it.n, show: it.t === 'episode' ? (V.showOf(it) || {}).n : undefined, g: it.g, alt: p.alt, backups: (it.a || []).length, ext: (String(it.u || '').split('?')[0].match(/\.(\w{2,5})$/) || [])[1] || '' },
       failed: failed,
     };
+    // Something else started playing while the form was open: the player's details would be about that instead.
+    if (p.it !== it) { o.item.alt = undefined; o.playerMovedOn = true; return o; }
     if (failed && p._failedWith) o.final = p._failedWith.message;
     if (p._attemptLog && p._attemptLog.length) o.attempts = p._attemptLog.slice();
     if (choice === 'sound' || choice === 'sync') {
@@ -69,7 +71,7 @@
         if (!pick) { V.toast('Choose what’s wrong first', { error: true }); var f = V.$('[data-c]', d); if (f) f.focus(); return false; }
         var label = CHOICES.filter(function (c) { return c[0] === pick; })[0][1];
         var note = scrubNote(V.$('[data-note]', d).value.trim().slice(0, 500));
-        var extra = details(p, pick, failed);
+        var extra = details(p, it, pick, failed);
         extra.choice = pick; extra.choiceLabel = label; extra.note = note;
         var sent = V.reportError && V.reportError('user', { message: label + ' — ' + nameOf(it) }, extra);
         if (!sent) { V.toast('You’ve sent several reports just now. Please try again in a few minutes.', { error: true }); return false; }

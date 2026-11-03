@@ -42,17 +42,21 @@ V.parental = (function () {
       title: 'Parental PIN',
       body: '<p>' + V.esc(it && it.n ? '“' + it.n + '” is locked.' : 'This is locked.') + ' Enter the parental PIN to unlock locked channels on this device for 30 minutes.</p><label class="field"><span>PIN</span><input class="input pin-in" data-pin type="password" inputmode="numeric" autocomplete="off" maxlength="8" autofocus></label><p class="err small" data-err hidden></p>',
       actions: [{ label: 'Cancel', value: false }, { label: 'Unlock', primary: true, fn: function (d) { return submit(d); } }],
-      onOpen: function (d, finish) { V.$('[data-pin]', d).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(d).then(function (ok) { if (ok) finish(true); }); } }); },
+      onOpen: function (d, finish) { V.$('[data-pin]', d).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(d).then(function (ok) { if (ok) finish(true); }, V.fail); } }); },
     }).then(function (ok) { return !!ok; });
   }
   function submit(d) {
     var pin = V.$('[data-pin]', d).value;
     var err = V.$('[data-err]', d);
+    // (Enter and Unlock together, or Enter twice, send it once: a wrong PIN sent twice counts twice.)
+    if (d._busy) return Promise.resolve(false);
+    if (!pin) { err.hidden = false; err.textContent = 'Enter the PIN first.'; V.$('[data-pin]', d).focus(); return Promise.resolve(false); }
+    d._busy = true;
     return V.api('/api/parental/unlock', { body: { pin: pin } }).then(function (r) {
       until = r.until;
       schedule();
-      return fill().then(function () { return true; });
-    }, function (e) { err.hidden = false; err.textContent = e.message; V.$('[data-pin]', d).value = ''; V.$('[data-pin]', d).focus(); return false; });
+      return fill().then(function () { return true; }, function (e) { d._busy = false; throw e; });
+    }, function (e) { d._busy = false; err.hidden = false; err.textContent = e.message; V.$('[data-pin]', d).value = ''; V.$('[data-pin]', d).focus(); return false; });
   }
 
   // Playing something locked asks for the PIN first.

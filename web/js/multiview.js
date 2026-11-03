@@ -145,6 +145,8 @@
       v.addEventListener('error', onErr);
       var play = function () { var p = v.play(); if (p && p.catch) p.catch(function () { if (!v.muted) { v.muted = true; v.play().catch(function () {}); sound(); } }); };
       var lost = function () { if (token === t.token && t.live) again(t); };
+      // (The tile was removed, or the page left, while its address was being fetched: don't start it.)
+      if (token !== t.token || !active || tiles.indexOf(t) < 0) return finish(new Error('gone'));
       if (!g || !g.kind || g.kind === 'dash') return finish(new Error('format'));
       if ((g.kind === 'hls' && g.native) || g.kind === 'native') { v.src = g.url; play(); return; }
       if (g.kind === 'hls') {
@@ -292,6 +294,7 @@
     teardown(t);
     report();
     claim(it, i).then(function (c) {
+      if (!active || tiles.indexOf(t) < 0) return; // (removed, or the page left, meanwhile)
       if (!c) { start(t); return; } // (cancelled: back to what it was)
       t.it = it; t.alt = c.alt; t.tries = 0;
       state.keys = tiles.map(function (x) { return x.it.k; });
@@ -359,7 +362,8 @@
     active = true;
     document.body.classList.add('mv-on');
     tiles = state.keys.map(function (k) { return { it: V.entry(k), alt: -1, el: null, v: null, token: 0, tries: 0, live: false }; }).filter(function (t) { return t.it && t.it.t === 'live'; });
-    V.pageCleanup = function () { stopAll(); active = false; document.body.classList.remove('mv-on'); report(); view = null; };
+    var tick = null;
+    V.pageCleanup = function () { clearInterval(tick); stopAll(); active = false; document.body.classList.remove('mv-on'); report(); view = null; };
     draw();
     var adding = r.q.get('add') ? V.entry(r.q.get('add')) : null;
     if (r.q.get('add')) history.replaceState(null, '', '#/multiview');
@@ -369,7 +373,7 @@
       chain = chain.then(function () {
         if (!active || tiles.indexOf(t) < 0) return;
         var i = tiles.indexOf(t);
-        return claim(t.it, i).then(function (c) { if (!active) return; if (!c) { removeTile(tiles.indexOf(t)); return; } t.alt = c.alt; start(t); return report(); });
+        return claim(t.it, i).then(function (c) { if (!active || tiles.indexOf(t) < 0) return; if (!c) { removeTile(tiles.indexOf(t)); return; } t.alt = c.alt; start(t); return report(); });
       });
     });
     chain.then(function () {
@@ -393,7 +397,12 @@
         else if (a === 'swap') pick('Change “' + tiles[i].it.n + '”').then(function (it) { if (it) swapTile(i, it); });
         else if (a === 'full') full(i);
         else if (a === 'remove') removeTile(i);
-        else if (a === 'retry') { tiles[i].tries = 0; claim(tiles[i].it, i).then(function (c) { if (c) { tiles[i].alt = c.alt; start(tiles[i]); report(); } }); }
+        else if (a === 'retry') {
+          var rt = tiles[i];
+          rt.tries = 0;
+          // (The same tile, not whatever is at that place by the time the answer comes.)
+          claim(rt.it, i).then(function (c) { if (!c || !active || tiles.indexOf(rt) < 0) return; rt.alt = c.alt; start(rt); report(); });
+        }
         return;
       }
       if (i >= 0) setFocus(i);
@@ -414,7 +423,7 @@
     v.addEventListener('touchend', function () { clearTimeout(lp); });
     v.addEventListener('touchmove', function () { clearTimeout(lp); }, { passive: true });
     // What's on now: refresh the labels now and then.
-    var tick = setInterval(function () { if (!active) return clearInterval(tick); tiles.forEach(function (t) { if (t.el) V.$('.mv-info', t.el).innerHTML = label(t); }); }, 60000);
+    tick = setInterval(function () { if (!active) return clearInterval(tick); tiles.forEach(function (t) { if (t.el) V.$('.mv-info', t.el).innerHTML = label(t); }); }, 60000);
   });
 
   // Back from a full-screen tile: the page draws again (V.closePlayer refreshes it) and the tiles start again.

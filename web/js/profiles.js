@@ -48,7 +48,8 @@ V._selectProfile = function (id, pin) {
     return V.enterApp();
   }, function (e) {
     if (e.status === 401 && p && p.hasPin) return V.pinPad(p).then(function (pin2) { if (pin2 !== null) return V._selectProfile(id, pin2); });
-    if (e.status === 403 || e.status === 429) { V.toast(e.message, { error: true }); if (p && p.hasPin) return V.pinPad(p, e.message).then(function (pin3) { if (pin3 !== null) return V._selectProfile(id, pin3); }); }
+    // (Wrong PIN: said once, in the pad — not also in a toast underneath it.)
+    if (e.status === 403 || e.status === 429) { if (p && p.hasPin) return V.pinPad(p, e.message).then(function (pin3) { if (pin3 !== null) return V._selectProfile(id, pin3); }); V.toast(e.message, { error: true }); return; }
     V.fail(e);
   });
 };
@@ -167,6 +168,8 @@ V.addProfileDialog = function () {
 /** Back to “Who’s watching?”. lock: also forget this profile's PIN on this device. */
 V.leaveProfile = function (lock) {
   if (V.watch && V.watch.it) V.closePlayer();
+  // The page's own clean-up too (multiview tiles would otherwise keep streaming behind "Who's watching?").
+  if (V.pageCleanup) { try { V.pageCleanup(); } catch (e) {} V.pageCleanup = null; }
   V.rt.close();
   V.api('/api/profiles/leave', { body: { lock: !!lock } }).catch(function () {}).then(function () {
     S.profile = null; S.data = null; S.items = []; S.recs = null; S.recsAt = 0; V._recsLoading = null; V._details = null; S.socialCache = null; S.extra = new Map();

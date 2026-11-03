@@ -1374,7 +1374,8 @@ function _taggedTemplateLiteralLoose(e, t) { return t || (t = e.slice(0)), e.raw
       v: e.v,
       bg: 'url(#av' + i + 'g)'
     });
-    return cache[i] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' + body + '</svg>';
+    // (Decoration: the name next to it, or the button's label, says who it is.)
+    return cache[i] = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" aria-hidden="true" focusable="false">' + body + '</svg>';
   }
   root.AVATARS = {
     count: N,

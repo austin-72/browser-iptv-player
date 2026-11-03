@@ -52,13 +52,13 @@
       var sure = items.filter(function (s) { return !(s.done && (s.done.logo || s.done.guide)) && confOf(s) >= SURE; });
       var list = res ? shown() : [];
       var ticked = items.filter(function (s) { var p = mem.picked[s.k]; var d = s.done || {}; return p && ((p.logo && !d.logo) || (p.guide && !d.guide)); }).length;
-      var a = document.activeElement, keep = a && body.contains(a) ? (a.closest('[data-k]') ? '[data-k="' + a.closest('[data-k]').dataset.k + '"] ' : '') + (a.hasAttribute('data-pick') ? '[data-pick="' + a.dataset.pick + '"]' : a.hasAttribute('data-show') ? '[data-show="' + a.dataset.show + '"]' : a.hasAttribute('data-accept') ? '[data-accept]' : '') : '';
+      var keep = remember();
       var cache = R.cache.iptvorg ? 'The public lists were downloaded ' + V.fmtAgo(R.cache.iptvorg) + ' and are kept for a week.' : 'The first search downloads the public channel, logo and guide lists (several tens of MB); they’re kept for a week.';
       body.innerHTML =
-        '<div class="page-tools"><a class="btn" href="#/admin/guides">' + V.icon('back') + ' TV guides</a></div>' +
-        '<section class="card-sec"><h2><span class="dim">TV guides ›</span> Find guides and logos</h2>' +
+        '<div class="page-tools gf-tools"><a class="btn" href="#/admin/guides">' + V.icon('back') + ' TV guides</a></div>' +
+        '<section class="card-sec"><h2>Find guides and logos</h2>' +
         '<p class="dim">For channels with no TV guide or no logo, this looks in two free public databases and suggests matches: <b>iptv-org</b> (channel names, logos, and the channel ids many guides use) and <b>epg.pw</b> (ready-made guides per country). Nothing changes until you accept a match. Accepted logos are saved like ones you set in Admin → Channels; accepted guides add only the guides needed and link the channel to them.</p>' +
-        '<p>' + V.plural(need.guide, 'channel has', 'channels have') + ' no guide, and ' + V.plural(need.logo, 'channel has', 'channels have') + ' no logo.</p>' +
+        '<p>' + (need.guide || need.logo ? V.plural(need.guide, 'channel has', 'channels have') + ' no guide, and ' + V.plural(need.logo, 'channel has', 'channels have') + ' no logo.' : 'Every channel already has a guide and a logo — there’s nothing to look for right now.') + '</p>' +
         '<p class="small dim">' + cache + '</p>' +
         '<div class="btn-row">' + (running ? '<button class="btn" data-stopscan>' + V.icon('x') + ' Stop</button>' : '<button class="btn primary" data-scan>' + V.icon('search') + ' ' + (res ? 'Look again' : 'Look for matches') + '</button>' + (R.cache.iptvorg ? '<button class="btn" data-refresh>' + V.icon('refresh') + ' Download fresh lists and look</button>' : '')) + '</div>' +
         (running ? '<p class="gf-step"><span class="spinner sm"></span> ' + esc(j.step || 'Working…') + '</p>' : j && j.error ? '<div class="note warn">' + V.icon('info') + ' <span>' + esc(j.error) + '</span></div>' : '') +
@@ -69,31 +69,69 @@
             '<div class="chips" role="group" aria-label="Show">' + [['all', 'All'], ['sure', 'Sure'], ['maybe', 'Not sure'], ['guide', 'Guides'], ['logo', 'Logos']].map(function (c) { return '<button class="chip' + (mem.show === c[0] ? ' on' : '') + '" data-show="' + c[0] + '" aria-pressed="' + (mem.show === c[0]) + '">' + c[1] + '</button>'; }).join('') + '</div>' +
             (list.length ? '<ul class="gf-list">' + list.slice(0, mem.n).map(rowHtml).join('') + '</ul>' + (list.length > mem.n ? '<div class="btn-row"><button class="btn" data-more>Show more</button></div>' : '') : '<p class="dim">Nothing here.</p>')
             : '<p class="dim">No matches found' + (res.checked ? ' for the ' + V.plural(res.checked, 'channel') + ' without a guide or logo' : ': every channel has a guide and a logo') + '.</p>') + '</section>' : '');
-      if (keep) { var el = null; try { el = V.$(keep, body); } catch (e) {} if (el) el.focus(); }
+      restore(keep);
     };
-    var apply = function (items) {
+    // A redraw (every 1.5 s while looking) mustn't close "Your own guide", lose what's typed there, or lose focus.
+    var KEYS = ['data-pick', 'data-show', 'data-accept', 'data-scan', 'data-refresh', 'data-stopscan', 'data-saveown', 'data-own', 'data-sure', 'data-ticked', 'data-more'];
+    var remember = function () {
+      var own = V.$('[data-own]', body), det = V.$('.gf-own', body);
+      var m = { own: own ? own.value : null, open: !!(det && det.open), sel: own && document.activeElement === own ? [own.selectionStart, own.selectionEnd] : null };
+      var a = document.activeElement;
+      if (!a || !body.contains(a)) return m;
+      var row = a.closest('[data-k]');
+      m.k = row ? row.getAttribute('data-k') : null;
+      m.attr = a.tagName === 'SUMMARY' ? 'summary' : KEYS.filter(function (x) { return a.hasAttribute(x); })[0] || '';
+      m.val = m.attr && m.attr !== 'summary' ? a.getAttribute(m.attr) : '';
+      return m;
+    };
+    var restore = function (m) {
+      var own = V.$('[data-own]', body), det = V.$('.gf-own', body);
+      if (own && m.own !== null) own.value = m.own;
+      if (det && m.open) det.open = true;
+      if (!m.attr) return;
+      var find = function (scope, attr, val) { return V.$$(attr === 'summary' ? 'summary' : '[' + attr + ']', scope).filter(function (x) { return !val || attr === 'data-accept' || x.getAttribute(attr) === val; })[0]; };
+      var row = m.k ? V.$$('[data-k]', body).filter(function (x) { return x.getAttribute('data-k') === m.k; })[0] : null;
+      var el = find(row || body, m.attr, m.val);
+      // (The button went away — a row just accepted, a search just started or ended: the nearest sensible one.)
+      if ((!el || el.disabled) && row) { el = null; for (var n = row.nextElementSibling; n && !el; n = n.nextElementSibling) el = V.$('[data-accept]', n); }
+      if (!el || el.disabled) el = m.k ? V.$('[data-accept]', body) || V.$('[data-show].on', body) : V.$('[data-stopscan]', body) || V.$('[data-scan]', body);
+      if (!el) return;
+      try { el.focus({ preventScroll: true }); } catch (e) {}
+      if (el === own && m.sel) try { own.setSelectionRange(m.sel[0], m.sel[1]); } catch (e) {}
+    };
+    // One request at a time: a second press while the first is on its way does nothing.
+    var busy = false;
+    var once = function (b, req) {
+      if (busy) return;
+      busy = true; b.disabled = true;
+      req().catch(V.fail).then(function () { busy = false; if (b.isConnected) b.disabled = false; });
+    };
+    var apply = function (b, items) {
       if (!items.length) return;
-      V.api('/api/admin/findguides/apply', { body: { items: items } }).then(function (r) {
-        V.toast('Added ' + V.plural(r.logos, 'logo') + ' and linked ' + V.plural(r.guides, 'guide') + (r.added.length ? '. Adding the guide' + (r.added.length > 1 ? 's ' : ' ') + r.added.join(' and ') + ' — listings appear once ' + (r.added.length > 1 ? 'they’ve' : 'it’s') + ' downloaded.' : '.'), { ms: 7000 });
-        load();
-      }).catch(V.fail);
+      once(b, function () {
+        return V.api('/api/admin/findguides/apply', { body: { items: items } }).then(function (r) {
+          V.toast('Added ' + V.plural(r.logos, 'logo') + ' and linked ' + V.plural(r.guides, 'guide') + (r.added.length ? '. Adding the guide' + (r.added.length > 1 ? 's ' : ' ') + r.added.join(' and ') + ' — listings appear once ' + (r.added.length > 1 ? 'they’ve' : 'it’s') + ' downloaded.' : '.'), { ms: 7000 });
+          return load();
+        });
+      });
     };
     body.onclick = function (e) {
       var b = e.target.closest('button');
       if (!b) return;
-      if (b.hasAttribute('data-scan') || b.hasAttribute('data-refresh')) V.api('/api/admin/findguides/scan', { body: { refresh: b.hasAttribute('data-refresh') } }).then(load).catch(V.fail);
-      else if (b.hasAttribute('data-stopscan')) V.del('/api/admin/findguides/scan').then(load).catch(V.fail);
-      else if (b.hasAttribute('data-saveown')) V.put('/api/admin/findguides/settings', { iptvGuide: V.$('[data-own]', body).value.trim() }).then(function () { V.toast('Saved — look again to use it'); load(); }).catch(V.fail);
+      if (b.hasAttribute('data-scan') || b.hasAttribute('data-refresh')) once(b, function () { return V.api('/api/admin/findguides/scan', { body: { refresh: b.hasAttribute('data-refresh') } }).then(load); });
+      else if (b.hasAttribute('data-stopscan')) once(b, function () { return V.del('/api/admin/findguides/scan').then(load); });
+      else if (b.hasAttribute('data-saveown')) once(b, function () { return V.put('/api/admin/findguides/settings', { iptvGuide: V.$('[data-own]', body).value.trim() }).then(function () { V.toast('Saved — look again to use it'); return load(); }); });
       else if (b.hasAttribute('data-show')) { mem.show = b.dataset.show; mem.n = 100; draw(); }
       else if (b.hasAttribute('data-more')) { mem.n += 100; draw(); }
-      else if (b.hasAttribute('data-sure')) apply(R.result.items.filter(function (s) { return confOf(s) >= SURE; }).map(function (s) { return { k: s.k, logo: !!(s.logo && s.logo.conf >= SURE), guide: !!(s.guide && s.guide.conf >= SURE) }; }));
-      else if (b.hasAttribute('data-ticked')) apply(R.result.items.filter(function (s) { var p = mem.picked[s.k]; return p && (p.logo || p.guide); }).map(function (s) { var p = mem.picked[s.k]; return { k: s.k, logo: !!p.logo, guide: !!p.guide }; }));
+      // (Rows already done are left out, so the count on the button is what gets sent.)
+      else if (b.hasAttribute('data-sure')) apply(b, R.result.items.filter(function (s) { return !(s.done && (s.done.logo || s.done.guide)) && confOf(s) >= SURE; }).map(function (s) { return { k: s.k, logo: !!(s.logo && s.logo.conf >= SURE), guide: !!(s.guide && s.guide.conf >= SURE) }; }));
+      else if (b.hasAttribute('data-ticked')) apply(b, R.result.items.filter(function (s) { var p = mem.picked[s.k], d = s.done || {}; return p && ((p.logo && !d.logo) || (p.guide && !d.guide)); }).map(function (s) { var p = mem.picked[s.k], d = s.done || {}; return { k: s.k, logo: !!p.logo && !d.logo, guide: !!p.guide && !d.guide }; }));
       else if (b.hasAttribute('data-accept')) {
         var k = b.closest('[data-k]').dataset.k, p = mem.picked[k] || {};
         var s = R.result.items.filter(function (x) { return x.k === k; })[0];
         // Nothing ticked on this row: "Accept" means everything suggested for it.
         if (!p.logo && !p.guide) p = { logo: !!(s && s.logo), guide: !!(s && s.guide) };
-        apply([{ k: k, logo: !!p.logo, guide: !!p.guide }]);
+        apply(b, [{ k: k, logo: !!p.logo, guide: !!p.guide }]);
       }
     };
     body.onchange = function (e) {

@@ -1,0 +1,11 @@
+/* Polish pass: guide titles kept readable at the left edge, episode numbers on phones. */
+
+/* ---- Guide: a programme that's almost all scrolled off to the left shows no stray letters (guide.js) */
+.gp.gp-sliver > * { visibility: hidden; }
+
+/* ---- Episode rows: the number column is hidden on phones, so the number goes before the title instead ("3 · Low Tide") */
+.ep-tn { display: none; }
+@media (max-width: 600px) {
+  .ep-tn { display: inline; color: var(--dim); font-weight: 600; font-size: .9em; }
+  .ep-t { column-gap: .4rem; }
+}

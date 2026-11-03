@@ -1,0 +1,73 @@
+/* Refinements: the title page's buttons (title.js), bookmarks as a tidy row, and other small touches. */
+
+/* ---- a title's buttons: Play (and Shuffle / From the start), then the round ones together */
+.tp-icons { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+@media (max-width: 600px) {
+  .tp-acts > .btn { flex: 1 1 0; justify-content: center; min-width: 0; }
+  .tp-icons { flex: 1 0 100%; justify-content: space-around; gap: .4rem; }
+}
+
+/* ---- bookmarks with only a time: one tidy row instead of a long column */
+.bms.bare { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.6rem; }
+.bms.bare li { padding: 0; gap: 0; }
+.bms.bare li span:empty { display: none; }
+
+/* ---- Live TV: what's on next is labelled as such */
+.chr-nl { font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .7; margin-right: .2rem; }
+
+/* ---- the guide on phones: the colour key on one line (it scrolls), so the grid starts higher */
+@media (max-width: 600px) {
+  .g-legend { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; white-space: nowrap; gap: .8rem; padding-bottom: 2px; }
+  .g-legend::-webkit-scrollbar { display: none; }
+  .g-legend .check { margin-left: .4rem; flex: none; }
+}
+
+/* ---- the player on narrow phones: "Sound only" lives in the settings (there's no room for every button), and the
+   channel card puts "Start over" on a line of its own instead of squeezing the programme's name */
+@media (max-width: 480px) {
+  .vp-ctrl [data-a=audioonly] { display: none; }
+  .vp-live .lc-body { flex: 1 1 calc(100% - 6rem); }
+  .vp-live > .btn { margin-left: 5.5rem; }
+}
+
+/* ---- the player: the gear (or subtitles button) shows its panel is open */
+.vp-ctrl .pbtn[aria-expanded=true] { color: var(--accent); }
+
+/* ---- Admin → Overview: the counts on one line where they fit (not one left over on a row of its own) */
+.stats { grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .6rem; }
+
+/* ---- the player: the time left is a button (tap: when it ends instead) */
+button.vp-t2 { background: none; border: 0; padding: .2rem .3rem; margin: -.2rem -.3rem; border-radius: 6px; font: inherit; font-size: .85rem; color: var(--dim); cursor: pointer; white-space: nowrap; }
+button.vp-t2:hover, button.vp-t2:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
+
+/* ---- touch screens and TVs: the round buttons have names underneath, so they need room between them */
+@media (hover: none) and (min-width: 601px) { .tp-icons { gap: 1.3rem; } }
+.tv .tp-icons { gap: 1.5rem; }
+/* (A remote has no pointer to move: "Hide the controls" is for mice.) */
+.tv .vp-ctrl [data-a=hidectl] { display: none; }
+
+/* ---- the settings panel in a narrower window: two sections side by side instead of four squeezed ones */
+@media (max-width: 1050px) and (min-width: 701px) and (min-height: 521px) {
+  /* (newspaper columns: the sections flow on into the next column, so it all still fits without scrolling) */
+  .vp-menu.big .mb.cols { display: block; column-count: 3; column-gap: 1.2em; }
+  .vp-menu.big .mcol { display: block; }
+  .vp-menu.big .mcol .mi { break-inside: avoid; }
+  .vp-menu.big .mcol .mg { break-after: avoid; }
+}
+@media (max-width: 860px) and (min-width: 701px) and (min-height: 521px) { .vp-menu.big .mb.cols { column-count: 2; } }
+
+/* ---- the phone remote with no screens yet: two short steps instead of a paragraph */
+.rm-steps { text-align: left; display: inline-block; margin: .4rem 0 .8rem; padding-left: 1.3rem; line-height: 1.6; }
+
+/* ---- My stuff on phones: history rows keep their two buttons beside them (not on a line below) */
+@media (max-width: 600px) {
+  .hist li { flex-wrap: nowrap; gap: .7rem; }
+  .hist-b { min-width: 0; }
+  .hist-art { width: 5.5rem; }
+}
+
+/* ---- a channel's schedule: "10:15 PM" on one line */
+.progs .pt { width: auto; min-width: 4.5rem; white-space: nowrap; }
+
+/* ---- Admin → Error reports: problems only seen before the last update */
+.er-old { color: #3fb950; font-weight: 600; }

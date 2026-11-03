@@ -24,16 +24,23 @@ V.catchup = function () {
           second: '2-digit',
           hourCycle: 'h23'
         });
-        var o = Object.fromEntries(f.formatToParts(new Date(ms)).map(function (p) {
-          return [p.type, p.value];
-        }));
-        return {
+        var o;
+        if (f.formatToParts) {
+          o = Object.fromEntries(f.formatToParts(new Date(ms)).map(function (p) {
+            return [p.type, p.value];
+          }));
+        } else {
+          // Older TV browsers: no formatToParts, so read the numbers out of "dd/mm/yyyy, hh:mm:ss".
+          var n = f.format(new Date(ms)).match(/\d+/g) || [];
+          o = { day: n[0], month: n[1], year: n[2], hour: n[3], minute: n[4], second: n[5] };
+        }
+        if (o.year && o.hour) return {
           Y: o.year,
-          m: o.month,
-          d: o.day,
-          H: o.hour,
-          M: o.minute,
-          S: o.second
+          m: pad(+o.month),
+          d: pad(+o.day),
+          H: pad(+o.hour % 24), // (some browsers ignore hourCycle and say "24" at midnight)
+          M: pad(+o.minute),
+          S: pad(+o.second || 0)
         };
       } catch (_unused) {}
     }
@@ -138,6 +145,46 @@ V.catchup = function () {
   var days = function days(e) {
     return e.cu && e.cu.days || 7;
   };
+
+  /**
+   * "Start over" (or an earlier part) of a programme still on air: its archive copy stops where "now" was when it
+   * started. When it gets there, carry on: the rest of it from the archive, or the channel live once it's caught up.
+   * True when it did something (otherwise the usual end of a video).
+   */
+  function carryOn(pl) {
+    var it = pl && pl.it;
+    if (!it || it.t !== 'catchup' || !it.cutAt || !it.prog || V._sleepAt === -1) return false; // (the sleep timer's "end of this video" stops it)
+    var c = V.entry(it.catchupOf);
+    if (!c) return false;
+    var prog = it.prog,
+      now = Date.now(),
+      at = it.cutAt; // (where the archive copy ended)
+    if (at >= prog.e - 5e3) return false; // (the whole programme has been played)
+    if (prog.e > now && now - at < 90e3) {
+      V.play(c); // (less than a minute and a half behind: live)
+      return true;
+    }
+    var ce = V.catchup.entryFor(c, prog, Math.floor((at - prog.s) / 1000));
+    if (!ce) {
+      if (prog.e <= now) return false;
+      V.play(c);
+      return true;
+    }
+    V.play(ce, {
+      startAt: 0
+    });
+    return true;
+  }
+  // (The player's end-of-video handler, from watch.js, does nothing for catch-up: ours goes first.)
+  V.on('player-started', function (pl) {
+    if (!pl.onEnded || pl.onEnded._catchup) return;
+    var prev = pl.onEnded;
+    pl.onEnded = function (self) {
+      if (carryOn(self || pl)) return;
+      return prev.apply(this, arguments);
+    };
+    pl.onEnded._catchup = true;
+  });
   return {
     available: function available(e) {
       return !!(e && e.cu && e.t === 'live' && build(e, Date.now() - 3600e3, Date.now() - 1800e3));
@@ -156,7 +203,9 @@ V.catchup = function () {
       }
       var start = p.s + offset * 1000;
       var end = Math.max(p.e, start + 60e3);
-      var url = build(e, start, Math.min(end, p.e > Date.now() ? Date.now() : end));
+      // Still on air: the archive only goes up to now (cutAt: see carryOn below).
+      var cut = p.e > Date.now() ? Date.now() : 0;
+      var url = build(e, start, Math.min(end, cut || end));
       if (!url) return null;
       return Object.assign({}, e, {
         k: e.k,
@@ -166,6 +215,7 @@ V.catchup = function () {
         catchupOf: e.k,
         prog: p,
         startOffset: offset,
+        cutAt: cut || undefined,
         n: "" + p.t,
         channelName: e.n,
         d: Math.max(0, (p.e - p.s) / 1000),

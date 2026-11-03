@@ -12,7 +12,7 @@
   var label = V.subDelayLabel = function (s) {
     s = round(s || 0);
     if (!s) return '0 s';
-    return (s > 0 ? '+' : '−') + String(Math.abs(s)) + ' s';
+    return (s > 0 ? '+' : '−') + String(Math.abs(s)) + '\u00a0s'; // (no break between number and unit)
   };
   var describe = function (s) { s = round(s || 0); return !s ? 'Subtitles in sync' : 'Subtitles ' + label(s) + (s > 0 ? ' (later)' : ' (earlier)'); };
 
@@ -92,7 +92,7 @@
     main.push({ label: 'Subtitle timing', value: cur ? label(cur) : 'In sync', page: 'subdelay' });
     var adj = function (d) { return function () { p.nudgeSubs(d); }; };
     pages.subdelay = [
-      { label: describe(cur), on: false, fn: function () {}, back: 'subdelay' },
+      { label: describe(cur), on: false, inert: true, fn: function () {}, back: 'subdelay' },
       { label: 'Earlier', value: '−0.1 s', fn: adj(-0.1), back: 'subdelay' },
       { label: 'Later', value: '+0.1 s', fn: adj(0.1), back: 'subdelay' },
       { label: 'Much earlier', value: '−0.5 s', fn: adj(-0.5), back: 'subdelay' },

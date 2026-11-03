@@ -23,6 +23,7 @@
 
   var LABELS = { sport: 'Sport', film: 'Films', news: 'News', kids: 'Kids' };
   var cache = null;
+  var chipFocus = ''; // (the chip just pressed: it keeps the focus when the page is drawn again)
   var load = function (kinds) {
     var key = kinds.join(',');
     if (cache && cache.key === key && Date.now() - cache.at < 5 * 60e3) return Promise.resolve(cache.v);
@@ -61,6 +62,7 @@
       '<div class="chips" role="group" aria-label="What to show">' + Object.keys(LABELS).map(function (k) { return '<button class="chip' + (kinds.indexOf(k) >= 0 ? ' on' : '') + '" data-kind="' + k + '" aria-pressed="' + (kinds.indexOf(k) >= 0) + '">' + LABELS[k] + '</button>'; }).join('') + '</div>' +
       '<section class="ol-events" aria-label="Events"></section><div class="ol-body"><div class="spinner"></div></div>';
     var body = V.$('.ol-body', view);
+    if (chipFocus) { var cf = V.$('[data-kind="' + chipFocus + '"]', view); chipFocus = ''; if (cf) setTimeout(function () { cf.focus({ preventScroll: true }); }, 0); }
     if (V.eventsSection) V.eventsSection(V.$('.ol-events', view));
     var data = null;
     var draw = function (v) {
@@ -92,6 +94,7 @@
         var k = ch.dataset.kind, i = kinds.indexOf(k);
         if (i >= 0 && kinds.length > 1) kinds.splice(i, 1); else if (i < 0) kinds.push(k);
         V.ls.set('onlater.k', kinds.join(','));
+        chipFocus = k;
         V.router.go('#/onlater?k=' + kinds.join(','), true);
         return;
       }

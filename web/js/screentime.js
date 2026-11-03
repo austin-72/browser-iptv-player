@@ -312,21 +312,28 @@
         if (!box) return;
         var id = li.dataset.id, rule = readRule(box), had = X.profiles[id] && X.profiles[id].rule;
         if (!rule.on && !had) return; // (never set up: nothing to save)
-        V.put('/api/admin/screentime/' + id, { rule: rule }).then(function (x) { var h = box.parentNode; h.innerHTML = stBox(null, x, X.tz); X.profiles[id] = x; }).catch(V.fail);
+        var wasOpen = box.open;
+        V.put('/api/admin/screentime/' + id, { rule: rule }).then(function (x) { var h = box.parentNode; h.innerHTML = stBox(null, x, X.tz); if (wasOpen) V.$('.st-box', h).open = true; X.profiles[id] = x; }).catch(V.fail);
       });
       body.addEventListener('click', function (e) {
         var box = e.target.closest('.st-box');
         if (!box) return;
         var li = box.closest('[data-id]'), id = li.dataset.id;
-        var done = function (x) { var h = box.parentNode; h.innerHTML = stBox(null, x, X.tz); var nb = V.$('.st-box', h); nb.open = true; X.profiles[id] = x; return x; };
-        if (e.target.closest('[data-st-grant]')) {
-          var m = +e.target.closest('[data-st-grant]').dataset.stGrant;
-          V.api('/api/admin/screentime/' + id + '/grant', { body: { minutes: m } }).then(function (x) { done(x); V.toast('Gave ' + fmtMin(m) + ' more today'); }).catch(V.fail);
-        } else if (e.target.closest('[data-st-reset]')) {
-          V.api('/api/admin/screentime/' + id + '/reset', { body: {} }).then(function (x) { done(x); V.toast('Back to the normal limits for today'); }).catch(V.fail);
-        } else if (e.target.closest('[data-st-yes], [data-st-no]')) {
-          var q = e.target.closest('[data-req]'), yes = e.target.closest('[data-st-yes]');
-          answer(q.dataset.req, !!yes, yes ? +yes.dataset.stYes : 0).then(function () { V.router.refresh(); }).catch(V.fail);
+        var btn = e.target.closest('[data-st-grant], [data-st-reset], [data-st-yes], [data-st-no]');
+        if (!btn || box._busy) return;
+        box._busy = true; // (a double click doesn't give the extra time twice)
+        var free = function (err) { box._busy = false; V.fail(err); };
+        // (Drawn again with the answer, still open, with the focus on the same button for a remote.)
+        var done = function (x) { var h = box.parentNode, sel = btn.hasAttribute('data-st-grant') ? '[data-st-grant="' + btn.dataset.stGrant + '"]' : '[data-st-reset]'; h.innerHTML = stBox(null, x, X.tz); var nb = V.$('.st-box', h); nb.open = true; X.profiles[id] = x; var f = V.$(sel, nb); if (f) f.focus(); return x; };
+        if (btn.hasAttribute('data-st-grant')) {
+          var m = +btn.dataset.stGrant;
+          V.api('/api/admin/screentime/' + id + '/grant', { body: { minutes: m } }).then(function (x) { done(x); V.toast('Gave ' + fmtMin(m) + ' more today'); }, free);
+        } else if (btn.hasAttribute('data-st-reset')) {
+          V.api('/api/admin/screentime/' + id + '/reset', { body: {} }).then(function (x) { done(x); V.toast('Back to the normal limits for today'); }, free);
+        } else {
+          // (answer() draws the page again itself.)
+          var q = btn.closest('[data-req]'), yes = btn.hasAttribute('data-st-yes');
+          answer(q.dataset.req, yes, yes ? +btn.dataset.stYes : 0).catch(free);
         }
       });
     }).catch(function () {});

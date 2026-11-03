@@ -7,8 +7,11 @@ V.route('search', function (view, r) {
     '<input type="search" class="input" data-q placeholder="Movies, series, channels, people…" aria-label="Search" autocomplete="off" enterkeyhint="search" value="' + V.esc(q0) + '">' +
     (voice ? '<button type="button" class="icon-btn" data-voice aria-label="Search by voice">' + V.icon('mic') + '</button>' : '') + '</form><div class="search-out"></div></div>';
   var input = V.$('[data-q]', view), out = V.$('.search-out', view);
-  var epgReq = 0, peopleReq = 0;
+  var epgReq = 0, peopleReq = 0, rec = null;
+  // Voice input still listening when the page is left: stop it (a late result would search on another page).
+  V.pageCleanup = function () { epgReq++; peopleReq++; if (rec) { try { rec.abort(); } catch (e) {} rec = null; } };
   var run = function (q) {
+    if (!document.contains(view)) return; // (another page by now)
     q = q.trim();
     history.replaceState(null, '', '#/search' + (q ? '?q=' + encodeURIComponent(q) : ''));
     V.router.current = location.hash;
@@ -29,9 +32,23 @@ V.route('search', function (view, r) {
     var f = V.searchFilters(q);
     var filtered = null;
     if (f) {
-      var pool = f.rest ? V.search.find(f.rest, { types: ['movie', 'show'], limit: 2000 }) : S.movies.concat(S.shows);
-      filtered = pool.filter(function (it) { return (!f.genres.length || f.genres.every(function (g) { return (it.gn || []).indexOf(g) >= 0; })) && (!f.from || (it.y && it.y >= f.from && it.y <= f.to)) && S.data.hidden.indexOf(it.k) < 0; });
-      if (!f.rest) filtered.sort(function (a, b) { return (b.r || 0) - (a.r || 0); });
+      var fits = function (it) { return (!f.from || (it.y && it.y >= f.from && it.y <= f.to)) && (!f.genres.length || f.genres.every(function (g) { return (it.gn || []).indexOf(g) >= 0; })) && !V.inList('hidden', it.k); };
+      if (f.rest) filtered = V.search.find(f.rest, { types: ['movie', 'show'], limit: 2000 }).filter(fits);
+      else {
+        // Everything matching, best rated first: only the 60 shown are kept in order (not a sort of the whole catalogue per key press).
+        filtered = [];
+        var scan = function (it) {
+          var r = it.r || 0, n = filtered.length;
+          if (n >= 60 && r <= (filtered[n - 1].r || 0)) return;
+          if (!fits(it)) return;
+          var i = n;
+          while (i > 0 && (filtered[i - 1].r || 0) < r) i--;
+          filtered.splice(i, 0, it);
+          if (filtered.length > 60) filtered.pop();
+        };
+        S.movies.forEach(scan);
+        S.shows.forEach(scan);
+      }
     }
     out.innerHTML = all.length || (filtered && filtered.length) ? '<div class="sr-people"></div><div class="sr-rows"></div>' : '<div class="sr-people"></div><div class="empty"><h2>No matches for “' + V.esc(q) + '”</h2><p>Try fewer words, or check the spelling.</p></div>';
     var rows = V.$('.sr-rows', out);
@@ -93,14 +110,16 @@ V.route('search', function (view, r) {
   }, true);
   var vb = V.$('[data-voice]', view);
   if (vb) vb.onclick = function () {
-    var rec = new voice();
+    if (rec) { try { rec.abort(); } catch (e) {} }
+    rec = new voice();
     rec.lang = navigator.language || 'en-US';
     rec.interimResults = true;
     vb.classList.add('listening');
     V.announce('Listening');
-    rec.onresult = function (ev) { var t = Array.prototype.map.call(ev.results, function (x) { return x[0].transcript; }).join(''); input.value = t; run(t); };
-    rec.onend = function () { vb.classList.remove('listening'); if (input.value) V.addSearch(input.value); };
-    rec.onerror = function (ev) { vb.classList.remove('listening'); if (ev.error !== 'no-speech') V.toast('Voice search: ' + ev.error, { error: true }); };
+    var me = rec;
+    rec.onresult = function (ev) { if (me !== rec || !document.contains(view)) return; var t = Array.prototype.map.call(ev.results, function (x) { return x[0].transcript; }).join(''); input.value = t; run(t); };
+    rec.onend = function () { if (me !== rec) return; rec = null; vb.classList.remove('listening'); if (input.value && document.contains(view)) V.addSearch(input.value); };
+    rec.onerror = function (ev) { if (me !== rec) return; vb.classList.remove('listening'); if (ev.error !== 'no-speech') V.toast('Voice search: ' + ev.error, { error: true }); };
     rec.start();
   };
   run(q0);

@@ -133,37 +133,60 @@
       var all = V.myLists().map(function (l) { return { id: l.id, name: l.name, keys: '__my:' + l.id === sel ? keys.slice(0, MAX_CH) : l.keys }; });
       save(all);
     };
-    var move = function (k, d) { var keys = keysOf(); var i = keys.indexOf(k), j = i + d; if (i < 0 || j < 0 || j >= keys.length) return; keys.splice(j, 0, keys.splice(i, 1)[0]); setKeys(keys); draw(); var b = V.$('[data-k="' + k + '"] [data-' + (d < 0 ? 'up' : 'down') + ']', view); if (b && !b.disabled) b.focus(); else { b = V.$('[data-k="' + k + '"] [data-' + (d < 0 ? 'down' : 'up') + ']', view); if (b) b.focus(); } };
+    var row = function (k) { return V.$('[data-k="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]', view); };
+    var move = function (k, d) { var keys = keysOf(); var i = keys.indexOf(k), j = i + d; if (i < 0 || j < 0 || j >= keys.length) return; keys.splice(j, 0, keys.splice(i, 1)[0]); setKeys(keys); draw(); var li = row(k), b = li && V.$('[data-' + (d < 0 ? 'up' : 'down') + ']', li); if (b && !b.disabled) b.focus(); else { b = li && V.$('[data-' + (d < 0 ? 'down' : 'up') + ']', li); if (b) b.focus(); } };
+    // Channels matching the search box (not ones already in the list).
+    var find = function () {
+      var qi = V.$('[data-q]', view), box = V.$('.mych-found', view);
+      if (!qi || !box) return;
+      var q = qi.value.trim(), have = keysOf();
+      var found = q ? V.search.find(q, { types: ['live', 'radio'], limit: 12 }).filter(function (c) { return have.indexOf(c.k) < 0; }) : [];
+      box.innerHTML = found.map(function (c) { return '<button class="side-ch mych-hit" data-add="' + V.esc(c.k) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="truncate">' + V.esc(c.n) + '</span>' + V.icon('plus') + '</button>'; }).join('') +
+        (q && !found.length ? '<p class="dim small">No channels match “' + V.esc(q) + '”' + (have.length ? ' (or they’re already in the list)' : '') + '.</p>' : '');
+    };
+    /** Draws it again after adding a channel: the search stays as it was, so several can be added in a row. */
+    var redrawKeepSearch = function () {
+      var qi = V.$('[data-q]', view), q = qi ? qi.value : '';
+      draw();
+      qi = V.$('[data-q]', view);
+      if (!qi) return;
+      qi.value = q; find();
+      var next = V.$('.mych-hit', view);
+      (next || qi).focus();
+    };
+    /** Shows one list, with the focus on its name on the left. */
+    var pick = function (v) {
+      sel = v; V.ls.set('mych.sel', sel); draw();
+      var f = V.$('[data-sel="' + (window.CSS && CSS.escape ? CSS.escape(sel) : sel) + '"]', view); if (f) f.focus();
+    };
     draw();
     view.addEventListener('click', function (e) {
       var b;
-      if ((b = e.target.closest('[data-sel]'))) { sel = b.dataset.sel; V.ls.set('mych.sel', sel); draw(); var f = V.$('[data-sel="' + sel + '"]', view); if (f) f.focus(); return; }
-      if (e.target.closest('[data-new]')) return V.newChannelList([]).then(function (l) { if (l) { sel = '__my:' + l.id; V.ls.set('mych.sel', sel); draw(); } });
-      if (e.target.closest('[data-rename]')) { var cur = V.myLists().filter(function (x) { return '__my:' + x.id === sel; })[0]; return V.prompt('Rename the list', { value: cur.name, max: 40 }).then(function (n) { n = (n || '').trim(); if (!n) return; save(V.myLists().map(function (l) { return { id: l.id, name: '__my:' + l.id === sel ? n : l.name, keys: l.keys }; })); draw(); }); }
-      if (e.target.closest('[data-delete]')) return V.confirm('Delete this list? The channels stay where they are.', { ok: 'Delete', danger: true }).then(function (ok) { if (!ok) return; save(V.myLists().filter(function (l) { return '__my:' + l.id !== sel; })); ['liveStart', 'guideStart'].forEach(function (p) { if (V.pref(p) === sel) V.setPref(p, '__last'); }); sel = '__fav'; draw(); });
+      if ((b = e.target.closest('[data-sel]'))) { pick(b.dataset.sel); return; }
+      if (e.target.closest('[data-new]')) return V.newChannelList([]).then(function (l) { if (l) pick('__my:' + l.id); });
+      if (e.target.closest('[data-rename]')) { var cur = V.myLists().filter(function (x) { return '__my:' + x.id === sel; })[0]; if (!cur) return; return V.prompt('Rename the list', { value: cur.name, max: 40, ok: 'Rename' }).then(function (n) { n = (n || '').trim(); if (!n) return; save(V.myLists().map(function (l) { return { id: l.id, name: '__my:' + l.id === sel ? n : l.name, keys: l.keys }; })); pick(sel); }); }
+      if (e.target.closest('[data-delete]')) return V.confirm('Delete this list? The channels stay where they are.', { ok: 'Delete', danger: true }).then(function (ok) { if (!ok) return; save(V.myLists().filter(function (l) { return '__my:' + l.id !== sel; })); ['liveStart', 'guideStart'].forEach(function (p) { if (V.pref(p) === sel) V.setPref(p, '__last'); }); pick('__fav'); V.toast('List deleted'); });
       var li = e.target.closest('[data-k]');
       if (li && e.target.closest('[data-up]')) return move(li.dataset.k, -1);
       if (li && e.target.closest('[data-down]')) return move(li.dataset.k, 1);
       if (li && e.target.closest('[data-rm]')) {
-        if (sel === '__fav') V.toggle('favs', li.dataset.k, false).then(draw); else { setKeys(keysOf().filter(function (k) { return k !== li.dataset.k; })); draw(); }
+        // The focus goes on to the next channel's ×, so a remote can keep going.
+        var k0 = li.dataset.k, sib = li.nextElementSibling || li.previousElementSibling, sk = sib && sib.dataset.k;
+        var after = function () { draw(); var n = sk && row(sk); var f = (n && V.$('[data-rm]', n)) || V.$('[data-q]', view); if (f) f.focus(); };
+        if (sel === '__fav') V.toggle('favs', k0, false).then(after); else { setKeys(keysOf().filter(function (k) { return k !== k0; })); after(); }
         return;
       }
       if ((b = e.target.closest('[data-add]'))) {
+        if (b.disabled) return;
+        b.disabled = true; // (not added twice by a double click)
         var k = b.dataset.add;
-        if (sel === '__fav') V.toggle('favs', k, true).then(function () { var o = keysOf().filter(function (x) { return x !== k; }); o.push(k); V.setPref('favOrder', o); draw(); });
-        else { var keys = keysOf(); if (keys.indexOf(k) < 0) keys.push(k); setKeys(keys); draw(); }
-        var q = V.$('[data-q]', view); if (q) q.focus();
+        if (sel === '__fav') V.toggle('favs', k, true).then(function () { var o = keysOf().filter(function (x) { return x !== k; }); o.push(k); V.setPref('favOrder', o); redrawKeepSearch(); }, function () { b.disabled = false; });
+        else { var keys = keysOf(); if (keys.indexOf(k) < 0) keys.push(k); setKeys(keys); redrawKeepSearch(); }
       }
     });
     view.addEventListener('change', function (e) { var s = e.target.closest('[data-start]'); if (s) { V.setPref(s.dataset.start, s.value); V.toast('Saved'); } });
-    view.addEventListener('submit', function (e) { e.preventDefault(); });
-    view.addEventListener('input', V.debounce(function (e) {
-      if (!e.target.hasAttribute('data-q')) return;
-      var q = e.target.value.trim();
-      var have = keysOf();
-      var found = q ? V.search.find(q, { types: ['live', 'radio'], limit: 12 }).filter(function (c) { return have.indexOf(c.k) < 0; }) : [];
-      V.$('.mych-found', view).innerHTML = found.map(function (c) { return '<button class="side-ch mych-hit" data-add="' + V.esc(c.k) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="truncate">' + V.esc(c.n) + '</span>' + V.icon('plus') + '</button>'; }).join('');
-    }, 150));
+    view.addEventListener('submit', function (e) { e.preventDefault(); find(); var h = V.$('.mych-hit', view); if (h) h.focus(); }); // (Enter: to the first match)
+    view.addEventListener('input', V.debounce(function (e) { if (e.target.hasAttribute('data-q')) find(); }, 150));
     // Desktop: drag a channel to a new place.
     var dragK = null;
     view.addEventListener('dragstart', function (e) { var li = e.target.closest('[data-k]'); if (!li) return; dragK = li.dataset.k; li.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', dragK); e.dataTransfer.effectAllowed = 'move'; } catch (x) {} });

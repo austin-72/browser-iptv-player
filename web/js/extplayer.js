@@ -36,11 +36,14 @@
   /** A one-entry playlist file most players open. */
   var m3u = function (url, title) { return '#EXTM3U\n#EXTINF:-1,' + String(title || '').replace(/[\r\n]/g, ' ') + '\n' + url + '\n'; };
 
+  var asking = false; // (a second press while the address is fetched would open the box twice)
   V.openInApp = function (it, opts) {
     opts = opts || {};
-    if (!it) return;
+    if (!it || asking) return;
+    asking = true;
     var title = it.t === 'episode' ? ((V.showOf(it) || {}).n || '') + ' ' + V.epLabel(it) : it.n;
     return V.api('/api/play/external', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: Number.isInteger(opts.alt) ? opts.alt : -1 } }).then(function (r) {
+      asking = false;
       var apps = V.extApps(r.url, title);
       var blob = URL.createObjectURL(new Blob([m3u(r.url, title)], { type: 'audio/x-mpegurl' }));
       var file = (title || 'stream').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'stream';
@@ -51,7 +54,7 @@
           apps.map(function (a, i) { return '<a class="btn block" data-app="' + i + '"' + (i ? '' : ' autofocus') + ' href="' + V.esc(a.href) + '">' + V.icon('openapp') + ' ' + V.esc(a.name) + (a.hint ? '<small class="dim">' + V.esc(a.hint) + '</small>' : '') + '</a>'; }).join('') +
           '<a class="btn block" data-m3u href="' + blob + '" download="' + V.esc(file) + '.m3u">' + V.icon('download') + ' Download playlist (.m3u)</a>' +
           '<button class="btn block" data-copy>' + V.icon('copy') + ' Copy the address</button></div>' +
-          '<p class="dim small">' + (r.how === 'direct' ? 'The app plays it straight from the provider.' : 'The app plays it through this server. The link works for ' + r.hours + ' hours.') + ' It uses one of the provider’s connections, like watching here.</p>',
+          '<p class="dim small">' + (r.how === 'direct' ? 'The app plays it straight from the provider.' : 'The app plays it through this server. The link works for ' + (r.hours || 12) + ' hours.') + ' It uses one of the provider’s connections, like watching here.</p>',
         actions: [{ label: 'Close' }],
         onOpen: function (d) {
           d.addEventListener('click', function (e) {
@@ -69,7 +72,7 @@
           });
         },
       }).then(function () { setTimeout(function () { URL.revokeObjectURL(blob); }, 60000); });
-    }).catch(V.fail);
+    }).catch(function (e) { asking = false; V.fail(e); });
   };
 
   // In the player's settings menu, and the options menus of channels, films and episodes.

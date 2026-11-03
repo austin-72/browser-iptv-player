@@ -5,6 +5,7 @@ V.epg = (function () {
   var loadedAt = 0;
   var ranges = new Map(); // key -> {from, to, list}
   var loading = null;
+  var shifted = {}; // key -> the now/next list moved by the channel's time shift (made once, not on every look)
   var shift = function (it, list) {
     if (!it || !it.sh || !list) return list;
     var d = it.sh * 3600e3;
@@ -15,6 +16,7 @@ V.epg = (function () {
     if (loading) return loading;
     loading = V.api('/api/epg/now').then(function (j) {
       now = (j && j.p) || {};
+      shifted = {};
       loadedAt = Date.now();
       ranges.clear();
       V.emit('epg');
@@ -39,7 +41,7 @@ V.epg = (function () {
   function listFor(it) {
     if (!it) return null;
     var k = it.t === 'catchup' ? it.catchupOf : it.k;
-    if (now[k]) return shift(V.entry(k) || it, now[k]);
+    if (now[k]) { var ent = V.entry(k) || it; if (!ent.sh) return now[k]; return shifted[k] || (shifted[k] = shift(ent, now[k])); }
     var c = V.entry(k) || it;
     if (phOn(c)) { var t = Date.now(); return placeholders(c, t - 3 * 3600e3, t + 8 * 3600e3); }
     return null;
@@ -50,7 +52,7 @@ V.epg = (function () {
     has: function (it) { return !!(it && (it.E || now[it.k])); },
     placeholders: function (it, from, to) { return phOn(it) ? placeholders(it, from, to) : []; },
     /** Listings sent separately (a locked channel's, once the parental PIN is entered). */
-    inject: function (map) { Object.keys(map || {}).forEach(function (k) { now[k] = map[k]; ranges.delete(k); }); },
+    inject: function (map) { Object.keys(map || {}).forEach(function (k) { now[k] = map[k]; delete shifted[k]; ranges.delete(k); }); },
     nowNext: function (it, t) {
       t = t || Date.now();
       var list = listFor(it);
@@ -80,7 +82,8 @@ V.epg = (function () {
         var out = {};
         keys.forEach(function (k) {
           var r = ranges.get(k); var it = V.entry(k);
-          var l = r ? shift(it, r.list.filter(function (p) { return p.e > from && p.s < to; })) : (listFor(it) || []).filter(function (p) { return p.e > from && p.s < to; });
+          // (Moved by the channel's time shift first, then cut to the window asked for.)
+          var l = (r ? shift(it, r.list) : (listFor(it) || [])).filter(function (p) { return p.e > from && p.s < to; });
           out[k] = !l.length || (l[0] && l[0].ph) ? (phOn(it) ? placeholders(it, from, to) : []) : l;
         });
         return out;
@@ -89,9 +92,19 @@ V.epg = (function () {
       var chunks = [];
       for (var i = 0; i < need.length; i += 150) chunks.push(need.slice(i, i + 150));
       var f = from - 3600e3, t2 = to + 3600e3;
+      // (The server sends at most 3 days at a time for many channels: a longer stretch is asked for in pieces.)
+      var spans = [];
+      for (var a = f; a < t2; a += 2.5 * 86400e3) spans.push([a, Math.min(t2, a + 2.5 * 86400e3)]);
       return Promise.all(chunks.map(function (c) {
-        return V.api('/api/epg/range?keys=' + c.map(encodeURIComponent).join(',') + '&from=' + f + '&to=' + t2).then(function (j) {
-          c.forEach(function (k) { ranges.set(k, { from: f, to: t2, list: j[k] || [] }); });
+        // (The server's times are the guide's own; a channel shown shifted by some hours needs that much more each side.)
+        var sh = Math.max.apply(null, [0].concat(c.map(function (k) { var e = V.entry(k); return e && e.sh ? Math.abs(e.sh) : 0; }))) * 3600e3;
+        return Promise.all(spans.map(function (sp, i) { return V.api('/api/epg/range?keys=' + c.map(encodeURIComponent).join(',') + '&from=' + (i === 0 ? sp[0] - sh : sp[0]) + '&to=' + (i === spans.length - 1 ? sp[1] + sh : sp[1])); })).then(function (js) {
+          c.forEach(function (k) {
+            var seen = {}, list = [];
+            js.forEach(function (j) { (j[k] || []).forEach(function (p) { if (!seen[p.s]) { seen[p.s] = 1; list.push(p); } }); });
+            list.sort(function (x, y) { return x.s - y.s; });
+            ranges.set(k, { from: f, to: t2, list: list });
+          });
         });
       })).then(done, done);
     },

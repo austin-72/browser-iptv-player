@@ -145,7 +145,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 ![The player showing stream info: playback Direct, 1280×720, straight from the provider](docs/screenshots/stream-info.jpg)
 
 - **Plays almost anything:** HLS, MPEG-TS, MP4, MKV, DASH, ClearKey DRM, and AC-3/E-AC-3 sound, from M3U, Xtream Codes or your own folders. It chooses the most direct way to play each stream (see [How playback works](#how-playback-works)). The *Stream info* panel shows which route is in use.
-- **A player that gets out of the way.** The buttons and the pointer fade after a couple of seconds without a move (or at once with the *Hide the controls* button, or U); the settings open as one big panel — Playback, Picture, Sound, More side by side, each setting with a picture and what it's set to — that needs no scrolling, closes with the gear again, its close button, Back or a click outside.
+- **A player that gets out of the way.** The buttons and the pointer fade after a couple of seconds without a move (or at once with the *Hide the controls* button, or U); the settings open as one big panel — Playback, Picture, Sound, More side by side, each setting with a picture and what it's set to — that needs no scrolling, closes with the gear again, its close button, Back or a click outside. Tap the time left to see the time it ends instead.
 - **Resume anywhere.** Progress syncs live between devices, and the next episode autoplays with a countdown (an *Autoplay* switch on the screen and in the player's menu turns it off).
 - **When something ends:** an episode shows the next one with its picture and story, plus *Previous episode*, *Random episode* and *All episodes*. A film shows the next film of its series first, then films like it.
 - **Play queue:** *Play next* or *Add to queue* on any film, series or episode; they play one after another with the same countdown. Reorder it in My stuff → Queue or from the player; it's the same on all your devices.
@@ -183,7 +183,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 ![Admin → Profiles with a Priority viewer switch on each profile](docs/screenshots/admin-profiles.jpg)
 
 - Unlimited profiles with 142 original profile pictures, or upload a photo. Each device remembers its profile.
-- **Optional PINs,** remembered on a device for 6 months or for 30 minutes, with a lockout after wrong guesses.
+- **Optional PINs,** remembered on a device for 6 months or for 30 minutes, with a lockout after wrong guesses (on the device that guessed, and everywhere after many guesses across devices).
 - **Kids profiles and age limits** (five levels, read from US, UK and EU ratings). Profiles can also be limited by type (live, films, series, radio) and category. Adult content is hidden unless allowed.
 - Each profile keeps its own history, My List, favourites, ratings, hidden titles, home layout, theme, subtitle style and languages.
 - **Busy providers:** if someone is already using the provider's connection, it says who's watching what and offers *Take over*. Titles on several providers play from the one with a free connection.
@@ -294,7 +294,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 | `DATA_DIR` | `./data` (`/data` in Docker) | Where accounts, lists, caches and history are stored |
 | `SITE_PASSWORD` | `changeme` | The site password used the very first time. After that, change it in Admin → Security |
 | `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see [Security](#security)) |
-| `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used |
+| `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used (the last address in X-Forwarded-For that isn’t local or Cloudflare’s) |
 | `HTTPS_CERT`, `HTTPS_KEY` | — | Paths to a certificate and key, so the server speaks https itself |
 | `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Falls back to software if it fails |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Render device for VAAPI |

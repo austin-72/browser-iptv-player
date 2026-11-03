@@ -75,7 +75,7 @@ V.route('home', function (view) {
       '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + ' Play</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
       '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
   }
-  if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') + '</div>';
+  if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.filter(function (m) { return !(S.profile && S.profile.kids && (m.id === 'scary' || m.id === 'kids')); }).map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') /* (a kids' profile: no "Something scary", and everything is for kids already) */ + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button>' + (V.homeFootExtra ? V.homeFootExtra() : '') + '</div>';
   view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
   if (heroIt) {
@@ -241,10 +241,10 @@ V.onTvNow = function (kind) {
   var k = V.ON_TV.filter(function (x) { return x.id === kind; })[0];
   if (!k) return [];
   var out = [];
-  var favs = new Set(S.data.favs);
+  var favs = new Set(S.data.favs), hidden = new Set(S.data.hidden); // (a Set: thousands of channels × the hidden list, four rows)
   for (var i = 0; i < S.live.length; i++) {
     var c = S.live[i];
-    if (S.data.hidden.indexOf(c.k) >= 0) continue;
+    if (hidden.has(c.k)) continue;
     var now = V.epg.nowNext(c).now;
     if (now && now.ph) now = null; // (a placeholder block isn't a programme)
     var cats = now && now.c ? [].concat(now.c).join(' ') : '';

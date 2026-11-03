@@ -22,7 +22,7 @@
     subs: { label: 'Subtitles on / off', run: needPlayer(function (p) { p.toggleSubs(); }) },
     subsnext: { label: 'Next subtitles', run: needPlayer(function (p) {
       var s = p._tracks().subs;
-      if (!s) return p.osd('No subtitles for this', 1200);
+      if (!s || !s.items.length) return p.osd('No subtitles for this', 1200);
       var i = s.items.findIndex(function (x) { return x.on; });
       var n = s.items[(i + 1) % s.items.length];
       n.fn(); p.osd('Subtitles: ' + n.label, 1500); p._menuRefresh();
@@ -189,7 +189,8 @@
           q = q.trim();
           var list = /^\d+$/.test(q) ? (S.live || []).concat(S.radio || []).filter(function (c) { return String(c.no) === q; }) : [];
           list = list.concat(q ? V.search.find(q, { types: ['live', 'radio'], limit: 30 }) : (V.favChannels ? V.favChannels('any') : []).concat(V.recentChannels ? V.recentChannels() : [])).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).slice(0, 30);
-          box.innerHTML = list.map(function (c) { return '<button class="side-ch" data-k="' + V.esc(c.k) + '"><span class="num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="sc-t"><span class="truncate">' + V.esc(c.n) + '</span></span></button>'; }).join('') || '<p class="dim">Type a channel’s name or number.</p>';
+          box.innerHTML = list.map(function (c) { return '<button class="side-ch" data-k="' + V.esc(c.k) + '"><span class="num">' + V.esc(c.no || '') + '</span>' + V.art(c.i, c.n, 'art sm') + '<span class="sc-t"><span class="truncate">' + V.esc(c.n) + '</span></span></button>'; }).join('') ||
+            '<p class="dim">' + (q ? 'No channel matches “' + V.esc(q) + '”.' : 'Type a channel’s name or number.') + '</p>';
         };
         draw('');
         V.$('[data-cq]', d).addEventListener('input', V.debounce(function (e) { draw(e.target.value); }, 120));
@@ -232,7 +233,12 @@
     wrap.innerHTML = section();
     var sec = wrap.firstChild;
     if (after && after.parentNode) after.parentNode.insertBefore(sec, after.nextSibling); else (V.$('.settings', view) || view).appendChild(sec);
-    var redraw = function () { var w = document.createElement('div'); w.innerHTML = section(); var n = w.firstChild; sec.parentNode.replaceChild(n, sec); sec = n; bind(); };
+    // (Drawn again: the focus goes to the same control in the new copy, else the first button, for TV remotes.)
+    var redraw = function (focusSel) {
+      var w = document.createElement('div'); w.innerHTML = section(); var n = w.firstChild;
+      sec.parentNode.replaceChild(n, sec); sec = n; bind();
+      if (focusSel) { var f = V.$(focusSel, sec) || V.$('[data-km-detect]', sec); if (f) f.focus({ preventScroll: true }); }
+    };
     var bind = function () {
       sec.addEventListener('change', function (e) {
         var s = e.target.closest('[data-km]');
@@ -240,17 +246,20 @@
         e.stopPropagation();
         var id = s.dataset.km;
         if (s.value === '__channel') {
-          pickChannel().then(function (k) { if (k) { setHere(id, 'channel:' + k); V.toast('Saved for this device'); } redraw(); var n = V.$('[data-km="' + id + '"]', sec); if (n) n.focus(); });
+          pickChannel().then(function (k) { if (k) { setHere(id, 'channel:' + k); V.toast('Saved for this device'); } redraw('[data-km="' + id + '"]'); });
           return;
         }
+        var own = ownHere();
         setHere(id, s.value);
         V.toast('Saved for this device');
+        // (The first change here gives this device its own buttons: the note and "Use my default here" follow.)
+        if (!own) redraw('[data-km="' + id + '"]');
       });
       sec.addEventListener('click', function (e) {
         if (e.target.closest('[data-km-detect]')) detector(sec);
         else if (e.target.closest('[data-km-def]')) { V.setPref('remoteKeys', Object.assign({}, mapping())); V.toast('Saved as your default — your other devices use it unless they have their own.'); }
-        else if (e.target.closest('[data-km-usedef]')) { V.ls.del('remoteKeys'); redraw(); V.toast('This device uses your default now'); }
-        else if (e.target.closest('[data-km-reset]')) { V.ls.set('remoteKeys', {}); redraw(); V.toast('The buttons work as usual on this device'); }
+        else if (e.target.closest('[data-km-usedef]')) { V.ls.del('remoteKeys'); redraw('[data-km-def]'); V.toast('This device uses your default now'); }
+        else if (e.target.closest('[data-km-reset]')) { V.ls.set('remoteKeys', {}); redraw('[data-km-reset]'); V.toast('The buttons work as usual on this device'); }
       });
     };
     bind();

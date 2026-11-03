@@ -52,7 +52,8 @@
 
   V.adminTabs.stats = function (body) {
     var days = +(V.ls.get('statsDays', 30)) || 30;
-    var data = null, showTable = false;
+    var data = null, showTable = false, seq = 0, busy = false;
+    var refocus = ''; // (after a redraw: the button that had focus, so a TV remote doesn't lose its place)
     var draw = function () {
       var d = data;
       var secs = d.secs, plays = d.plays;
@@ -67,8 +68,8 @@
       var html = '<div class="st-conc"></div><section class="card-sec"><div class="st-head"><h2>How streams reached viewers</h2><div class="chips" role="group" aria-label="Period">' +
         [[7, '7 days'], [30, '30 days'], [90, '90 days']].map(function (o) { return '<button class="chip' + (o[0] === days ? ' on' : '') + '" aria-pressed="' + (o[0] === days) + '" data-days="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div></div>';
       if (empty) {
-        html += '<p class="dim">Nothing has been watched in this period yet. Statistics start counting from the moment this version is running' + (d.since ? ' (' + V.esc(new Date(d.since).toLocaleDateString()) + ')' : '') + '.</p></section>';
-        body.innerHTML = html; if (V.statsConc) V.statsConc(V.$('.st-conc', body), days); return;
+        html += '<p class="dim">Nothing has been watched in this period yet. Statistics start counting from the moment this version is running' + (d.since ? ' (' + V.esc(new Date(d.since).toLocaleDateString()) + ')' : '') + '. Try a longer period, or come back once people have watched something.</p></section>';
+        body.innerHTML = html; focusBack(); if (V.statsConc) V.statsConc(V.$('.st-conc', body), days); return;
       }
       html += '<div class="stats st-tiles">' +
         '<div class="stat st-hero"><b class="num">' + Math.round(directShare * 100) + '%</b><span>watched straight from the provider</span></div>' +
@@ -117,7 +118,14 @@
       html += '<section class="card-sec"><h2>Reset</h2><p class="dim">Counting since ' + V.esc(new Date(d.since).toLocaleString()) + '. Statistics are kept for 120 days.</p><button class="btn danger" data-reset>Reset statistics</button></section>';
       body.innerHTML = html;
       chart(V.$('.st-chart', body), V.$('.st-tip', body), d.series);
+      focusBack();
       if (V.statsConc) V.statsConc(V.$('.st-conc', body), days);
+    };
+    var focusBack = function () {
+      if (!refocus) return;
+      var el = V.$(refocus, body);
+      refocus = '';
+      if (el) try { el.focus({ preventScroll: true }); } catch (e) {}
     };
 
     var dayTable = function (d) {
@@ -128,17 +136,34 @@
     };
 
     var load = function () {
-      body.innerHTML = '<div class="center pad"><span class="spinner"></span></div>';
-      V.api('/api/admin/stats?days=' + days).then(function (d) { data = d; draw(); }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+      var my = ++seq;
+      // (Switching period: keep the page where it is, dimmed, rather than blanking it.)
+      if (data) body.classList.add('st-loading'); else body.innerHTML = '<div class="center pad"><span class="spinner"></span></div>';
+      body.setAttribute('aria-busy', 'true');
+      V.api('/api/admin/stats?days=' + days).then(function (d) {
+        if (my !== seq) return; // (an older period answered late)
+        data = d; draw();
+      }).catch(function (e) { if (my === seq) body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; }).then(function () {
+        if (my !== seq) return;
+        body.classList.remove('st-loading'); body.removeAttribute('aria-busy');
+      });
     };
 
     body.onclick = function (e) {
       var b = e.target.closest('[data-days]');
-      if (b) { days = +b.dataset.days; V.ls.set('statsDays', days); load(); return; }
-      if (e.target.closest('.st-tbl-btn')) { showTable = !showTable; draw(); return; }
-      if (e.target.closest('[data-reset]')) {
+      if (b) {
+        if (+b.dataset.days === days && data) return;
+        days = +b.dataset.days; V.ls.set('statsDays', days);
+        refocus = '[data-days="' + days + '"]';
+        V.$$('[data-days]', body).forEach(function (x) { var on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on); });
+        load(); return;
+      }
+      if (e.target.closest('.st-tbl-btn')) { showTable = !showTable; refocus = '.st-tbl-btn'; draw(); return; }
+      if (e.target.closest('[data-reset]') && !busy) {
         V.confirm('Reset all playback statistics? This can’t be undone.', { ok: 'Reset', danger: true }).then(function (ok) {
-          if (ok) V.del('/api/admin/stats').then(function () { V.toast('Statistics reset'); load(); }).catch(V.fail);
+          if (!ok) return;
+          busy = true;
+          V.del('/api/admin/stats').then(function () { V.toast('Statistics reset'); load(); }).catch(V.fail).then(function () { busy = false; });
         });
       }
     };
@@ -154,10 +179,10 @@
     var W = Math.max(280, el.clientWidth), H = 200, padL = 36, padR = 8, padT = 10, padB = 24;
     var vals = series.map(function (s) { return GROUPS.map(function (g) { return sum(s.secs, g.routes) / 3600; }); });
     var max = Math.max.apply(null, vals.map(function (v) { return v[0] + v[1] + v[2]; }).concat([0]));
-    // A tidy top for the axis: 1, 2, 5 × 10^n.
+    // A tidy top for the axis: four steps of a round number of minutes or hours (so the labels read 15m, 30m, 2h…).
+    var STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180, 300, 600, 1200, 3000, 6000, 12000, 30000, 60000];
     var top = 1;
-    if (max > 0) { var p = Math.pow(10, Math.floor(Math.log10(max))); top = [1, 2, 2.5, 5, 10].map(function (m) { return m * p; }).filter(function (v) { return v >= max; })[0]; }
-    if (max < 1) top = max > 0.5 ? 1 : max > 0.25 ? 0.5 : 0.25;
+    for (var si = 0; si < STEPS.length; si++) { top = STEPS[si] * 4 / 60; if (top >= max) break; }
     var n = series.length, iw = W - padL - padR, ih = H - padT - padB;
     var slot = iw / n, gap = Math.min(4, Math.max(1, slot * 0.25)), bw = Math.max(1, slot - gap);
     var y = function (v) { return padT + ih - v / top * ih; };

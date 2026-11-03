@@ -159,6 +159,8 @@
   }
   function switchTo(id) {
     if (V.watch && V.watch.it) V.closePlayer();
+    // The page's own clean-up too (multiview tiles would otherwise keep streaming behind "Who's watching?").
+    if (V.pageCleanup) { try { V.pageCleanup(); } catch (e) {} V.pageCleanup = null; }
     V.rt.close();
     // As "Switch profile" does, then straight into the one picked (its PIN pad if it has one; cancelling it leaves
     // you on "Who's watching?").

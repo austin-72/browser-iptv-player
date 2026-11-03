@@ -66,7 +66,24 @@ V.adminTabs.outputs = function (body, A) {
   body.innerHTML = '<div class="spinner"></div>';
   var O = null;
   var copyRow = function (label, value) { return '<label class="field"><span>' + label + '</span><div class="inline"><input class="input" readonly value="' + V.esc(value) + '"><button class="btn" data-copy="' + V.esc(value) + '">Copy</button></div></label>'; };
+  // (What had focus before a redraw, to put it back: a TV remote would otherwise be left nowhere.)
+  var pending = null;
+  var focusOf = function (a) {
+    if (!a || !body.contains(a)) return null;
+    var li = a.closest('[data-pid]');
+    var attr = ['data-o', 'data-login', 'data-setpw', 'data-nologin', 'data-copy'].filter(function (x) { return a.hasAttribute(x); })[0];
+    return attr ? { pid: li ? li.getAttribute('data-pid') : null, attr: attr, val: attr === 'data-o' ? a.getAttribute(attr) : '' } : null;
+  };
+  var refocus = function (f) {
+    if (!f) return;
+    var scope = f.pid ? V.$$('[data-pid]', body).filter(function (x) { return x.getAttribute('data-pid') === f.pid; })[0] : body;
+    var el = scope ? V.$$('[' + f.attr + ']', scope).filter(function (x) { return !f.val || x.getAttribute(f.attr) === f.val; })[0] : null;
+    if (!el && scope && f.pid) el = V.$('button', scope); // ("Make a login" became "New password", or the login went)
+    if (el) try { el.focus({ preventScroll: true }); } catch (e) {}
+  };
   var draw = function () {
+    var keep = pending || focusOf(document.activeElement);
+    pending = null;
     var base = location.protocol + '//' + location.host;
     var logins = {};
     O.logins.forEach(function (x) { logins[x.profile] = x; });
@@ -77,7 +94,7 @@ V.adminTabs.outputs = function (body, A) {
       (O.xtream.enabled ? copyRow('Server (in the app: “Xtream Codes” / “Xtream API”)', base) +
         '<ul class="simple out-logins">' + O.profiles.map(function (p) {
           var l = logins[p.id];
-          return '<li data-pid="' + p.id + '">' + V.avatar(p.avatar, 'sm') + ' <b>' + V.esc(p.name) + '</b>' + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + ' <span class="dim">· ' + (l ? 'username <code>' + V.esc(l.user) + '</code>' : 'no login') + '</span>' +
+          return '<li data-pid="' + V.esc(p.id) + '">' + V.avatar(p.avatar, 'sm') + ' <b>' + V.esc(p.name) + '</b>' + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + ' <span class="dim">· ' + (l ? 'username <code>' + V.esc(l.user) + '</code>' : 'no login') + '</span>' +
             '<span class="sp"></span><button class="btn sm" data-login>' + (l ? 'New password' : 'Make a login') + '</button>' + (l ? '<button class="btn sm" data-setpw>Choose password</button><button class="icon-btn sm" data-nologin aria-label="Remove login">' + V.icon('trash') + '</button>' : '') + '</li>';
         }).join('') + '</ul><p class="dim small">The playlist and guide for the same login: <code>' + V.esc(base) + '/get.php?username=…&amp;password=…&amp;type=m3u_plus</code> and <code>/xmltv.php?username=…&amp;password=…</code>. The 24/7 channels from My channels aren’t included (only this app can play them).</p>' : '') +
       '</section>' +
@@ -85,15 +102,20 @@ V.adminTabs.outputs = function (body, A) {
       '<p class="dim">Lets Plex, Jellyfin or Emby add your live channels as if this were an HDHomeRun tuner on the network — so they can show them, and record them with their own DVR. Only devices on your home network can use it, and there’s no password, so leave it off if you don’t need it.</p>' +
       '<label class="check"><input type="checkbox" data-o="hdhr"' + (O.hdhr.enabled ? ' checked' : '') + '><span>Turn on the tuner</span></label>' +
       (O.hdhr.enabled ? '<div class="grid2"><label class="field"><span>Tuners (streams at once)</span><input class="input" type="number" min="1" max="8" data-o="tuners" value="' + O.hdhr.tuners + '"></label>' +
-        '<label class="field"><span>Channels as seen by</span><select class="input" data-o="profile">' + O.profiles.map(function (p) { return '<option value="' + p.id + '"' + ((O.hdhr.profile || '') === p.id || (!O.hdhr.profile && p.admin) ? ' selected' : '') + '>' + V.esc(p.name) + '</option>'; }).join('') + '</select></label></div>' +
+        '<label class="field"><span>Channels as seen by</span><select class="input" data-o="profile">' + O.profiles.map(function (p) { return '<option value="' + V.esc(p.id) + '"' + ((O.hdhr.profile || '') === p.id || (!O.hdhr.profile && p.admin) ? ' selected' : '') + '>' + V.esc(p.name) + '</option>'; }).join('') + '</select></label></div>' +
         copyRow('Tuner address (Plex: Live TV &amp; DVR → Set up → enter it by hand; Jellyfin: Live TV → Tuner devices → HDHomeRun)', base) +
         copyRow('TV guide for it (XMLTV)', base + '/hdhr/epg.xml') +
         '<p class="dim small">The tuner never uses more of a provider’s connections than it allows, counting everyone watching here.</p>' : '') +
       '</section>' +
       (O.active.length ? '<section class="card-sec"><h2>Other apps, in the last few hours</h2><ul class="simple">' + O.active.map(function (a) { var p = O.profiles.filter(function (x) { return x.id === a.profile; })[0]; return '<li>' + V.esc(a.kind === 'hdhr' ? 'Tuner' : 'Xtream login') + ' · ' + V.esc(p ? p.name : '') + ' · ' + V.esc(a.n) + ' <span class="dim">· ' + V.esc(a.ip) + ' · since ' + V.fmtAgo(a.since) + '</span></li>'; }).join('') + '</ul></section>' : '');
+    refocus(keep);
   };
   var load = function () { return V.api('/api/admin/outputs').then(function (r) { O = r; draw(); }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; }); };
-  var save = function (patch) { return V.put('/api/admin/outputs', patch).then(function () { V.toast('Saved'); return load(); }).catch(V.fail); };
+  // (A failed save redraws too, so the switch shows what's really saved.)
+  var save = function (el, patch) {
+    pending = focusOf(el); el.disabled = true;
+    return V.put('/api/admin/outputs', patch).then(function () { V.toast('Saved'); }, V.fail).then(load);
+  };
   var showPw = function (r) {
     return V.dialog({ title: 'Login for the app', body: '<p>Server: <code>' + V.esc(location.protocol + '//' + location.host) + '</code></p><p>Username: <code>' + V.esc(r.user) + '</code></p><p>Password: <code class="big">' + V.esc(r.password) + '</code></p><p class="dim small">Write it down — it isn’t shown again (you can always make a new one).</p>', actions: [{ label: 'Copy password', fn: function () { V.copy(r.password); return false; } }, { label: 'Done', primary: true, value: true }] });
   };
@@ -102,16 +124,21 @@ V.adminTabs.outputs = function (body, A) {
     var c = e.target.closest('[data-copy]'); if (c) return V.copy(c.dataset.copy);
     var li = e.target.closest('[data-pid]');
     if (!li) return;
-    var pid = li.dataset.pid;
-    if (e.target.closest('[data-login]')) V.api('/api/admin/outputs/logins/' + pid, { body: {} }).then(function (r) { load(); return showPw(r); }).catch(V.fail);
-    else if (e.target.closest('[data-setpw]')) V.prompt('New password for this login (6 characters or more)', { type: 'text' }).then(function (pw) { if (pw) V.api('/api/admin/outputs/logins/' + pid, { body: { password: pw } }).then(function (r) { load(); return showPw(r); }).catch(V.fail); });
-    else if (e.target.closest('[data-nologin]')) V.confirm('Remove this login? Apps signed in with it stop working.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/outputs/logins/' + pid).then(load).catch(V.fail); });
+    var pid = li.dataset.pid, path = '/api/admin/outputs/logins/' + encodeURIComponent(pid);
+    var b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    // (The list is redrawn once the password dialog closes, with focus back on this row.)
+    var made = function (r) { return showPw(r).then(function () { pending = focusOf(b) || { pid: pid, attr: 'data-login' }; return load(); }); };
+    var send = function (req) { b.disabled = true; req().then(made).catch(function (err) { if (b.isConnected) b.disabled = false; V.fail(err); }); };
+    if (b.hasAttribute('data-login')) send(function () { return V.api(path, { body: {} }); });
+    else if (b.hasAttribute('data-setpw')) V.prompt('New password for this login (6 characters or more)', { type: 'text' }).then(function (pw) { if (pw) send(function () { return V.api(path, { body: { password: pw } }); }); });
+    else if (b.hasAttribute('data-nologin')) V.confirm('Remove this login? Apps signed in with it stop working.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) { pending = { pid: pid, attr: 'data-login' }; V.del(path).then(function () { V.toast('Login removed'); return load(); }).catch(function (err) { pending = null; V.fail(err); }); } });
   };
   body.onchange = function (e) {
     var k = e.target.dataset.o;
-    if (k === 'xtream') save({ xtream: { enabled: e.target.checked } });
-    else if (k === 'hdhr') save({ hdhr: { enabled: e.target.checked } });
-    else if (k === 'tuners') save({ hdhr: { tuners: +e.target.value } });
-    else if (k === 'profile') save({ hdhr: { profile: e.target.value } });
+    if (k === 'xtream') save(e.target, { xtream: { enabled: e.target.checked } });
+    else if (k === 'hdhr') save(e.target, { hdhr: { enabled: e.target.checked } });
+    else if (k === 'tuners') { var n = V.adminNum(e.target, O.hdhr.tuners); if (n !== null) save(e.target, { hdhr: { tuners: n } }); }
+    else if (k === 'profile') save(e.target, { hdhr: { profile: e.target.value } });
   };
 };

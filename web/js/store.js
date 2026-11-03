@@ -168,15 +168,34 @@ V.played = function (it, seconds, leaving) {
   V.emit('history');
 };
 
-V.inList = function (field, k) { return S.data[field].indexOf(k) >= 0; };
+// (Looked up for every title when lists are drawn — with a big catalogue, a Set rather than searching the array each
+// time. It's made again whenever the list is a different one or has changed length or ends.)
+var inListCache = {};
+V.inList = function (field, k) {
+  var a = S.data[field];
+  if (!a) return false;
+  if (a.length < 50) return a.indexOf(k) >= 0;
+  var c = inListCache[field];
+  if (!c || c.a !== a || c.n !== a.length || c.first !== a[0] || c.last !== a[a.length - 1]) c = inListCache[field] = { a: a, n: a.length, first: a[0], last: a[a.length - 1], set: new Set(a) };
+  return c.set.has(k);
+};
 V.toggle = function (field, k, on) {
   var list = S.data[field];
   var has = list.indexOf(k) >= 0;
   var want = on === undefined ? !has : !!on;
   if (want && !has) list.unshift(k);
   if (!want && has) S.data[field] = list.filter(function (x) { return x !== k; });
+  delete inListCache[field];
   V.emit('data', field);
-  return V.api('/api/toggle', { body: { field: field, k: k, on: want } }).then(function () { return want; }, function (e) { V.fail(e); return !want; });
+  return V.api('/api/toggle', { body: { field: field, k: k, on: want } }).then(function () { return want; }, function (e) {
+    // (Not saved: put it back as it was, so the button and the list agree.)
+    var l2 = S.data[field];
+    if (want && l2.indexOf(k) >= 0 && !has) S.data[field] = l2.filter(function (x) { return x !== k; });
+    else if (!want && has && l2.indexOf(k) < 0) l2.unshift(k);
+    delete inListCache[field];
+    V.emit('data', field);
+    V.fail(e); return has;
+  });
 };
 V.rate = function (k, v) {
   if (!v) delete S.data.ratings[k]; else S.data.ratings[k] = v;

@@ -27,7 +27,7 @@
       if (x.kind === 'ttx') {
         tr = { kind: 'ttx', dec: new D.Ttx(x.page), ents: [], label: lname(x.lang) + ' · teletext ' + (x.page >> 8) + ('0' + (x.page & 255).toString(16)).slice(-2) + (x.hi ? ' (hard of hearing)' : ''), lang: x.lang };
       } else {
-        tr = new V.PicTrack({ kind: x.kind, label: (lname(x.lang) || 'Subtitles') + (x.kind === 'dvb' ? '' : '') + (x.hi ? ' (hard of hearing)' : ''), lang: x.lang });
+        tr = new V.PicTrack({ kind: x.kind, label: (lname(x.lang) || 'Subtitles') + (x.hi ?' (hard of hearing)' : ''), lang: x.lang });
         if (x.kind === 'dvb' && (x.comp || x.anc)) tr.pages = { comp: x.comp, anc: x.anc };
       }
       tr.pid = pid; tr.clock = clock; tr.live = true;
@@ -255,17 +255,19 @@
     if (!s || !p.sessionId || p.vod || p._sessSubsT) return;
     var sid = p.sessionId, from = 0, tok = p.token;
     var clock = function (pl) { return pl.video.currentTime; };
+    // (Each answer checks it's still for this session: one arriving after a channel change mustn't set a timer that
+    // stops the next channel's subtitles from being fetched.)
     var poll = function () {
       if (p.token !== tok || p.sessionId !== sid) return;
       V.api('/api/sessionsubs/' + sid + '?from=' + from).then(function (r) {
-        if (p.token !== tok) return;
+        if (p.token !== tok || p.sessionId !== sid) return;
         if (r.none) { p._sessSubsT = null; return; } // (this conversion has no subtitles to copy)
         (r.streams || []).forEach(function (x) { V.liveSubsAnnounce(p, x.pid, x.subs, clock); });
         var base = p._initPts;
         if (base !== null && base !== undefined) (r.packets || []).forEach(function (x) { V.liveSubsPacket(p, x.pid, x.pts - base, b64(x.data)); });
         if ((base !== null && base !== undefined) || !r.packets || !r.packets.length) from = r.next;
         p._sessSubsT = setTimeout(poll, 2000);
-      }, function () { p._sessSubsT = setTimeout(poll, 10000); });
+      }, function () { if (p.token === tok && p.sessionId === sid) p._sessSubsT = setTimeout(poll, 10000); });
     };
     p._sessSubsT = setTimeout(poll, 1000);
   });

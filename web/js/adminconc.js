@@ -10,7 +10,8 @@
   var hm = function (t) { return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); };
   var when = function (t) { return new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
   var hourName = function (h) { return new Date(2020, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric' }); };
-  var dur = function (m) { m = Math.round(m || 0); if (m < 60) return m + ' min'; var h = Math.floor(m / 60), r = m % 60; return h + ' h' + (r ? ' ' + r + ' min' : ''); };
+  // (No-break spaces keep "27 min" together when a narrow table wraps it.)
+  var dur = function (m) { m = Math.round(m || 0); if (m < 60) return m + ' min'; var h = Math.floor(m / 60), r = m % 60; return h + ' h' + (r ? ' ' + r + ' min' : ''); };
   var avg = function (x) { return x >= 10 ? Math.round(x) : Math.round(x * 10) / 10; };
 
   V.statsConc = function (box, days) {
@@ -73,6 +74,9 @@
       if (!b) return;
       pick = b.getAttribute('data-p'); V.ls.set('concPick', pick);
       draw(box, d);
+      // (Keep focus on the provider just picked: the redraw replaced its button.)
+      var again = V.$$('button[data-p]', box).filter(function (x) { return x.getAttribute('data-p') === pick; })[0];
+      if (again) try { again.focus({ preventScroll: true }); } catch (err) {}
     };
     if (!box._resize) {
       box._resize = true;

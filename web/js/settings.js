@@ -5,7 +5,7 @@ V.route('settings', function (view) {
   var langs = Array.isArray(pr.langs) ? pr.langs : null;
   var unknown = typeof pr.unknownLang === 'boolean' ? pr.unknownLang : S.settings.showUnknownLang;
   var defNames = (S.settings.defaultLangs || []).map(V.langName).join(', ') || 'all languages';
-  var langOpts = function (cur) { return '<option value="">No preference</option>' + (S.boot.languages || []).map(function (l) { return '<option value="' + l.code + '"' + (l.code === cur ? ' selected' : '') + '>' + V.esc(l.name) + '</option>'; }).join(''); };
+  var langOpts = function (cur) { return '<option value="">No preference</option>' + (S.boot.languages || []).map(function (l) { return '<option value="' + V.esc(l.code) + '"' + (l.code === cur ? ' selected' : '') + '>' + V.esc(l.name) + '</option>'; }).join(''); };
   var sw = function (k, label, hint) { return '<label class="switch"><input type="checkbox" data-pref="' + k + '"' + (pf[k] ? ' checked' : '') + '><span class="sw"></span><span><b>' + label + '</b>' + (hint ? '<small>' + hint + '</small>' : '') + '</span></label>'; };
   view.innerHTML = V.pageHead('Settings') + '<div class="settings">' +
     '<section class="card-sec"><h2>Profile</h2><div class="prof-row"><button class="pf-av-btn" data-a="avatar" aria-label="Change picture">' + V.avatar(pr.avatar, 'xl') + '<span class="pf-av-edit">' + V.icon('edit') + '</span></button><div class="grow">' +
@@ -19,7 +19,7 @@ V.route('settings', function (view) {
     '<div class="lang-pick"' + (langs ? '' : ' hidden') + '>' + V.langChecks(langs || S.settings.defaultLangs) + '</div>' +
     '<label class="check"><input type="checkbox" data-unknown' + (unknown ? ' checked' : '') + '><span>Also show things whose language isn’t known</span></label><button class="btn primary" data-a="langs">Save languages</button></section>' +
 
-    '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.THEMES.map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
+    '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.THEMES.map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto" aria-pressed="' + (pf.theme === 'auto') + '"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
     '<div class="grid2"><label class="field"><span>Text size</span><select class="input" data-pref-sel="uiScale">' + [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large'], [1.5, 'Huge']].map(function (o) { return '<option value="' + o[0] + '"' + (+pf.uiScale === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>TV mode (big, remote-friendly)</span><select class="input" data-pref-sel="tvMode">' + [['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(function (o) { return '<option value="' + o[0] + '"' + (pf.tvMode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
     sw('reduceMotion', 'Reduce motion', 'Fewer animations') + '</section>' +
@@ -67,13 +67,22 @@ V.route('settings', function (view) {
     if (!hit) ms.textContent = 'None of the streams here use plain http.';
     else V.mixedOk(hit).then(function (ok) { ms.innerHTML = ok ? V.icon('check', 'tiny ok') + ' Allowed in this browser — http streams play straight from the provider.' : V.icon('info', 'tiny') + ' Not allowed in this browser yet, so http streams play through the server.'; });
   }
+  // A Save button is off while its change is on the way (so it isn't sent twice).
+  var busy = function (b, p) { b.disabled = true; return p.catch(V.fail).then(function () { b.disabled = false; }); };
+  // Enter in a name box saves it, like its Save button.
+  view.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !e.target.matches('[data-name], [data-devname]')) return;
+    e.preventDefault();
+    var sb = V.$('[data-a="' + (e.target.hasAttribute('data-name') ? 'name' : 'devname') + '"]', view);
+    if (sb && !sb.disabled) sb.click();
+  });
   view.addEventListener('change', function (e) {
     var t = e.target;
     if (t.hasAttribute('data-askprofile')) { V.ls.set('askProfile', t.checked); V.toast(t.checked ? 'This device will ask who’s watching' : 'This device opens straight into your profile'); return; }
     if (t.dataset.pref) { V.setPref(t.dataset.pref, t.checked); if (t.dataset.pref === 'reduceMotion') V.applyLook(); }
     else if (t.dataset.prefSel) { var v = t.value; if (t.dataset.prefSel === 'uiScale') v = +v; V.setPref(t.dataset.prefSel, v); V.applyLook(); }
     else if (t.name === 'lmode') V.$('.lang-pick', view).hidden = t.value !== 'own';
-    else if (t.dataset.interest !== undefined) V.put('/api/me', { interests: V.$$('[data-interest]:checked', view).map(function (x) { return x.value; }) }).catch(V.fail);
+    else if (t.dataset.interest !== undefined) V.put('/api/me', { interests: V.$$('[data-interest]:checked', view).map(function (x) { return x.value; }) }).then(function (p) { if (p && p.id) S.profile = p; }).catch(V.fail); // (kept, so the page shows them when opened again)
   });
   view.addEventListener('click', function (e) {
     var th = e.target.closest('button[data-theme]'); // (the page itself carries data-theme too)
@@ -86,16 +95,21 @@ V.route('settings', function (view) {
       var req = typeof i === 'object' && i.upload ? V.put('/api/me/avatar', { image: i.upload }) : V.put('/api/me', { avatar: i });
       req.then(function (p) { S.profile = p; V.renderShell(); V.router.refresh(); V.toast('Picture updated'); }).catch(V.fail);
     });
-    else if (a === 'name') V.put('/api/me', { name: V.$('[data-name]', view).value }).then(function (p) { S.profile = p; V.renderShell(); V.toast('Saved'); }).catch(V.fail);
+    else if (a === 'name') {
+      var nm = V.$('[data-name]', view).value.trim();
+      if (!nm) { V.toast('Type a name first', { error: true }); V.$('[data-name]', view).focus(); return; }
+      busy(b, V.put('/api/me', { name: nm }).then(function (p) { S.profile = p; V.renderShell(); V.$('[data-name]', view).value = p.name; V.toast('Name saved'); }));
+    }
     else if (a === 'pin') V.changePin();
     else if (a === 'nopin') V.prompt('Enter your current PIN to remove it', { type: 'password' }).then(function (cur) { if (cur === null) return; V.put('/api/me', { pin: '', currentPin: cur }).then(function (p) { S.profile = p; V.toast('PIN removed'); V.router.refresh(); }).catch(V.fail); });
     else if (a === 'langs') {
       var own = V.$('[name=lmode]:checked', view).value === 'own';
       var picked = V.$$('.lang-pick input:checked', view).map(function (x) { return x.value; });
-      V.put('/api/me', { langs: own ? picked : null, unknownLang: V.$('[data-unknown]', view).checked }).then(function (p) { S.profile = p; V.toast('Languages saved — reloading the catalogue'); return V.loadCatalog(); }).then(function () { V.renderShell(); }).catch(V.fail);
+      if (own && !picked.length) { V.toast('Pick at least one language, or use the default', { error: true }); return; }
+      busy(b, V.put('/api/me', { langs: own ? picked : null, unknownLang: V.$('[data-unknown]', view).checked }).then(function (p) { S.profile = p; V.toast('Languages saved — reloading the catalogue'); return V.loadCatalog(); }).then(function () { V.renderShell(); }));
     }
     else if (a === 'substyle') V.subtitleStyleDialog();
-    else if (a === 'devname') { var n = V.$('[data-devname]', view).value.trim(); if (n) { V.ls.set('deviceName', n); V.device.name = n; V.rt.connect(); V.toast('Saved'); } }
+    else if (a === 'devname') { var n = V.$('[data-devname]', view).value.trim(); if (n) { V.ls.set('deviceName', n); V.device.name = n; V.rt.connect(); V.toast('Device name saved'); } else { V.toast('Type a name for this device first', { error: true }); V.$('[data-devname]', view).focus(); } }
     else if (a === 'notif') Notification.requestPermission().then(function () { V.router.refresh(); });
     else if (a === 'install' && V.installPrompt) { V.installPrompt.prompt(); V.installPrompt = null; }
     else if (a === 'keys') V.shortcutsHelp();

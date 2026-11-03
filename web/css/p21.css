@@ -1,0 +1,82 @@
+/* Polish pass: tidier rows and toolbars on phones, bigger touch targets, clearer focus on TVs. CSS only. */
+
+/* ---- Episode rows: the divider runs straight to the ends (it curved up at the rounded corners) */
+.ep { border-bottom: 0; background: linear-gradient(var(--line), var(--line)) left bottom / 100% 1px no-repeat; }
+.ep.cur { background: var(--card); }
+/* phones: the running time always sits under the title (it jumped between the title's line and its own line) */
+@media (max-width: 600px) {
+  .ep-t { row-gap: 0; }
+  .ep-t .dim { flex-basis: 100%; margin-left: 0; font-size: .82rem; }
+}
+
+/* ---- Guide: the "Colours" switch lines up with the colour key */
+.g-legend .check { margin-top: 0; margin-bottom: 0; align-items: center; }
+.g-legend .check input { margin-top: 0; }
+/* a focused programme or channel keeps its whole ring (it was cut off at the guide's edges) */
+.gp:focus-visible, .g-ch:focus-visible { outline-offset: -3px; }
+/* phones: the guide's controls two to a row, edge to edge, like Movies and Series */
+@media (max-width: 600px) {
+  .view-guide .page-tools { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; flex: 1 1 100%; min-width: 0; align-items: center; }
+  .view-guide .page-tools > * { min-width: 0; }
+  .view-guide .page-tools .input { width: 100%; min-width: 0; max-width: none; }
+  .view-guide .page-tools .check { margin: 0; align-items: center; }
+  .view-guide .page-tools .check input { margin-top: 0; }
+  .view-guide .page-tools form.inline { grid-column: 1 / -1; flex-wrap: nowrap; }
+  .view-guide .page-tools form.inline .input { flex: 1 1 auto; }
+  .view-guide .page-tools > .btn { width: 100%; }
+}
+
+/* ---- My stuff → History on phones: "Resume" shows as its icon, like Play, so the title and details get the room
+   (they wrapped a word at a time). The button keeps its "Resume" name for screen readers. */
+@media (max-width: 600px) {
+  .hist .btn.sm[data-h=play] { font-size: 0; gap: 0; padding: 0; width: 2.5rem; }
+  .hist .btn.sm[data-h=play] .i { width: 1.15rem; height: 1.15rem; }
+}
+
+/* ---- My stuff → Queue on phones: the buttons sit under the title, beside the picture (not on a row of their own) */
+@media (max-width: 600px) {
+  .q-list:not(.compact) .q-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); column-gap: .7rem; row-gap: 0; align-items: center; }
+  .q-list:not(.compact) .q-slot { grid-row: span 2; }
+  .q-list:not(.compact) .q-b { align-self: end; }
+  .q-list:not(.compact) .q-acts { width: auto; justify-content: flex-start; margin-left: -.6rem; align-self: start; }
+}
+
+/* ---- Touch screens: small buttons and chips big enough to tap (they were 24–37px tall) */
+@media (pointer: coarse) and (max-width: 760px) {
+  .btn.sm { min-height: 2.5rem; }
+  .chip:not(.sm), .grp { min-height: 2.5rem; }
+  .toast-x { min-width: 2.5rem; min-height: 2.5rem; align-items: center; justify-content: center; }
+  .vp-menu.big .mh-x, .vp-menu.big .mh .mi.back { width: 2.6rem; height: 2.6rem; }
+  /* the genre chips and the player's remaining-time switch keep their look; only the place you can tap grows */
+  .tp-genres .chip.sm, button.vp-t2 { position: relative; }
+  .tp-genres .chip.sm::after, button.vp-t2::after { content: ''; position: absolute; top: -8px; bottom: -8px; left: -2px; right: -2px; }
+}
+
+/* ---- Player settings on phones: a long setting name takes two lines instead of being cut off ("Brightness & col…") */
+@media (max-width: 700px) {
+  .vp-menu.big .mi .mtx .ml { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; }
+}
+
+/* ---- TV ---- */
+/* the focused card's name moves down with its enlarged picture (the picture's ring covered the name) */
+.tv .card-meta { transition: transform .2s; }
+.tv .card:focus .card-meta { transform: translateY(12px); }
+/* moving down a page, the focused item stops a little above the screen's edge, not flush against it */
+html.tv :focus { scroll-margin-bottom: 40px; }
+/* the guide: a white ring inside the programme */
+.tv .gp:focus, .tv .g-ch:focus { outline-offset: -4px; }
+/* cast and crew links: a solid highlight (a ring around a word covered the words beside it) */
+.tv .tp-credits a:focus { outline: none; background: #fff; color: #000; border-radius: 4px; box-shadow: 0 0 0 3px #fff; border-bottom-color: transparent; }
+/* episode rows: the ring follows the picture's rounded corners */
+.tv .ep-play:focus { border-radius: 10px; }
+/* Settings: genre chips and switches get the same white ring as everything else (theirs was thin and red) */
+.tv .chip-check input:focus + span, .tv .switch input:focus + .sw { outline: 4px solid #fff; outline-offset: 3px; }
+/* the player: controls and cards kept clear of the screen's edges, as the pages are (they sat 16px from the edge) */
+html.tv .vp-top { padding: 28px 48px 40px 40px; }
+html.tv .vp-ctrl { padding: 40px 48px 28px; }
+html.tv .vp-live { left: 48px; bottom: 8.5rem; }
+html.tv .vp-skip, html.tv .vp-upnext { right: 48px; bottom: 8.5rem; }
+html.tv .vp-stats { left: 48px; top: 6rem; }
+html.tv .vp-menu:not(.big) { right: 48px; bottom: 7rem; }
+html.tv .vp-menu.big { bottom: 7rem; max-height: calc(100% - 10rem); }
+html.tv .vp-t1, html.tv .vp-t2 { font-size: 1rem; }

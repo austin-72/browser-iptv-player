@@ -96,7 +96,7 @@ V.Player = function (host) {
     '<button class="vp-skip" hidden></button>' +
     '<div class="vp-upnext" hidden></div>' +
     '<div class="vp-ctrl">' +
-    '  <div class="vp-seekrow"><span class="vp-t1 num"></span><div class="vp-seek" role="slider" tabindex="0" aria-label="Seek"><div class="track"><div class="buf"></div><div class="fill"></div><div class="marks"></div></div><div class="knob"></div><div class="tip"><img alt="" hidden><span></span></div></div><span class="vp-t2 num"></span></div>' +
+    '  <div class="vp-seekrow"><span class="vp-t1 num"></span><div class="vp-seek" role="slider" tabindex="0" aria-label="Seek"><div class="track"><div class="buf"></div><div class="fill"></div><div class="marks"></div></div><div class="knob"></div><div class="tip"><img alt="" hidden><span></span></div></div><button class="vp-t2 num" data-a="timeends" title="Time left, or when it ends" aria-label="Time left, or when it ends"></button></div>' +
     '  <div class="vp-row">' +
     '    <button class="pbtn big" data-a="play" aria-label="Play">' + V.icon('play') + '</button>' +
     '    <button class="pbtn" data-a="rw" aria-label="Back 10 seconds">' + V.icon('rw') + '</button>' +
@@ -148,7 +148,8 @@ PP.load = function (it, opts) {
   if (!opts.quiet) { this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; this._fileTracks = null; this._fileSub = -1; }
   this._triedDirect = false;
   this._failedWith = null;
-  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; }
+  this._loadAt = opts.startAt || 0; // (where this load starts: a backup stream tried after it fails starts there too)
+  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; }
   else if (opts.alt !== undefined) this.alt = opts.alt;
@@ -218,7 +219,9 @@ PP.load = function (it, opts) {
   };
   return (pickSource ? this._sources(it, token, opts) : Promise.resolve(true)).then(function (go) {
     if (!go || token !== self.token) return;
-    return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
+    return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined || token !== self.token ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
+      // (Another title started while this one was being looked up: nothing more to do here.)
+      if (token !== self.token) return;
       // A watch party sharing one connection: the party's stream through the server first (see lib/fanout.js).
       plan = opts.share && !opts.force && it.t !== 'catchup' ? [{ via: 'party', party: opts.share, kind: '?' }].concat(p) : p;
       return next(0);
@@ -240,7 +243,7 @@ PP._useSources = function (r, it, token, opts) {
   var self = this;
   if (r.allBusy && !opts.busyOk) {
     var by = [];
-    srcs.forEach(function (x) { x.by.forEach(function (b) { if (!by.some(function (y) { return y.conn === b.conn; })) by.push(b); }); });
+    srcs.forEach(function (x) { (x.by || []).forEach(function (b) { if (!by.some(function (y) { return y.conn === b.conn; })) by.push(b); }); });
     if (by.length) {
       // Viewers on a priority profile keep their connection: a standard profile can't take it or squeeze in beside them.
       var locked = srcs.every(function (x) { return x.locked; });
@@ -340,7 +343,9 @@ PP._directCopy = function (it, force, plan) {
   var cands = this._altsLeft.filter(function (x) { return busy.indexOf(x) < 0; }).slice(0, 3); // (not one someone here is already using)
   var token = this.token;
   var at = function (i) {
-    if (i >= cands.length || token !== self.token) { self.alt = orig.alt; self.reachInfo = orig.info; self._mixedOk = orig.mok; self.vod = orig.vod; return plan; }
+    // (Another title started meanwhile: leave its alt, reach info and live/VOD state alone.)
+    if (token !== self.token) return plan;
+    if (i >= cands.length) { self.alt = orig.alt; self.reachInfo = orig.info; self._mixedOk = orig.mok; self.vod = orig.vod; return plan; }
     self.alt = cands[i];
     return self._plan(it, force).then(function (p) {
       if (!direct(p)) return at(i + 1);
@@ -393,11 +398,15 @@ PP._planNow = function (it, force) {
   // Ask the server how this browser can reach the provider itself (it checks what the browser would be told).
   var fallback = function () { return self._planGuess(it, url, g, hasHeaders, mixed, routing, sessions, plan); };
   if (!(routing !== 'server' && /^https?:/i.test(url))) return fallback();
+  // (A later title started while asking: its reach info and live/VOD state aren't this one's to set.)
+  var tok = this.token;
   // An http stream on this https page: fine when this browser has been told to allow it for the site.
   return (mixed && !V.relayOn() ? V.mixedOk(url) : Promise.resolve(false)).then(function (mok) {
+  if (tok !== self.token) return [];
   if (mok) mixed = false;
   self._mixedOk = mok;
   return V.api('/api/play/reach', { body: { k: key, alt: self.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } }).then(null, function () { return null; }).then(function (info) {
+    if (tok !== self.token) return [];
     if (!info) return fallback();
     // (A server from before it knew about this still says "blocked": go by what the browser said.)
     if (info.blocked === 'mixed' && mok) { self.reachInfo = info; return fallback(); }
@@ -500,8 +509,9 @@ PP._planGuess = function (it, url, g, hasHeaders, mixed, routing, sessions, plan
     return plan;
   }
   // No file extension: ask the server what it is (it reads only the first bytes), then connect directly.
+  var tok = this.token;
   var sniff = direct && g === 'unknown' ? V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: it.t === 'catchup' ? url : undefined, sniff: true } }).then(function (sn) {
-    if (sn.finite) self.vod = it.t !== 'live';
+    if (sn.finite && tok === self.token) self.vod = it.t !== 'live'; // (not on a title started since)
     g = { hls: 'hls', ts: 'ts', native: 'native', dash: 'dash', ffmpeg: 'ffmpeg' }[sn.kind] || 'unknown';
     if (g === 'ffmpeg') direct = false;
   }, function () {}) : Promise.resolve();
@@ -571,8 +581,9 @@ PP._attempt = function (a, token, startAt) {
   if (this._audioSrc && !(V.audioReadable ? V.audioReadable(this, a) : !(a.via === 'direct' && (a.kind === 'native' || a.native)))) this._replaceVideo();
   return new Promise(function (resolve, reject) {
     var v = self.video;
-    var done = false;
-    var cleanup = function () { clearTimeout(timer); v.removeEventListener('playing', ok); v.removeEventListener('error', onErr); v.removeEventListener('canplay', onCanPlay); self._failNow = null; };
+    var done = false, dead = false;
+    // (Only its own: an old attempt finishing late mustn't unhook the one that's running now.)
+    var cleanup = function () { clearTimeout(timer); v.removeEventListener('playing', ok); v.removeEventListener('error', onErr); v.removeEventListener('canplay', onCanPlay); if (self._failNow === fail) self._failNow = null; };
     var ok = function () {
       if (done) return;
       var vid = self.it && (self.it.t === 'movie' || self.it.t === 'episode' || self.it.t === 'live' || self.it.t === 'catchup');
@@ -583,7 +594,7 @@ PP._attempt = function (a, token, startAt) {
       }
       done = true; cleanup(); resolve();
     };
-    var fail = function (e) { if (!done) { done = true; cleanup(); reject(e instanceof Error ? e : new Error(String(e))); } };
+    var fail = function (e) { if (!done) { done = dead = true; cleanup(); reject(e instanceof Error ? e : new Error(String(e))); } };
     var onErr = function () { fail(V.techErr(self._mediaErr(), self._mediaDetail())); };
     var onCanPlay = function () { if (self._blocked) ok(); };
     v.addEventListener('playing', ok);
@@ -614,7 +625,8 @@ PP._attempt = function (a, token, startAt) {
     v.addEventListener('playing', ok);
     v.removeEventListener('playing', ok0);
     self._failNow = fail;
-    self._attach(a, token, startAt).catch(fail);
+    // (Answers that arrive after this attempt gave up — a slow server, a timed-out start — must not start anything.)
+    self._attach(a, token, startAt, function () { return dead || token !== self.token; }).catch(fail);
   });
 };
 
@@ -630,8 +642,10 @@ PP._hasVideoTrack = function (a) {
 };
 
   /** Starts one way of playing (a promise). Asks the server first for relays and conversions. */
-PP._attach = function (a, token, startAt) {
+PP._attach = function (a, token, startAt, over) {
   var self = this;
+  // (Stale: another title started, or this attempt already gave up and the next way is being tried.)
+  var gone = function () { return token !== self.token || !!(over && over()); };
   this.offset = 0;
   this.sessionDuration = 0;
   this.attemptVia = a.via;
@@ -641,7 +655,7 @@ PP._attach = function (a, token, startAt) {
   var prep = Promise.resolve(go);
   if (a.via === 'relay') {
     prep = V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, sniff: go.kind === '?' } }).then(function (r) {
-      if (token !== self.token) return null;
+      if (gone()) return null;
       go.url = r.url;
       if (go.kind === '?') {
         if (r.finite) self.vod = true;
@@ -653,7 +667,7 @@ PP._attach = function (a, token, startAt) {
     });
   } else if (a.via === 'party') {
     prep = V.api('/api/party/' + a.party + '/stream', { body: { k: it.k, alt: this.alt } }).then(function (r) {
-      if (token !== self.token) return null;
+      if (gone()) return null;
       go.url = r.url; go.kind = r.kind;
       return go;
     });
@@ -661,7 +675,8 @@ PP._attach = function (a, token, startAt) {
     var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
     if (a.audioOnly) body.audioOnly = true;
     prep = V.api('/api/play/session', { body: body }).then(function (s) {
-      if (token !== self.token) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
+      // (Too late: end it, or it keeps converting — and holding a provider connection — with nobody watching.)
+      if (gone()) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
       self.sessionId = s.sessionId;
       if (self.audioTrack === undefined && s.audioTrack !== undefined) self.audioTrack = s.audioTrack;
       self.sessionInfo = s;
@@ -670,25 +685,33 @@ PP._attach = function (a, token, startAt) {
       if (s.duration) self.vod = true;
       go.kind = 'hls'; go.url = s.url;
       var sid = s.sessionId;
+      clearInterval(self._pinger); // (never two keep-alives at once)
       self._pinger = setInterval(function () { V.api('/api/session/' + sid + '/ping', { method: 'POST' }).catch(function () {}); }, 15000);
       return go;
     });
   }
-  return prep.then(function (g) { if (g) return self._attachMedia(a, token, startAt, g.kind, g.url); });
+  return prep.then(function (g) { if (g && !gone()) return self._attachMedia(a, token, startAt, g.kind, g.url, gone); });
 };
-PP._attachMedia = function (a, token, startAt, kind, url) {
+PP._attachMedia = function (a, token, startAt, kind, url, gone) {
   var self = this, v = this.video, it = this.it;
+  if (!gone) gone = function () { return token !== self.token; };
   var rel = Math.max(0, (startAt || 0) - this.offset - (it.startOffset || 0));
   var bufGoal = V.tune ? V.tune.bufGoal(this) : V.pref('dataSaver') ? 15 : 30;
   if (kind === 'hls' && a.native) {
     v.src = url;
-    if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
+    if (rel > 0) this._seekOnMeta(rel);
   } else if (kind === 'hls') {
-    return (window.Hls ? Promise.resolve() : V.loadScript('/vendor/hls.min.js').catch(function () {})).then(function () { return self._attachHls(a, token, url, rel, bufGoal); });
+    return (window.Hls ? Promise.resolve() : V.loadScript('/vendor/hls.min.js').catch(function () {})).then(function () { if (!gone()) return self._attachHls(a, token, url, rel, bufGoal); });
   } else if (kind === 'ts') {
-    return (window.mpegts ? Promise.resolve() : V.loadScript('/vendor/mpegts.js')).then(function () { return self._attachTs(url); });
+    return (window.mpegts ? Promise.resolve() : V.loadScript('/vendor/mpegts.js')).then(function () {
+      if (gone()) return;
+      var r = self._attachTs(url);
+      // (mpegts.js has no start position: a film resumed, or reconnected part-way, would start from the beginning.)
+      if (rel > 0 && self.vod) self._seekOnMeta(rel);
+      return r;
+    });
   } else if (kind === 'dash') {
-    return this._attachDash(url, rel, bufGoal, a.via === 'relay' ? 'all' : a.via === 'split' ? 'manifest' : '', token).then(function () { if (token === self.token) self._play(); });
+    return this._attachDash(url, rel, bufGoal, a.via === 'relay' ? 'all' : a.via === 'split' ? 'manifest' : '', token, gone).then(function () { if (!gone()) self._play(); });
   } else if (kind === 'mb') {
     var lim = this._connLimit || 0;
     return V.mbStart(v, url, this.vod ? (startAt || 0) : 0, {
@@ -697,7 +720,7 @@ PP._attachMedia = function (a, token, startAt, kind, url) {
       lang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '',
       onError: function (e) { if (token === self.token) self._fatal(new Error('The conversion in this browser stopped (' + (e && e.message || e) + ').')); },
     }).then(function (ctl) {
-      if (token !== self.token) { ctl.stop(); return; }
+      if (gone()) { ctl.stop(); return; }
       self.mb = ctl;
       if (ctl.audioTrack >= 0) self.audioTrack = ctl.audioTrack;
       self.offset = ctl.offset;
@@ -706,9 +729,24 @@ PP._attachMedia = function (a, token, startAt, kind, url) {
     });
   } else {
     v.src = url;
-    if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
+    if (rel > 0) this._seekOnMeta(rel);
   }
   this._play();
+};
+  /**
+   * Moves to `rel` once the video knows its length. Only one is waiting at a time, and a teardown drops it: an
+   * attempt that never loaded mustn't move the next way of playing (e.g. a server conversion that already starts there).
+   */
+PP._seekOnMeta = function (rel) {
+  var self = this, v = this.video;
+  this._dropSeekOnMeta();
+  var f = function () { self._metaSeek = null; v.currentTime = rel; };
+  this._metaSeek = { v: v, f: f };
+  v.addEventListener('loadedmetadata', f, { once: true });
+};
+PP._dropSeekOnMeta = function () {
+  var m = this._metaSeek;
+  if (m) { m.v.removeEventListener('loadedmetadata', m.f); this._metaSeek = null; }
 };
 PP._attachHls = function (a, token, url, rel, bufGoal) {
   var v = this.video;
@@ -718,7 +756,7 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
   if (this._forceHls === 'native' || (preferNative && this._forceHls !== 'hlsjs')) {
     this._hlsWay = 'native';
     v.src = url;
-    if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
+    if (rel > 0) this._seekOnMeta(rel);
     this._play();
     return;
   }
@@ -749,7 +787,7 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       this._hlsWay = 'native';
       v.src = url;
-      if (rel > 0) v.addEventListener('loadedmetadata', function () { v.currentTime = rel; }, { once: true });
+      if (rel > 0) this._seekOnMeta(rel);
     } else throw new Error('This browser can’t play HLS streams.');
   }
   this._play();
@@ -780,7 +818,7 @@ PP._attachTs = function (url) {
   this._play();
 };
 
-PP._attachDash = function (url, rel, bufGoal, viaServer, token) {
+PP._attachDash = function (url, rel, bufGoal, viaServer, token, gone) {
   var self = this;
   return (window.shaka ? Promise.resolve() : V.loadScript('/vendor/shaka-player.compiled.js')).then(function () {
     if (!self._shakaReady) { shaka.polyfill.installAll(); self._shakaReady = true; }
@@ -789,7 +827,7 @@ PP._attachDash = function (url, rel, bufGoal, viaServer, token) {
     self._shakaGone = null;
     return gone;
   }).then(function () {
-    if (token !== self.token) return;
+    if (token !== self.token || (gone && gone())) return;
     var sp = new shaka.Player();
     self.shaka = sp;
     return Promise.resolve(sp.attach(self.video)).then(function () { return self._shakaLoad(sp, url, rel, bufGoal, viaServer, token); });
@@ -924,14 +962,18 @@ PP._fatal = function (err) {
   if (!this.it) return;
   // Through the stream relay, while the server can't be reached (restarting): the relay doesn't need it, so keep
   // reconnecting to the same relay address (good for 12 hours) instead of giving up or asking the server for another.
+  // (Only when the server was reachable before and isn't now; at most 5 minutes; a retry that fails comes back here.)
   var a0 = this.attempt;
-  if (a0 && a0.via === 'direct' && this.reachInfo && this.reachInfo.relay && !V.rt.open() && Date.now() - (this._relayHoldSince || (this._relayHoldSince = Date.now())) < 5 * 60e3) {
-    var it0 = this.it, tok0 = this.token, me0 = this, pos0 = this.vod ? this.position : 0;
-    this._msg({ spin: true, title: 'Reconnecting…' });
-    setTimeout(function () { if (tok0 === me0.token) me0.load(it0, { quiet: true, only: a0, alt: me0.alt, startAt: pos0 || undefined }); }, 3000);
-    return;
+  if (a0 && a0.via === 'direct' && this.reachInfo && this.reachInfo.relay && V._rtEver && !V.rt.open() && this._relayHoldSince !== -1) {
+    if (!this._relayHoldSince) this._relayHoldSince = Date.now();
+    if (Date.now() - this._relayHoldSince < 5 * 60e3) {
+      var it0 = this.it, tok0 = this.token, me0 = this, pos0 = this.vod ? this.position || this._lastPos || 0 : 0;
+      this._msg({ spin: true, title: 'Reconnecting…' });
+      setTimeout(function () { if (tok0 === me0.token) me0.load(it0, { quiet: true, only: a0, alt: me0.alt, startAt: pos0 || undefined, onFail: function (e) { me0._fatal(e); } }); }, 3000);
+      return;
+    }
+    this._relayHoldSince = -1; // (given up holding for this title)
   }
-  this._relayHoldSince = 0;
   if (!this.vod && this.reconnects < 4) {
     this.reconnects++;
     var it = this.it, tok = this.token, a = this.attempt;
@@ -960,7 +1002,9 @@ PP._failed = function (err) {
     this._msg({ spin: true, title: 'Trying backup stream ' + (next + 2) + ' of ' + total + '…' });
     var tok = this.token, it = this.it;
     var me = this;
-    setTimeout(function () { if (tok === me.token) me.load(it, { alt: next, quiet: true }); }, 400);
+    // (A film: the backup starts where this one was, or was meant to start — not at the beginning.)
+    var at = !this.vod ? 0 : this.started ? this.position : this._loadAt || 0;
+    setTimeout(function () { if (tok === me.token) me.load(it, { alt: next, quiet: true, startAt: at || undefined }); }, 400);
     return;
   }
   this._error(err);
@@ -969,6 +1013,9 @@ PP._failed = function (err) {
 PP._afterStart = function () {
   this.started = true;
   this._relayHoldSince = 0;
+  // (Playing again for half a minute: the next drop gets its full set of reconnects again.)
+  var tkR = this.token, meR = this;
+  setTimeout(function () { if (meR.token === tkR && meR.started) meR.reconnects = 0; }, 30000);
   this._everStarted = true;
   this._startedAlt = this.alt;
   this._msg(null);
@@ -1059,6 +1106,7 @@ PP._statFlush = function () {
 };
 
 PP._error = function (err) {
+  this.started = false; // (nothing plays now: Play means try again, and the pause the teardown causes saves nothing)
   this._teardownMedia();
   this._healthFail(err, false);
   var me = this;
@@ -1071,6 +1119,12 @@ PP._error = function (err) {
   this._failedWith = err;
   if (V.reportProblem && this.it) acts.push({ label: 'Report a problem', fn: function () { V.reportProblem(me, { failed: true }); } });
   var sub = err.message;
+  // (Nothing is playing now: the play button says so, and the channel card doesn't sit on top of the message.)
+  var pb = V.$('[data-a=play]', this.host);
+  if (pb) { pb.innerHTML = V.icon('play'); pb.setAttribute('aria-label', 'Play'); }
+  this.el.classList.add('paused');
+  var lc = V.$('.vp-live', this.host);
+  if (lc) lc.hidden = true;
   this._msg({ title: 'Can’t play this right now', sub: sub, actions: acts });
   // Every way of playing it failed: report it, with what each way said.
   if (V.reportError && this.it) {
@@ -1111,9 +1165,15 @@ PP._teardownMedia = function () {
   V.emit('player-teardown', this);
   if (this.hls) { try { this.hls.destroy(); } catch (e) {} this.hls = null; }
   this._hlsAttach = null;
-  if (this.mts) { try { this.mts.pause(); this.mts.unload(); this.mts.detachMediaElement(); this.mts.destroy(); } catch (e) {} this.mts = null; }
-  if (this.shaka) { var sp = this.shaka; this.shaka = null; this._shakaGone = sp.destroy().catch(function () {}); }
+  // Each step on its own: one throwing (pausing a stream that never loaded) mustn't leave the rest undone and the
+  // provider connection open.
+  if (this.mts) {
+    var m = this.mts; this.mts = null;
+    ['pause', 'unload', 'detachMediaElement', 'destroy'].forEach(function (f) { try { m[f](); } catch (e) {} });
+  }
+  if (this.shaka) { var sp = this.shaka; this.shaka = null; try { this._shakaGone = sp.destroy().catch(function () {}); } catch (e) { this._shakaGone = null; } }
   clearInterval(this._pinger);
+  this._dropSeekOnMeta();
   if (this.sessionId) { V.api('/api/session/' + this.sessionId, { method: 'DELETE', keepalive: true }).catch(function () {}); this.sessionId = null; }
   if (this.mb) { this.mb.stop(); this.mb = null; }
   var v = this.video;
@@ -1125,6 +1185,9 @@ PP._teardownMedia = function () {
 };
 
 PP._teardown = function () {
+  // An attempt still starting (a new title, or closing): end it now. Left alone, its timer and listeners stay on the
+  // video and later fail or unhook the next title's attempt. (Its token is already old, so nothing else follows.)
+  if (this._failNow) this._failNow(new Error('Stopped.'));
   this._statFlush();
   this._saveProgress();
   this._accountWatched();
@@ -1239,6 +1302,8 @@ PP._accountWatched = function (leaving) {
 
   // ------------------------------------------------------------ controls
 PP.togglePlay = function () {
+  // (After "Can't play this right now": Play means try again.)
+  if (!this.started && this._failedWith && this.it && !V.$('.vp-msg', this.host).hidden) { this.load(this.it, { startAt: this.vod ? this._lastPos || 0 : 0 }); return; }
   if (!this.started) return;
   var v = this.video;
   if (v.paused) v.play().catch(function () {}); else v.pause();
@@ -1523,7 +1588,7 @@ PP._menuPages = function (kind) {
   var main = [];
   var tr = this._tracks();
   if (kind === 'cc') {
-    if (tr.subs) { main.push({ label: 'Subtitles', value: tr.subs.value, page: 'subs' }); pages.subs = tr.subs.items; } else main.push({ label: 'Subtitles', value: 'None', fn: function () {} });
+    if (tr.subs) { main.push({ label: 'Subtitles', value: tr.subs.value, page: 'subs' }); pages.subs = tr.subs.items; } else main.push({ label: 'Subtitles', value: 'None', inert: true, fn: function () {} });
     if (tr.audio) { main.push({ label: 'Audio', value: tr.audio.value, page: 'audio' }); pages.audio = tr.audio.items; }
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
     // Subtitles found online (SubDL, Addic7ed, OpenSubtitles): see integrations.js.
@@ -1609,10 +1674,12 @@ PP._openMenu = function (page, kind) {
   var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '" aria-label="Back">' + V.icon('back') + '</button>' : '';
   var head = '<div class="mh">' + back + '<span class="mh-t">' + (from && radio ? '<span class="mh-ic">' + V.icon(menuIcon(from)) + '</span>' : '') + V.esc(title) + '</span>' +
     '<button class="mh-x" data-close aria-label="Close" title="Close">' + V.icon('x') + '</button></div>';
+  // A line that does nothing when pressed (Audio sync's "Sound in sync", say) just says how things are.
+  var inert = function (it) { return it.inert ? ' data-inert' : ''; };
   var row = function (it, i) {
-    if (radio) return '<button class="mi opt' + (it.on ? ' on' : '') + '" data-i="' + i + '" role="menuitemradio" aria-checked="' + !!it.on + '"><span class="dot">' + (it.on ? V.icon('check') : '') + '</span><span class="ml">' + V.esc(it.label) + '</span>' + (it.value ? '<span class="mv">' + V.esc(it.value) + '</span>' : '') + '</button>';
+    if (radio) return '<button class="mi opt' + (it.on ? ' on' : '') + '" data-i="' + i + '"' + inert(it) + ' role="menuitemradio" aria-checked="' + !!it.on + '"><span class="dot">' + (it.on ? V.icon('check') : '') + '</span><span class="ml">' + V.esc(it.label) + '</span>' + (it.value ? '<span class="mv">' + V.esc(it.value) + '</span>' : '') + '</button>';
     var val = it.value !== undefined && it.value !== '' ? '<span class="mv">' + V.esc(it.value) + '</span>' : '';
-    return '<button class="mi tile" data-i="' + i + '" role="menuitem"><span class="mic">' + V.icon(menuIcon(it)) + '</span><span class="mtx"><span class="ml">' + V.esc(it.label) + '</span>' + val + '</span>' + (it.page ? V.icon('next', 'mnx') : '') + '</button>';
+    return '<button class="mi tile" data-i="' + i + '"' + inert(it) + ' role="menuitem"><span class="mic">' + V.icon(menuIcon(it)) + '</span><span class="mtx"><span class="ml">' + V.esc(it.label) + '</span>' + val + '</span>' + (it.page ? V.icon('next', 'mnx') : '') + '</button>';
   };
   var body, wide = false;
   if (this._menuPage === 'main' && kind !== 'cc' && items.length > 7) {
@@ -1627,6 +1694,9 @@ PP._openMenu = function (page, kind) {
     body = '<div class="mb cols" style="--cols:' + groups.length + '">' + groups.map(function (g) { return '<div class="mcol" role="group" aria-label="' + g[0] + '"><div class="mg" role="presentation">' + g[0] + '</div>' + g[1].join('') + '</div>'; }).join('') + '</div>';
   } else body = '<div class="mb' + (radio ? ' opts' + (items.length > 6 ? ' many' : '') : ' list') + '">' + items.map(row).join('') + '</div>';
   m.className = 'vp-menu big' + (wide ? ' wide' : '') + (radio ? ' radio' : '');
+  // (The button that opened it shows it's open.)
+  var host = this.host;
+  ['gear', 'cc'].forEach(function (x) { var bt = V.$('[data-a=' + x + ']', host); if (bt) bt.setAttribute('aria-expanded', String(x === (kind === 'cc' ? 'cc' : 'gear'))); });
   m.setAttribute('aria-label', title);
   m.innerHTML = head + body;
   var self = this;
@@ -1642,7 +1712,8 @@ PP._openMenu = function (page, kind) {
     it.fn();
     if (self._menuPage === 'main') self._closeMenu(); else self._openMenu(it.back || parent);
   };
-  var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mb .mi', m);
+  // (The highlight starts on the first line that does something, so a remote's first press isn't wasted.)
+  var first = (keep !== null && V.$('.mi[data-i="' + keep + '"]', m)) || V.$('.mi[aria-checked=true]', m) || V.$('.mb .mi:not([data-inert])', m) || V.$('.mb .mi', m);
   // (Not on touch screens: there the highlight just looks like a stuck tap. Remotes and keyboards still get it.)
   var touch = !V.tvMode && window.matchMedia && matchMedia('(hover: none)').matches;
   if (first && (!touch || keep !== null)) first.focus({ preventScroll: true });
@@ -1650,8 +1721,14 @@ PP._openMenu = function (page, kind) {
   if (mb) mb.scrollTop = scrollWas;
   m.scrollTop = 0;
 };
+/** Back (Esc, a remote's Back): from a setting's choices to the settings; from the settings, closed. */
+PP._menuBack = function () {
+  var pg = this._menuPage || 'main';
+  if (pg === 'main') return this._closeMenu();
+  this._openMenu(pg.indexOf('adj-') === 0 ? 'adjust' : 'main');
+};
 PP._menuRefresh = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) this._openMenu(this._menuPage); this._ccButton(); };
-PP._closeMenu = function () { var m = V.$('.vp-menu', this.host); if (m && !m.hidden) { m.hidden = true; var b = V.$('[data-a=' + (this._menuKind === 'cc' ? 'cc' : 'gear') + ']', this.host); if (b && this.el.contains(document.activeElement)) b.focus(); } };
+PP._closeMenu = function () { var m = V.$('.vp-menu', this.host); var host = this.host; ['gear', 'cc'].forEach(function (x) { var bt = V.$('[data-a=' + x + ']', host); if (bt) bt.setAttribute('aria-expanded', 'false'); }); if (m && !m.hidden) { m.hidden = true; var b = V.$('[data-a=' + (this._menuKind === 'cc' ? 'cc' : 'gear') + ']', this.host); if (b && this.el.contains(document.activeElement)) b.focus(); } };
 PP._ccButton = function () { var t = this._tracks(); var b = V.$('[data-a=cc]', this.host); if (b) b.classList.toggle('dim', !t.subs && !t.audio); };
 
   // ------------------------------------------------------------ stats
@@ -1721,7 +1798,9 @@ PP._tick = function () {
   if (this.vod) {
     var pos = this.position, tot = this.duration;
     t1.textContent = V.fmtDur(pos);
-    t2.textContent = tot ? '−' + V.fmtDur(Math.max(0, tot - pos)) : '';
+    // Time left, or (a tap on it switches, and it's remembered) the time it ends — at the speed it's playing.
+    var left = Math.max(0, tot - pos);
+    t2.textContent = !tot ? '' : V.pref('timeEnds') ? 'Ends ' + V.fmtClock(Date.now() + left / (v.playbackRate || 1) * 1000) : '−' + V.fmtDur(left);
     seek.hidden = !tot;
     if (tot) {
       var f = V.clamp(pos / tot, 0, 1);
@@ -1838,6 +1917,7 @@ PP._bind = function () {
     else if (a === 'pip') self.togglePip();
     else if (a === 'golive') self.goLive();
     else if (a === 'stats-x') self.toggleStats(false);
+    else if (a === 'timeends') { V.setPref('timeEnds', !V.pref('timeEnds')); self._tick(); }
     else if (a === 'hidectl') { self.hideControls(); return; }
     else if (a === 'gear' || a === 'cc') { var m = V.$('.vp-menu', h); if (m.hidden || self._menuKind !== a) { self._menuKind = a; self._openMenu('main', a); } else self._closeMenu(); }
     else if (self.onButton) self.onButton(a, b);

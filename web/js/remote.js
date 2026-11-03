@@ -48,7 +48,7 @@ V.route('remote', function (view, r) {
 });
 
 function remoteList(view) {
-  view.innerHTML = V.pageHead('Remote') + '<p class="dim">Pick a screen to control. Screens show up while the app is open on them — signed in as you, or signed in from this device with a code.</p><div class="remote-devs"><div class="spinner"></div></div>' +
+  view.innerHTML = V.pageHead('Remote') + '<p class="dim">Pick a screen to control.</p><div class="remote-devs"><div class="spinner"></div></div>' +
     '<div class="btn-row"><button class="btn" data-pair>' + V.icon('tv') + ' Sign in a TV</button></div>';
   var draw = function () {
     V.api('/api/devices').then(function (devs) {
@@ -57,7 +57,7 @@ function remoteList(view) {
       if (!box) return;
       box.innerHTML = others.length ? others.map(function (d) {
         return '<a class="remote-dev" href="#/remote/' + encodeURIComponent(d.conn) + '">' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.playing ? 'Playing ' + V.esc(d.playing.n || '') : 'Nothing playing') + '</small></span>' + V.icon('next') + '</a>';
-      }).join('') : V.empty('No other screens open', 'Open the app on your TV or computer and pick ' + V.esc(S.profile.name) + ' there: it shows up here within a few seconds. A TV that isn’t signed in yet: choose “Sign in with your phone” on it, then “Sign in a TV” below. On the TV, Profile menu → “Control from your phone” shows a code your phone’s camera can open.');
+      }).join('') : V.empty('No other screens open', '', '<ol class="rm-steps"><li>Open the app on your TV or computer.</li><li>Pick <b>' + V.esc(S.profile.name) + '</b> there — it shows up here in a few seconds.</li></ol><p class="dim small">TV not signed in yet? Choose “Sign in with your phone” on it, then <b>Sign in a TV</b> below.</p>');
     }).catch(V.fail);
   };
   draw();
@@ -115,7 +115,7 @@ function remotePad(view, conn) {
   var hello = function () { cmd('watch'); };
   hello();
   var t = setInterval(hello, 10000);
-  V.api('/api/devices').then(function (devs) { var d = devs.filter(function (x) { return x.conn === conn; })[0]; if (d) { name = d.name; $('.rm-dev').textContent = d.name; drawTarget(); } else V.router.go('#/remote', true); });
+  V.api('/api/devices').then(function (devs) { var d = devs.filter(function (x) { return x.conn === conn; })[0]; if (d) { name = d.name; $('.rm-dev').textContent = d.name; drawTarget(); } else V.router.go('#/remote', true); }).catch(function () {}); // (offline a moment: the page tries again)
   V.pageCleanup = function () { clearInterval(t); off(); cmd('unwatch'); };
   var drawTarget = function () { var on = V.remote.target && V.remote.target.conn === conn; var b = $('[data-target]'); b.classList.toggle('primary', !!on); b.innerHTML = V.icon('cast') + (on ? ' Playing things here: on' : ' Pick things to play here'); };
   view.addEventListener('click', function (e) {

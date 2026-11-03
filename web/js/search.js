@@ -107,8 +107,8 @@ V.search = (function () {
       });
     }
     // Things you've watched rank a little higher.
-    var prog = S.data ? S.data.progress : {};
-    var hidden = S.data && S.data.hidden.length ? new Set(S.data.hidden) : null;
+    var prog = (S.data && S.data.progress) || {};
+    var hidden = S.data && S.data.hidden && S.data.hidden.length ? new Set(S.data.hidden) : null;
     var out = [];
     scores.forEach(function (s, i) {
       var it = items[i];

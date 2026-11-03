@@ -105,13 +105,49 @@
       this.abort = function () { if (sig.aborted) return; sig.aborted = true; ls.forEach(function (fn) { try { fn(); } catch (e) {} }); };
     };
   }
-  // IntersectionObserver (Chrome < 51): treat everything as visible, a moment later (lists still fill in page by page).
+  // IntersectionObserver (Chrome < 51, the PS4): where each thing is, compared with the screen (plus rootMargin), checked
+  // when something scrolls or the window changes size — a few times a second at most. (Saying everything is visible
+  // straight away made long lists, like 5,000 channels, draw every row in one go.)
   if (!window.IntersectionObserver) {
-    window.IntersectionObserver = function (cb) {
+    var ioAll = [], ioLast = 0, ioTimer = null;
+    var ioCheckAll = function () { ioTimer = null; ioLast = Date.now(); ioAll.slice().forEach(function (o) { o._check(); }); };
+    var ioSoon = function () { if (!ioTimer) ioTimer = setTimeout(ioCheckAll, Math.max(16, 150 - (Date.now() - ioLast))); };
+    window.addEventListener('resize', ioSoon);
+    document.addEventListener('scroll', ioSoon, true); // (scrolling inside a list or a row too)
+    window.IntersectionObserver = function (cb, opts) {
+      opts = opts || {};
       var self = this, els = [];
-      this.observe = function (el) { els.push(el); setTimeout(function () { if (els.indexOf(el) >= 0) cb([{ target: el, isIntersecting: true, intersectionRatio: 1 }], self); }, 60); };
-      this.unobserve = function (el) { els = els.filter(function (x) { return x !== el; }); };
-      this.disconnect = function () { els = []; };
+      var px = String(opts.rootMargin || '0px').split(/\s+/).map(function (x) { return parseFloat(x) || 0; });
+      var mt = px[0], mr = px.length > 1 ? px[1] : mt, mb = px.length > 2 ? px[2] : mt, ml = px.length > 3 ? px[3] : mr;
+      var thr = [].concat(opts.threshold || 0)[0] || 0;
+      var drop = function () { var i = ioAll.indexOf(self); if (i >= 0) ioAll.splice(i, 1); };
+      this._check = function () {
+        var out = [], vw = window.innerWidth || document.documentElement.clientWidth, vh = window.innerHeight || document.documentElement.clientHeight;
+        // (Something no longer on the page is forgotten, so a page left without disconnect() doesn't keep it.)
+        els = els.filter(function (x) { return document.documentElement.contains(x.el); });
+        els.forEach(function (x) {
+          var hit = false, ratio = 0;
+          if (x.el.getClientRects().length) { // (not display:none)
+            var r = x.el.getBoundingClientRect();
+            var w = Math.min(r.right, vw + mr) - Math.max(r.left, -ml), h = Math.min(r.bottom, vh + mb) - Math.max(r.top, -mt);
+            var area = r.width * r.height;
+            ratio = w >= 0 && h >= 0 ? (area ? Math.max(0, w) * Math.max(0, h) / area : 1) : 0;
+            hit = w >= 0 && h >= 0 && ratio >= thr;
+          }
+          if (hit !== x.hit) { x.hit = hit; out.push({ target: x.el, isIntersecting: hit, intersectionRatio: ratio, time: Date.now() }); }
+        });
+        if (!els.length) drop();
+        if (out.length) cb(out, self);
+      };
+      this.observe = function (el) {
+        if (els.some(function (x) { return x.el === el; })) return;
+        els.push({ el: el, hit: null }); // (the first check always reports, in view or not, like the real one)
+        if (ioAll.indexOf(self) < 0) ioAll.push(self);
+        ioSoon();
+      };
+      this.unobserve = function (el) { els = els.filter(function (x) { return x.el !== el; }); if (!els.length) drop(); };
+      this.disconnect = function () { els = []; drop(); };
+      this.takeRecords = function () { return []; };
     };
   }
   // node.isConnected (Chrome before 54): "is this still on the page?"

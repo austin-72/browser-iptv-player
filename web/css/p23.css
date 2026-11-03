@@ -1,0 +1,13 @@
+/* p23: player polish. */
+
+/* While watching, messages show at the top, under the title row, so they never cover the buttons, the channel
+   card's Start over or Skip intro at the bottom. */
+body.watching #toasts { top: calc(max(12px, env(safe-area-inset-top)) + 3.9rem); bottom: auto; }
+html.tv body.watching #toasts { top: 6.5rem; }
+
+/* Phones: a setting's choices (Audio sync, Speed…) don't keep an empty space for the tick unless picked, so the
+   names fit, and the values (+250 ms) aren't cut short. */
+@media (max-width: 700px) {
+  .vp-menu.big .mi.opt:not(.on) .dot { display: none; }
+  .vp-menu.big .mi.opt .mv { flex: none; max-width: none; }
+}

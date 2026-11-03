@@ -34,7 +34,7 @@
     var pool = fresh.length ? fresh : list;
     return pool[Math.floor(Math.random() * pool.length)];
   };
-  V.playPrevEpisode = function () { var it = V.watch.it, pv = V.prevEpisode(it); if (pv) V.play(pv, { startAt: 0 }); else if (V.player) V.player.osd('This is the first episode', 1500); };
+  V.playPrevEpisode = function () { var it = V.watch.it; if (!it) return; var pv = V.prevEpisode(it); if (pv) V.play(pv, { startAt: 0 }); else if (V.player) V.player.osd('This is the first episode', 1500); };
   // Fetch the series' episodes as soon as one plays (so the next one is known before this one ends).
   V.on('playing', function (it) {
     hide();
@@ -48,13 +48,16 @@
     if (!host) return null;
     var b = V.$('.vp-end', host);
     if (!b) { b = document.createElement('div'); b.className = 'vp-end'; b.hidden = true; var msg = V.$('.vp-msg', host); (msg ? msg.parentNode : host).appendChild(b); }
+    // (The viewer plays or seeks the finished title again: the card — and its countdown — goes.)
+    var v = V.player.video;
+    if (v && !v._endHooked) { v._endHooked = true; var shown = function () { var e2 = V.player && V.$('.vp-end', V.player.host); return e2 && !e2.hidden; }; v.addEventListener('play', function () { if (shown()) hide(); }); v.addEventListener('seeking', function () { if (shown() && !v.ended) hide(); }); }
     return b;
   }
   function hide() { clearInterval(timer); timer = null; var b = V.player && V.player.host && V.$('.vp-end', V.player.host); if (b) { b.hidden = true; b.innerHTML = ''; } }
   V.hideEndCard = hide;
   var sw = function () { return '<label class="ve-auto"><input type="checkbox" data-ve-auto' + (autoplay() ? ' checked' : '') + '><span class="ve-sw" aria-hidden="true"></span><span>Autoplay</span></label>'; };
   var art = function (x, fallback) { return V.art((x && x.i) || (fallback && fallback.i) || '', (x && x.n) || '', 'art'); };
-  var focusFirst = function (b) { var f = V.$('[data-ve-first]', b) || V.$('button', b); if (f && (V.tvMode || V.device.tv || (document.activeElement && V.player.el.contains(document.activeElement)))) f.focus(); };
+  var focusFirst = function (b) { if (document.activeElement && b.contains(document.activeElement) && document.activeElement !== b) return; var f = V.$('[data-ve-first]', b) || V.$('button', b); if (f && (V.tvMode || V.device.tv || (document.activeElement && V.player.el.contains(document.activeElement)))) f.focus(); };
 
   /** An episode ended (it: the episode; nx: what plays next, if anything). */
   V.showEpisodeEnd = function (it, nx, o) {
@@ -83,7 +86,10 @@
     var tick = function () {
       var c = V.$('.ve-c', b);
       if (!c) return;
-      if (!autoplay()) { c.textContent = queued ? 'Play next' : 'Next episode'; return; }
+      // No countdown when Autoplay is off, the viewer said "Not now", left the player (mini) or is choosing an
+      // episode themselves — or something else is playing by now.
+      var off = !autoplay() || o.noAuto || V.watch.mini || V.watch.side || V.watch.it !== it || b.hidden;
+      if (off) { c.textContent = queued ? 'Play next' : 'Next episode'; if (V.watch.it !== it || b.hidden) { clearInterval(timer); timer = null; } return; }
       c.textContent = (queued ? 'Play next' : 'Next episode') + ' in ' + left + ' s';
       if (left-- <= 0) { clearInterval(timer); timer = null; V.autoNext ? V.autoNext(nx) : V.playUpNext(nx); }
     };
@@ -114,6 +120,8 @@
     var like = V.similar ? V.similar(it, 12) : [];
     var draw = function (seriesNext, colName) {
       var items = (seriesNext ? [seriesNext] : []).concat(like.filter(function (x) { return !seriesNext || x.k !== seriesNext.k; })).slice(0, 12);
+      // (Drawn again when the film's series arrives: a TV viewer already moving along the row keeps their place.)
+      var had = document.activeElement && b.contains(document.activeElement) ? document.activeElement.getAttribute('data-k') || document.activeElement.getAttribute('data-ve') : null;
       b.innerHTML = '<div class="ve-box wide"><div class="ve-top"><span class="dim small">“' + V.esc(it.n) + '” finished</span><span class="sp"></span><button class="pbtn" data-ve="x" aria-label="Close">' + V.icon('x') + '</button></div>' +
         (seriesNext ? '<div class="ve-next"><div class="ve-art poster">' + art(seriesNext) + '</div><div class="ve-info"><div class="dim small">Next in ' + V.esc(colName || 'the series') + '</div><div class="ve-t">' + V.esc(seriesNext.n) + '</div>' + (seriesNext.plot ? '<p class="ve-plot">' + V.esc(seriesNext.plot) + '</p>' : '') + (seriesNext.y ? '<div class="dim small">' + seriesNext.y + '</div>' : '') + '</div></div>' : '') +
         (items.length > (seriesNext ? 1 : 0) ? '<div class="dim small ve-h">' + (seriesNext ? 'More like this' : 'You might like') + '</div><div class="ve-row">' + items.filter(function (x) { return !seriesNext || x.k !== seriesNext.k; }).map(function (x) {
@@ -122,7 +130,8 @@
         '<div class="ve-acts">' + (seriesNext ? '<button class="btn primary" data-ve="play" data-k="' + V.esc(seriesNext.k) + '" data-ve-first>' + V.icon('play') + ' Play “' + V.esc(seriesNext.n) + '”</button>' : '') +
         '<button class="btn" data-ve="again"' + (seriesNext ? '' : ' data-ve-first') + '>' + V.icon('restart') + ' Watch again</button><button class="btn" data-ve="close">Close</button></div></div>';
       b.hidden = false;
-      focusFirst(b);
+      var back = had && (V.$('[data-k="' + had.replace(/"/g, '') + '"]', b) || V.$('[data-ve="' + had.replace(/"/g, '') + '"]', b));
+      if (back) back.focus(); else focusFirst(b);
     };
     b.onclick = function (e) {
       e.stopPropagation();

@@ -1,15 +1,18 @@
 /* Browsing: Movies, Series, Live TV, Radio and a channel's own page. */
 'use strict';
 
+// (One collator for every comparison: localeCompare makes one each time, which takes seconds over 100,000 titles on a TV.)
+var nameCmp = (function () { try { var c = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }); return function (x, y) { return c.compare(x, y); }; } catch (e) { return function (x, y) { return String(x).localeCompare(y); }; } })();
+V.nameCmp = nameCmp;
 V.sortItems = function (items, sort) {
   var a = items.slice();
-  if (sort === 'az') a.sort(function (x, y) { return x.n.localeCompare(y.n); });
-  else if (sort === 'za') a.sort(function (x, y) { return y.n.localeCompare(x.n); });
+  if (sort === 'az') a.sort(function (x, y) { return nameCmp(x.n, y.n); });
+  else if (sort === 'za') a.sort(function (x, y) { return nameCmp(y.n, x.n); });
   else if (sort === 'new') a.sort(function (x, y) { return (y.ad || 0) - (x.ad || 0); });
   else if (sort === 'year') a.sort(function (x, y) { return (y.y || 0) - (x.y || 0); });
   else if (sort === 'rating') a.sort(function (x, y) { return (y.r || 0) - (x.r || 0); });
   else if (sort === 'num') a.sort(function (x, y) { return (x.no || 0) - (y.no || 0); });
-  else if (sort === 'genre') a.sort(function (x, y) { var gx = (x.gn && x.gn[0]) || '\uffff', gy = (y.gn && y.gn[0]) || '\uffff'; return gx.localeCompare(gy) || x.n.localeCompare(y.n); });
+  else if (sort === 'genre') a.sort(function (x, y) { var gx = (x.gn && x.gn[0]) || '\uffff', gy = (y.gn && y.gn[0]) || '\uffff'; return nameCmp(gx, gy) || nameCmp(x.n, y.n); });
   return a;
 };
 
@@ -43,12 +46,12 @@ function vodPage(view, r, type, title) {
     (type === 'movie' ? '<label class="sel"><span class="sr-only">Length</span><select class="input" data-f="len">' + [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(maxLen || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' : '') +
     '<label class="sel"><span class="sr-only">Sort</span><select class="input" data-f="sort">' + [['default', 'Suggested'], ['new', 'Newest'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     (g ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to home</button>' : '') + '</div>') +
-    (genres.length ? V.chips([{ v: '', l: 'All genres' }].concat(genres.filter(function (x) { return x.n >= 3; }).slice(0, 16).map(function (x) { return { v: x.name, l: x.name }; })), genre, 'genre') : '') +
-    '<p class="count dim">' + V.plural(items.length, type === 'movie' ? 'movie' : 'series', type === 'movie' ? 'movies' : 'series') + (dec || minR || maxLen ? ' · <button class="linkish" data-clear-f>Clear filters</button>' : '') + '</p><div class="grid-host"></div>';
+    // (No row of genre buttons as well: the Genre list above does the same, and the page starts sooner.)
+    '<p class="count dim">' + V.plural(items.length, type === 'movie' ? 'movie' : 'series', type === 'movie' ? 'movies' : 'series') + (g || genre || dec || minR || maxLen ? ' · <button class="linkish" data-clear-f>Clear filters</button>' : '') + '</p><div class="grid-host"></div>';
   V.$$('[data-f]', view).forEach(function (s) { s.onchange = function () { if (s.dataset.f === 'sort') V.ls.set('sort.' + type, s.value); setQ(s.dataset.f, s.value === 'default' ? '' : s.value); }; });
   V.$$('[data-genre]', view).forEach(function (b) { b.onclick = function () { setQ('genre', b.dataset.genre); }; });
   var cf = V.$('[data-clear-f]', view);
-  if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
+  if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['g', 'genre', 'dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
   var pin = V.$('[data-pin-g]', view);
   if (pin) pin.onclick = function () { var id = type + '|' + g; if (S.data.home.pinned.indexOf(id) < 0) { S.data.home.pinned.push(id); V.saveHome(); } V.toast('Pinned to your home page'); };
   if (!all.length) { V.$('.grid-host', view).innerHTML = V.empty('No ' + title.toLowerCase() + ' yet', 'None of the lists have any, or your language settings hide them.', '<div class="btn-row empty-acts"><a class="btn" href="#/settings">Language settings</a></div>'); return; }
@@ -113,7 +116,16 @@ function channelsPage(view, r, type) {
     var row = e.target.closest('[data-k]');
     if (row) { e.preventDefault(); V.play(V.entry(row.dataset.k), { list: box._items }); }
   });
-  var tick = setInterval(function () { V.$$('.chr', box).forEach(function (el) { var it = V.entry(el.dataset.k); var nn = V.epg.nowNext(it); var b = V.$('.bar i', el); if (b && nn.now) b.style.width = V.clamp((Date.now() - nn.now.s) / (nn.now.e - nn.now.s), 0, 1) * 100 + '%'; }); }, 30000);
+  // Every half minute: the progress bars move on, and a channel whose programme has changed shows the new one.
+  var tick = setInterval(function () {
+    V.$$('.chr', box).forEach(function (el) {
+      var it = V.entry(el.dataset.k); var nn = V.epg.nowNext(it);
+      var ns = nn.now ? nn.now.s : 0;
+      if (el._ns !== undefined && el._ns !== ns && it && document.activeElement !== el && !el.contains(document.activeElement)) { var tmp = document.createElement('div'); tmp.innerHTML = V.channelRow(it); var fresh = tmp.firstElementChild; if (fresh) { fresh._ns = ns; el.parentNode.replaceChild(fresh, el); } return; }
+      el._ns = ns;
+      var b = V.$('.bar i', el); if (b && nn.now) b.style.width = V.clamp((Date.now() - nn.now.s) / (nn.now.e - nn.now.s), 0, 1) * 100 + '%';
+    });
+  }, 30000);
   V.pageCleanup = function () { clearInterval(tick); if (curIo) curIo.disconnect(); };
 }
 /** An event channel with nothing on: its name says so, or its event (from its name) is over and nothing follows. */
@@ -132,7 +144,7 @@ V.channelRow = function (c) {
     '<span class="chr-no num">' + (c.no || '') + '</span>' + V.art(c.i, c.n, 'art chr-logo') +
     '<span class="chr-main"><span class="dn-row"><span class="chr-name truncate">' + V.esc(c.n) + (c.cu ? ' ' + V.icon('archive', 'tiny') : '') + '</span>' + (V.downMark ? V.downMark(c) : '') + '</span>' +
     (c.lk && !V.parental.open(c) ? '<span class="chr-now dim truncate">' + V.icon('lock', 'tiny') + ' Locked</span>' : nn.now ? '<span class="chr-now truncate' + (nn.now.ph ? ' ph' : '') + '">' + V.esc(nn.now.t) + '</span><span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : c.ev ? '<span class="chr-now truncate">' + V.eventLabel(c) + '</span>' : '<span class="chr-now dim truncate">' + V.esc(c.es === 'none' ? 'No event right now' : c.g) + '</span>') + '</span>' +
-    '<span class="chr-next dim truncate">' + (nn.next && !nn.next.ph ? V.fmtClock(nn.next.s) + ' ' + V.esc(nn.next.t) : '') + '</span>' +
+    '<span class="chr-next dim truncate">' + (nn.next && !nn.next.ph ? '<span class="chr-nl">Next</span> ' + V.fmtClock(nn.next.s) + ' ' + V.esc(nn.next.t) : '') + '</span>' +
     '<button class="icon-btn" data-fav="' + V.esc(c.k) + '" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button></a>';
 };
 /** A pay-per-view channel's event: "LIVE · Chelsea vs. Man Utd", "Ended · …". */
@@ -209,6 +221,14 @@ V.toggleReminder = function (c, p) {
     V.toast('I’ll remind you when “' + p.t + '” starts');
   }
   V.api('/api/reminders', { body: on ? { remove: { k: c.k, s: p.s } } : { add: { k: c.k, s: p.s, e: p.e, t: p.t } } }).catch(V.fail);
+  // (The guide's tile for it shows the bell — or not — straight away, wherever the reminder was set from.)
+  V.$$('.gp[data-s="' + p.s + '"]').forEach(function (el) {
+    if (el.dataset.k !== c.k) return;
+    var b = V.$('b', el), bell = b && V.$('.tiny', b);
+    if (on && bell) bell.parentNode.removeChild(bell);
+    else if (!on && b && !bell) b.insertAdjacentHTML('afterbegin', V.icon('bellf', 'tiny'));
+  });
+  V.emit('reminders');
   return !on;
 };
 V.checkReminders = function () {

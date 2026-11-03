@@ -1,0 +1,9 @@
+/* Sound only on a TV: the "listening" card, readable from the sofa. */
+html.tv .vp-art .ao-now { font-size: 1.4rem; }
+html.tv .vp-art .ao-next { font-size: 1.15rem; }
+html.tv .vp-art .ao-tag { font-size: 1.1rem; gap: .5rem; }
+html.tv .vp-art .ao-tag .i { width: 1.3rem; height: 1.3rem; }
+html.tv .vp-art .ao-tag .linkish { padding: .15rem .35rem; border-radius: 6px; }
+
+/* Admin → Channel health on a phone: the search and both filters as one tidy column. */
+@media (max-width: 600px) { .hl-tools .input { width: 100%; min-width: 0; } }

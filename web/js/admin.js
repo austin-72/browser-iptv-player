@@ -39,6 +39,8 @@ V.route('admin', function (view, r) {
   var body = V.$('.admin-body', view);
   V.api('/api/admin').then(function (A) {
     S.admin = A;
+    // Left the page before this came back: don't draw (or start timers) into it — its clean-up has already run.
+    if (!document.documentElement.contains(body)) return;
     (V.adminTabs[tab] || V.adminTabs.overview)(body, A);
     // "Add a list" from an empty home page: straight to the form.
     if (tab === 'lists' && r.q.get('add') && /^#\/admin\/lists/.test(location.hash)) {
@@ -53,6 +55,13 @@ V.adminSave = function (patch, msg) {
 };
 
 V.adminTabs = {};
+
+/** A number field's value, or null when it's empty (put the saved value back then, rather than saving 0). */
+V.adminNum = function (el, saved) {
+  var v = String(el.value).trim();
+  if (v === '' || isNaN(+v)) { el.value = saved === undefined || saved === null ? '' : saved; V.toast('Enter a number', { error: true }); return null; }
+  return +v;
+};
 
 V.adminTabs.overview = function (body, A) {
   var st = A.status;
@@ -72,8 +81,8 @@ V.adminTabs.overview = function (body, A) {
     '<section class="card-sec"><h2>Server</h2><dl class="kv"><dt>Version</dt><dd>' + V.esc(st.version) + '</dd><dt>ffmpeg</dt><dd>' + (st.ffmpeg ? V.esc(st.ffmpegVersion) + (st.hw ? ' · hardware: ' + st.hw : '') : 'not found') + '</dd><dt>Intro detection</dt><dd>' + (st.intro ? 'available' : 'unavailable') + '</dd><dt>TMDB</dt><dd>' + (st.tmdb.enabled ? 'on · ' + st.tmdb.matched + ' titles matched' + (st.tmdb.error ? ' · ' + V.esc(st.tmdb.error) : '') : 'off') + '</dd><dt>Data folder</dt><dd><code>' + V.esc(st.dataDir) + '</code></dd><dt>Listening on</dt><dd>' + V.esc(st.listen) + '</dd><dt>System</dt><dd>' + V.esc(st.platform + ' · Node ' + st.node) + '</dd><dt>Up for</dt><dd>' + V.fmtLen(st.uptime) + '</dd>' + (st.mem ? '<dt>Memory</dt><dd>' + V.fmtSize(st.mem) + (st.items ? ' · ' + V.plural(st.items, 'catalogue entry', 'catalogue entries') : '') + '</dd>' : '') + '</dl></section>';
   if (V.adminWatching) V.adminWatching(V.$('[data-watching]', body)); // live: quality, route, connections (integrations.js)
   body.onclick = function (e) {
-    var b = e.target.closest('[data-stop]'); if (b) V.del('/api/admin/sessions/' + b.dataset.stop).then(function () { V.router.refresh(); });
-    var c = e.target.closest('[data-acct]'); if (c) { c.disabled = true; V.api('/api/admin/accounts/check', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(V.fail); }
+    var b = e.target.closest('[data-stop]'); if (b) { b.disabled = true; V.del('/api/admin/sessions/' + b.dataset.stop).then(function () { V.router.refresh(); }).catch(function (x) { b.disabled = false; V.fail(x); }); }
+    var c = e.target.closest('[data-acct]'); if (c) { c.disabled = true; V.api('/api/admin/accounts/check', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(function (x) { c.disabled = false; V.fail(x); }); }
   };
 };
 /** "EVESTV · active · expires 30 Oct 2027 (364 days) · 1 connection · in use by Mom (Living Room TV)" */
@@ -82,12 +91,16 @@ V.adminAccountLine = function (l) {
   var days = a.expires ? Math.floor((a.expires - Date.now()) / 86400e3) : null;
   var use = l.inUse || [];
   return '<b>' + V.esc(l.name) + '</b> <span class="dim">· ' + V.esc(a.status || '?') + (a.expires ? ' · expires ' + new Date(a.expires).toLocaleDateString() + ' (<span class="' + (days <= 14 ? 'err' : '') + '">' + (days < 0 ? 'expired' : V.plural(days, 'day')) + '</span>)' : '') +
-    (a.maxConnections ? ' · ' + V.plural(+a.maxConnections, 'connection') + ' allowed' : '') + (a.activeConnections !== undefined && a.activeConnections !== '' ? ' · provider says ' + a.activeConnections + ' in use' : '') + '</span>' +
+    (a.maxConnections ? ' · ' + V.plural(+a.maxConnections, 'connection') + ' allowed' : '') + (a.activeConnections !== undefined && a.activeConnections !== '' ? ' · provider says ' + V.esc(a.activeConnections) + ' in use' : '') + '</span>' +
     (use.length ? '<div class="small">In use by ' + use.map(function (u) { return V.esc(u.name) + ' (' + V.esc(u.device) + ': ' + V.esc(u.n) + ')'; }).join(', ') + '</div>' : '') + (a.checkedAt ? '<div class="dim small">Checked ' + V.fmtAgo(a.checkedAt) + '</div>' : '');
 };
 
 V.adminTabs.lists = function (body, A) {
   var draw = function () {
+    // Keep the focus on the same button through a redraw (a TV remote would lose its place every 4 s while refreshing).
+    var fa = document.activeElement, fli = fa && body.contains(fa) && fa.closest('[data-id]');
+    var fk = fli ? ['data-up', 'data-down', 'data-en', 'data-ct', 'data-ref', 'data-edit', 'data-del'].filter(function (k) { return fa.hasAttribute(k); })[0] : null;
+    var fid = fli ? fli.dataset.id : null;
     body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a list</button><span class="dim">Lists are merged into one catalogue for everyone, with duplicates combined (other copies become backup streams). Order matters: the first list wins when the same channel is in several.</span></div>' +
       (A.lists.length ? '<ul class="adm-list">' + A.lists.map(function (l, i) {
         var s = l.status || {};
@@ -95,11 +108,16 @@ V.adminTabs.lists = function (body, A) {
         var info = (l.type === 'xtream' || (l.type === 'stalker' && l.account) ? (l.account ? V.adminAccountLine(l) : '') : V.listInfo && V.listInfo(l) ? V.listInfo(l) : l.type === 'folder' ? V.esc((l.folders || []).join(', ')) : l.type === 'url' ? V.esc(l.url) : 'Uploaded file') + (px ? '<div>' + V.icon('globe', 'tiny') + ' Proxy: ' + V.esc(px) + '</div>' : '');
         return '<li class="' + (l.enabled ? '' : 'off') + '" data-id="' + l.id + '"><div class="al-h"><span class="al-type">' + ({ url: 'Playlist', file: 'File', xtream: 'Xtream', folder: 'Folder', stalker: 'Portal', mediaserver: ({ jellyfin: 'Jellyfin', emby: 'Emby', plex: 'Plex' })[l.kind] || 'Library' }[l.type]) + '</span><b>' + V.esc(l.name) + '</b>' + (s.format ? '<span class="chip sm">' + V.esc(s.format) + '</span>' : '') + '<span class="sp"></span>' +
           '<button class="icon-btn" data-up aria-label="Move up"' + (i ? '' : ' disabled') + '>' + V.icon('up') + '</button><button class="icon-btn" data-down aria-label="Move down"' + (i < A.lists.length - 1 ? '' : ' disabled') + '>' + V.icon('down') + '</button>' +
-          '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label>' + (l.type !== 'folder' ? '<button class="icon-btn" data-ct aria-label="Test how many streams play at once" title="Test how many streams play at once">' + V.icon('pulse') + '</button>' : '') + '<button class="icon-btn" data-ref aria-label="Refresh now">' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
+          '<label class="switch sm"><input type="checkbox" data-en' + (l.enabled ? ' checked' : '') + '><span class="sw"></span><span class="sr-only">Enabled</span></label>' + (l.type !== 'folder' ? '<button class="icon-btn" data-ct aria-label="Test how many streams play at once" title="Test how many streams play at once">' + V.icon('pulse') + '</button>' : '') + '<button class="icon-btn" data-ref aria-label="Refresh now"' + (l.refreshing ? ' disabled' : '') + '>' + V.icon('refresh') + '</button><button class="icon-btn" data-edit aria-label="Edit">' + V.icon('edit') + '</button><button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button></div>' +
           '<div class="al-b dim small">' + info + '</div><div class="al-s small">' + (l.refreshing ? '<span class="spinner sm"></span> Refreshing…' : s.ok ? V.icon('check', 'tiny ok') + ' ' + V.plural(s.count || 0, 'item') + ' · updated ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.icon('x', 'tiny') + ' ' + V.esc(s.error) + '</span>' + (s.count ? ' <span class="dim">(using the saved copy)</span>' : '') : '') +
           (l.refreshHours ? ' · every ' + l.refreshHours + ' h' : ' · no automatic refresh') + (l.lang ? ' · language forced: ' + V.esc(V.langName(l.lang)) : '') + '</div>' +
           (l.testing ? '<div class="al-s small"><span class="spinner sm"></span> Testing how many streams play at once…</div>' : l.connTest ? '<div class="al-s small">' + V.icon('pulse', 'tiny') + ' ' + V.connTestLine(l.connTest) + ' <span class="dim">· tested ' + V.fmtAgo(l.connTest.at) + '</span></div>' : '') + '</li>';
       }).join('') + '</ul>' : V.empty('No lists yet', 'Add an M3U/M3U8 playlist (any format: PLS, XSPF, JSON…), an Xtream Codes account, an uploaded file, or a folder of your own videos on the server.'));
+    if (fk) {
+      var row = V.$$('[data-id]', body).filter(function (x) { return x.dataset.id === fid; })[0];
+      var nf = row && (V.$('[' + fk + ']:not([disabled])', row) || V.$('[data-edit]', row));
+      if (nf) nf.focus();
+    }
   };
   draw();
   var reload = function () { return V.api('/api/admin').then(function (a) { A = S.admin = a; draw(); }); };
@@ -112,17 +130,23 @@ V.adminTabs.lists = function (body, A) {
     if (!b) return;
     if (b.hasAttribute('data-ct')) { V.connTestDialog(l).then(reload); return; }
     if (b.hasAttribute('data-ref')) { b.disabled = true; V.api('/api/admin/lists/' + id + '/refresh', { method: 'POST' }).then(function (r) { V.toast(r && r.running ? 'Still refreshing in the background — this list shows the result when it’s done' : 'Refreshed', { ms: r && r.running ? 6000 : 3000 }); reload(); }).catch(function (x) { V.fail(x); reload(); }); }
-    else if (b.hasAttribute('data-del')) V.confirm('Remove “' + l.name + '”? Its channels and videos disappear for everyone.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/lists/' + id).then(reload); });
+    else if (b.hasAttribute('data-del')) V.confirm('Remove “' + l.name + '”? Its channels and videos disappear for everyone.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/lists/' + id).then(reload).catch(V.fail); });
     else if (b.hasAttribute('data-edit')) V.editListDialog(l).then(function (ok) { if (ok) reload(); });
     else if (b.hasAttribute('data-up') || b.hasAttribute('data-down')) {
       var ids = A.lists.map(function (x) { return x.id; });
       var i = ids.indexOf(id), j = b.hasAttribute('data-up') ? i - 1 : i + 1;
       ids.splice(j, 0, ids.splice(i, 1)[0]);
-      V.api('/api/admin/lists-order', { body: { ids: ids } }).then(reload);
+      // (Off until the new order is drawn: a second press would send an order worked out from the old one.)
+      b.disabled = true;
+      V.api('/api/admin/lists-order', { body: { ids: ids } }).then(reload).catch(function (x) { V.fail(x); reload(); });
     }
   };
-  body.onchange = function (e) { if (e.target.hasAttribute('data-en')) { var id = e.target.closest('[data-id]').dataset.id; V.put('/api/admin/lists/' + id, { enabled: e.target.checked }).then(reload).catch(V.fail); } };
-  var t = setInterval(function () { if (A.lists.some(function (l) { return l.refreshing || l.testing; }) && !V.$('dialog[open]')) reload(); }, 4000);
+  // (A failed switch is put back: reload draws what the server has.)
+  body.onchange = function (e) { if (e.target.hasAttribute('data-en')) { var id = e.target.closest('[data-id]').dataset.id; V.put('/api/admin/lists/' + id, { enabled: e.target.checked }).then(reload).catch(function (x) { V.fail(x); reload(); }); } };
+  var t = setInterval(function () {
+    if (!document.documentElement.contains(body)) { clearInterval(t); return; } // (the page is gone)
+    if (A.lists.some(function (l) { return l.refreshing || l.testing; }) && !V.$('dialog[open]')) reload().catch(function () {});
+  }, 4000);
   V.pageCleanup = function () { clearInterval(t); };
 };
 
@@ -275,6 +299,9 @@ V.editListDialog = function (l) {
       var patch = {};
       ['name', 'url', 'server', 'username', 'password', 'ua', 'lang', 'refreshHours', 'proxy', 'portal', 'mac', 'serial', 'deviceId', 'deviceId2', 'signature', 'token', 'kind', 'evTz', 'relay'].forEach(function (k) { if (fd.has(k)) patch[k] = fd.get(k); });
       V.$$('[data-bool]', d).forEach(function (x) { patch[x.name] = x.checked; });
+      // An emptied name or refresh field keeps what was saved (the server would store a blank name, or 0 = never refresh).
+      if (patch.name !== undefined && !String(patch.name).trim()) delete patch.name;
+      if (patch.refreshHours !== undefined) { if (String(patch.refreshHours).trim() === '' || isNaN(+patch.refreshHours)) delete patch.refreshHours; else patch.refreshHours = +patch.refreshHours; }
       if (patch.proxy === (l.proxy || '')) delete patch.proxy;
       if (patch.relay === (l.relay || '')) delete patch.relay;
       if (V.$('[name=useGuide]', d)) patch.useGuide = !!fd.get('useGuide');
@@ -310,15 +337,16 @@ V.adminTabs.guides = function (body, A) {
     '<div class="grid2 small-grid"><label class="field"><span>Days of listings to keep ahead</span><input class="input" type="number" min="1" max="21" data-s="epgDays" value="' + A.settings.epgDays + '"></label><label class="field"><span>Days to keep in the past (for catch-up)</span><input class="input" type="number" min="0" max="14" data-s="epgPastDays" value="' + A.settings.epgPastDays + '"></label><label class="field"><span>Refresh every (hours)</span><input class="input" type="number" min="1" max="168" data-s="epgRefreshHours" value="' + A.settings.epgRefreshHours + '"></label></div>' +
     (A.guides.length ? '<ul class="adm-list">' + A.guides.map(function (g) { var s = g.status || {}; return '<li class="' + (g.enabled ? '' : 'off') + '" data-id="' + g.id + '"><div class="al-h"><b>' + V.esc(g.name) + '</b>' + (g.auto ? '<span class="chip sm">from a list</span>' : '') + '<span class="sp"></span><label class="switch sm"><input type="checkbox" data-en' + (g.enabled ? ' checked' : '') + '><span class="sw"></span></label><button class="icon-btn" data-ref aria-label="Refresh">' + V.icon('refresh') + '</button>' + (g.auto ? '' : '<button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button>') + '</div><div class="al-b dim small">' + V.esc(g.url.replace(/(password=)[^&]+/, '$1•••')) + '</div><div class="al-s small">' + (s.ok ? V.icon('check', 'tiny ok') + ' ' + (s.channels || 0) + ' channels · ' + (s.programmes || 0).toLocaleString() + ' programmes · ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.esc(s.error) + '</span>' : 'Not loaded yet') + '</div></li>'; }).join('') + '</ul>' : V.empty('No guides', 'Add an XMLTV address (.xml or .xml.gz).'));
   body.onchange = function (e) {
-    if (e.target.dataset.s) { var p = {}; p[e.target.dataset.s] = +e.target.value; V.adminSave(p); }
-    if (e.target.hasAttribute('data-en')) V.put('/api/admin/guides/' + e.target.closest('[data-id]').dataset.id, { enabled: e.target.checked }).then(function () { V.router.refresh(); });
+    if (e.target.dataset.s) { var k = e.target.dataset.s, n = V.adminNum(e.target, S.admin.settings[k]); if (n === null) return; var p = {}; p[k] = n; V.adminSave(p).catch(function () {}); }
+    if (e.target.hasAttribute('data-en')) V.put('/api/admin/guides/' + e.target.closest('[data-id]').dataset.id, { enabled: e.target.checked }).then(function () { V.router.refresh(); }).catch(function (x) { V.fail(x); V.router.refresh(); });
   };
   body.onclick = function (e) {
     if (e.target.closest('[data-add]')) return V.prompt('Guide address (XMLTV)', { placeholder: 'https://…/guide.xml.gz' }).then(function (u) { if (u) { V.toast('Loading the guide…'); V.api('/api/admin/guides', { body: { url: u } }).then(function (g) { V.toast(g.status && g.status.ok ? 'Guide loaded' : 'Guide added, but: ' + ((g.status && g.status.error) || 'not loaded')); V.router.refresh(); }).catch(V.fail); } });
     var li = e.target.closest('[data-id]');
     if (!li) return;
-    if (e.target.closest('[data-ref]')) { V.toast('Refreshing…'); V.api('/api/admin/guides/' + li.dataset.id + '/refresh', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(V.fail); }
-    if (e.target.closest('[data-del]')) V.del('/api/admin/guides/' + li.dataset.id).then(function () { V.router.refresh(); });
+    var rb = e.target.closest('[data-ref]');
+    if (rb) { rb.disabled = true; V.toast('Refreshing…'); V.api('/api/admin/guides/' + li.dataset.id + '/refresh', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(function (x) { rb.disabled = false; V.fail(x); }); }
+    if (e.target.closest('[data-del]')) V.del('/api/admin/guides/' + li.dataset.id).then(function () { V.router.refresh(); }).catch(V.fail);
   };
 };
 
@@ -328,7 +356,7 @@ V.adminTabs.profiles = function (body, A) {
     '<ul class="adm-profiles">' + A.profiles.map(function (p) {
       var r = p.restrictions || {};
       return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri" data-prichip>Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +
-        '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? p.langs.map(V.langName).join(', ') || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div></div>' +
+        '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? V.esc(p.langs.map(function (c) { return V.langName(c); }).join(', ')) || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div></div>' +
         (p.admin ? '' : '<div class="ap-limits grid2"><label class="field"><span>Age limit</span><select class="input" data-r="maxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(r.maxCert) === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label>' +
           '<div class="field"><span>Can watch</span><div class="chips">' + [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']].map(function (t) { var on = !r.types || !r.types.length || r.types.indexOf(t[0]) >= 0; return '<label class="chip-check"><input type="checkbox" data-type="' + t[0] + '"' + (on ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') + '</div></div>' +
           '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile (only kids’ titles and channels)</span></label><label class="check"><input type="checkbox" data-r="adult"' + (r.adult ? ' checked' : '') + '><span>Allow adult (18+) groups</span></label>' +
@@ -385,7 +413,7 @@ V.adminTabs.content = function (body, A) {
     V.$('[data-gf]', body).addEventListener('input', V.debounce(function (e) { draw(e.target.value); }, 150));
     body.addEventListener('change', function (e) { if (e.target.closest('.groups-adm')) { if (e.target.checked) hidden.add(e.target.value); else hidden.delete(e.target.value); } });
     V.$('[data-save-g]', body).onclick = function () { V.adminSave({ hiddenGroups: Array.from(hidden) }, 'Saved — the catalogue is being rebuilt'); };
-  });
+  }).catch(function (e) { var gb = V.$('.groups-adm', body); if (gb) gb.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; V.$('[data-save-g]', body).disabled = true; }); // (not a spinner forever, nor a Save that does nothing)
   V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked }, 'Saved — everyone using the default sees the change'); };
 };
 
@@ -408,7 +436,8 @@ V.adminTabs.playback = function (body, A) {
   body.onchange = function (e) {
     var t = e.target, p = {};
     if (t.name === 'routing') p.routing = t.value;
-    else if (t.dataset.s) p[t.dataset.s] = t.type === 'number' || t.dataset.s === 'transcodeMaxHeight' ? +t.value : t.value;
+    else if (t.dataset.s && t.type === 'number') { p[t.dataset.s] = V.adminNum(t, S.admin.settings[t.dataset.s]); if (p[t.dataset.s] === null) return; }
+    else if (t.dataset.s) p[t.dataset.s] = t.dataset.s === 'transcodeMaxHeight' ? +t.value : t.value;
     else if (t.dataset.b) p[t.dataset.b] = t.checked;
     else return;
     V.adminSave(p).then(function () { if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }); });
@@ -425,7 +454,7 @@ V.adminTabs.recs = function (body, A) {
     '<section class="card-sec"><h2>How recommendations work</h2><p class="dim">Each profile’s picks are worked out on the server and saved on disk. They use what the profile watched (more weight for finished and recent things), thumbs up/down, My List and chosen interests; TMDB’s related titles; actors and directors you keep watching; titles several of your favourites point to; and what others in the household watch. Titles that keep being shown without being opened make way for new ones, and rows are re-ranked for variety.</p></section>';
   body.onclick = function (e) {
     if (e.target.closest('[data-save]')) V.adminSave({ tmdbKey: V.$('[data-key]', body).value }).then(function () { V.router.refresh(); });
-    if (e.target.closest('[data-test]')) V.api('/api/admin/tmdb/test', { method: 'POST' }).then(function (j) { V.toast(j.ok ? 'TMDB works' : 'TMDB: ' + j.error, { error: !j.ok }); });
+    if (e.target.closest('[data-test]')) V.api('/api/admin/tmdb/test', { method: 'POST' }).then(function (j) { V.toast(j.ok ? 'TMDB works' : 'TMDB: ' + j.error, { error: !j.ok }); }).catch(V.fail);
   };
   if (A.status.tmdb.enabled) V.tmdbFetchPanel(V.$('.tmdb-fetch', body));
 };
@@ -513,27 +542,33 @@ V.adminTabs.network = function (body, A) {
       '<button class="btn primary" data-save-d>Save</button></section>';
   };
   draw();
+  // Redraw without losing what's typed but not saved yet in the other sections (keep: their fields' attributes).
+  var redraw = function (keep) {
+    var vals = keep.map(function (a) { var el = V.$('[' + a + ']', body); return el ? el.value : null; });
+    draw();
+    keep.forEach(function (a, i) { var el = V.$('[' + a + ']', body); if (el && vals[i] !== null) el.value = vals[i]; });
+  };
   var collect = function () { V.$$('.proxies [data-i]', body).forEach(function (li) { var x = proxies[+li.dataset.i]; x.name = V.$('[data-k=name]', li).value; x.url = V.$('[data-k=url]', li).value.trim(); x.video = V.$('[data-k=video]', li).checked; }); };
   body.onclick = function (e) {
     var li = e.target.closest('[data-i]');
-    if (e.target.closest('[data-add]')) { collect(); proxies.push({ name: 'Proxy ' + (proxies.length + 1), url: '', video: false }); draw(); }
-    else if (li && e.target.closest('[data-rm]')) { collect(); proxies.splice(+li.dataset.i, 1); draw(); }
+    if (e.target.closest('[data-add]')) { collect(); proxies.push({ name: 'Proxy ' + (proxies.length + 1), url: '', video: false }); redraw(['data-relay-url', 'data-direct']); }
+    else if (li && e.target.closest('[data-rm]')) { collect(); proxies.splice(+li.dataset.i, 1); redraw(['data-relay-url', 'data-direct']); }
     else if (li && e.target.closest('[data-test]')) {
       collect();
       var x = proxies[+li.dataset.i], res = V.$('[data-res]', li);
       res.textContent = 'Testing…';
-      V.api('/api/admin/proxy/test', { body: { url: x.url, id: x.id } }).then(function (r) { res.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' Works · ' + r.ms + ' ms' + (r.ip ? ' · the internet sees ' + V.esc(r.ip) : '') : '<span class="err">' + V.esc(r.error || 'HTTP ' + r.status) + '</span>'; });
-    } else if (e.target.closest('[data-save-p]')) { collect(); V.adminSave({ proxies: proxies, proxy: V.$('[data-def]', body).value }, 'Saved — lists using a changed proxy refresh').then(function (r) { proxies = r.proxies.map(function (x) { return Object.assign({}, x); }); st = r; draw(); }); }
-    else if (e.target.closest('[data-relay-save]')) V.adminSave({ relay: { url: V.$('[data-relay-url]', body).value.trim(), all: V.$('[data-relay-all]', body).checked, proxy: V.$('[data-relay-proxy]', body).value } }, 'Saved').then(function (r) { st = r; draw(); });
-    else if (e.target.closest('[data-relay-off]')) V.confirm('Stop using the stream relay? Direct streams go straight to the providers again.', { ok: 'Stop using it' }).then(function (ok) { if (ok) V.adminSave({ relay: { url: '' } }, 'The stream relay is off').then(function (r) { st = r; draw(); }); });
-    else if (e.target.closest('[data-relay-new]')) V.confirm('Make a new secret? The relay stops working until you give it the new one.', { ok: 'Make a new secret', danger: true }).then(function (ok) { if (ok) V.adminSave({ relay: { newSecret: true } }, 'New secret made — copy it to the relay').then(function (r) { st = r; draw(); }); });
+      V.api('/api/admin/proxy/test', { body: { url: x.url, id: x.id } }).then(function (r) { res.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' Works · ' + r.ms + ' ms' + (r.ip ? ' · the internet sees ' + V.esc(r.ip) : '') : '<span class="err">' + V.esc(r.error || 'HTTP ' + r.status) + '</span>'; }).catch(function (er) { res.innerHTML = '<span class="err">' + V.esc(er.message) + '</span>'; });
+    } else if (e.target.closest('[data-save-p]')) { collect(); V.adminSave({ proxies: proxies, proxy: V.$('[data-def]', body).value }, 'Saved — lists using a changed proxy refresh').then(function (r) { proxies = (r.proxies || []).map(function (x) { return Object.assign({}, x); }); st = r; redraw(['data-relay-url', 'data-direct']); }).catch(function () {}); }
+    else if (e.target.closest('[data-relay-save]')) V.adminSave({ relay: { url: V.$('[data-relay-url]', body).value.trim(), all: V.$('[data-relay-all]', body).checked, proxy: V.$('[data-relay-proxy]', body).value } }, 'Saved').then(function (r) { st = r; redraw(['data-direct']); }).catch(function () {});
+    else if (e.target.closest('[data-relay-off]')) V.confirm('Stop using the stream relay? Direct streams go straight to the providers again.', { ok: 'Stop using it' }).then(function (ok) { if (ok) V.adminSave({ relay: { url: '' } }, 'The stream relay is off').then(function (r) { st = r; redraw(['data-direct']); }).catch(function () {}); });
+    else if (e.target.closest('[data-relay-new]')) V.confirm('Make a new secret? The relay stops working until you give it the new one.', { ok: 'Make a new secret', danger: true }).then(function (ok) { if (ok) V.adminSave({ relay: { newSecret: true } }, 'New secret made — copy it to the relay').then(function (r) { st = r; redraw(['data-relay-url', 'data-direct']); }).catch(function () {}); });
     else if (e.target.closest('[data-relay-copy]')) V.api('/api/admin/relay/secret').then(function (r) { V.copy(r.secret, 'Secret copied — paste it into the relay’s RELAY_SECRET'); }).catch(V.fail);
     else if (e.target.closest('[data-relay-test]')) { var rr = V.$('[data-relay-res]', body); rr.textContent = 'Testing…'; V.api('/api/admin/relay/test', { method: 'POST' }).then(function (r) { rr.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' The relay works (' + r.ms + ' ms' + (r.streams ? ', ' + V.plural(r.streams, 'stream') + ' playing through it' : '') + (r.films ? ', ' + V.plural(r.films, 'film') + ' on its disk' : '') + ')' + (r.outdated ? ' <span class="warn">It runs version ' + V.esc(String(r.version)) + '; this server has ' + V.esc(r.latest) + '.</span> <button class="btn sm primary" data-relay-update>Update the relay</button>' : '') +
         // Its proxies: what providers will see.
         (r.proxies ? '<span class="relay-px">' + (r.ownIp ? '<br>' + V.icon('info', 'tiny') + ' The relay’s own address: ' + V.esc(r.ownIp) : '') + r.proxies.map(function (x) { return '<br>' + (x.ok ? V.icon('check', 'tiny ok') + ' Through ' + V.esc(x.name) + ': works · ' + x.ms + ' ms · providers see ' + V.esc(x.ip || '?') : '<span class="err">Through ' + V.esc(x.name) + ': ' + V.esc(x.error) + '</span>'); }).join('') + '</span>' : '') +
         (r.proxyNote ? '<br><span class="dim">' + V.esc(r.proxyNote) + '</span>' : '') : '<span class="err">' + V.esc(r.error) + '</span>'; }).catch(V.fail); }
-    else if (e.target.closest('[data-relay-update]')) { var ru = V.$('[data-relay-res]', body); ru.textContent = 'Updating the relay…'; V.api('/api/admin/relay/update', { method: 'POST' }).then(function (r) { if (!r.ok) { ru.innerHTML = '<span class="err">' + V.esc(r.error) + '</span>'; return; } ru.textContent = 'Updated to version ' + r.to + ' — it’s restarting…'; setTimeout(function () { var t = V.$('[data-relay-test]', body); if (t) t.click(); }, 6000); }).catch(V.fail); }
-    else if (e.target.closest('[data-save-d]')) V.adminSave({ directAddress: V.$('[data-direct]', body).value.trim(), directSwitch: V.$('[data-dmode]', body).value }).then(function (r) { st = r; S.settings.directAddress = r.directAddress; S.settings.directSwitch = r.directSwitch; draw(); });
+    else if (e.target.closest('[data-relay-update]')) { var ru = V.$('[data-relay-res]', body); ru.textContent = 'Updating the relay…'; V.api('/api/admin/relay/update', { method: 'POST' }).then(function (r) { if (!r.ok) { ru.innerHTML = '<span class="err">' + V.esc(r.error) + '</span>'; return; } ru.textContent = 'Updated to version ' + r.to + ' — it’s restarting…'; setTimeout(function () { var t = V.$('[data-relay-test]', body); if (t && body.isConnected) t.click(); }, 6000); }).catch(function (er) { ru.textContent = ''; V.fail(er); }); }
+    else if (e.target.closest('[data-save-d]')) V.adminSave({ directAddress: V.$('[data-direct]', body).value.trim(), directSwitch: V.$('[data-dmode]', body).value }).then(function (r) { st = r; S.settings.directAddress = r.directAddress; S.settings.directSwitch = r.directSwitch; redraw(['data-relay-url']); }).catch(function () {});
   };
 };
 
@@ -558,16 +593,25 @@ V.adminTabs.categories = function (body, A) {
     if (box) box.innerHTML = groups.filter(function (g) { return !nq || V.norm(g.name).indexOf(nq) >= 0; }).slice(0, 600).map(function (g) { var t = Object.keys(g.types).map(function (k) { return g.types[k] + ' ' + (V.TYPE_NAMES[k] || k).toLowerCase(); }).join(', '); return '<button class="chip sm" data-use="' + V.esc(g.name) + '" title="Make a rule for this">' + V.esc(g.name) + ' <small>' + V.esc(t) + '</small></button>'; }).join(' ');
   };
   var collect = function () { V.$$('.rules [data-i]', body).forEach(function (tr) { var r = rules[+tr.dataset.i]; r.match = V.$('[data-k=match]', tr).value.trim(); r.to = V.$('[data-k=to]', tr).value.trim(); r.hide = V.$('[data-k=hide]', tr).checked; var t = V.$('[data-k=types]', tr).value; r.types = t ? [t] : []; }); };
-  V.api('/api/admin/groups').then(function (g) { groups = g.groups; draw(); });
+  // (collect first: rules typed while the category names were loading aren't lost.)
+  V.api('/api/admin/groups').then(function (g) { groups = g.groups; collect(); draw(); }).catch(V.fail);
   draw();
   body.onclick = function (e) {
     var tr = e.target.closest('[data-i]');
     if (e.target.closest('[data-add]')) { collect(); rules.push({ match: '', to: '', hide: false, types: [] }); draw(); }
     else if (tr && e.target.closest('[data-rm]')) { collect(); rules.splice(+tr.dataset.i, 1); draw(); }
     else if (e.target.closest('[data-use]')) { collect(); rules.push({ match: e.target.closest('[data-use]').dataset.use, to: '', hide: false, types: [] }); draw(); var last = V.$$('.rules [data-k=to]', body).pop(); if (last) last.focus(); }
-    else if (e.target.closest('[data-save]')) { collect(); V.adminSave({ groupRules: rules.filter(function (r) { return r.match; }), tidyGroups: V.$('[data-tidy]', body).checked }, 'Saved — the catalogue is being rebuilt').then(function (r) { st = r; rules = (r.groupRules || []).map(function (x) { return Object.assign({}, x); }); setTimeout(function () { V.api('/api/admin/groups').then(function (g) { groups = g.groups; draw(); }); }, 4000); }); }
+    else if (e.target.closest('[data-save]')) { collect(); V.adminSave({ groupRules: rules.filter(function (r) { return r.match; }), tidyGroups: V.$('[data-tidy]', body).checked }, 'Saved — the catalogue is being rebuilt').then(function (r) {
+      st = r; rules = (r.groupRules || []).map(function (x) { return Object.assign({}, x); });
+      draw(); // (now the rows match the saved rules, so later edits are collected onto the right ones)
+      setTimeout(function () { V.api('/api/admin/groups').then(function (g) { groups = g.groups; collect(); draw(); }).catch(function () {}); }, 4000);
+    }).catch(function () {}); }
   };
-  body.onchange = function (e) { if (e.target.dataset.k === 'hide') { var to = V.$('[data-k=to]', e.target.closest('tr')); to.disabled = e.target.checked; } if (e.target.hasAttribute('data-tidy')) V.adminSave({ tidyGroups: e.target.checked }, 'Saved — the catalogue is being rebuilt'); };
+  body.onchange = function (e) {
+    if (e.target.dataset.k === 'hide') { var to = V.$('[data-k=to]', e.target.closest('tr')); to.disabled = e.target.checked; }
+    // (Remembered here too: a redraw — adding a rule — would otherwise tick it again, and "Save and rebuild" turn it back on.)
+    if (e.target.hasAttribute('data-tidy')) { var on = e.target.checked; V.adminSave({ tidyGroups: on }, 'Saved — the catalogue is being rebuilt').then(function (r) { st = r; }).catch(function () { st.tidyGroups = !on; var c = V.$('[data-tidy]', body); if (c) c.checked = !on; }); st.tidyGroups = on; }
+  };
   body.oninput = V.debounce(function (e) { if (e.target.hasAttribute('data-f')) listNow(e.target.value); }, 150);
 };
 
@@ -605,7 +649,7 @@ V.adminTabs.security = function (body, A) {
     '<section class="card-sec"><h2>Addresses this server answers to</h2><p class="dim">IP addresses, localhost and local names (.local/.lan) always work. While the site password is the default, other names (like a domain behind a reverse proxy) must be listed here or in the ALLOWED_HOSTS setting — this blocks “DNS rebinding” attacks.</p><label class="field"><span>Extra host names (one per line)</span><textarea class="input" rows="3" data-hosts>' + V.esc((A.settings.allowedHosts || []).join('\n')) + '</textarea></label><button class="btn" data-a="hosts">Save</button></section>';
   body.onclick = function (e) {
     var b = e.target.closest('[data-a]'), end = e.target.closest('[data-end]');
-    if (end) return V.del('/api/admin/devices/' + end.dataset.end).then(function () { V.router.refresh(); });
+    if (end) { end.disabled = true; return V.del('/api/admin/devices/' + end.dataset.end).then(function () { V.router.refresh(); }).catch(function (x) { end.disabled = false; V.fail(x); }); }
     if (!b) return;
     if (b.dataset.a === 'prune') return V.api('/api/admin/devices/prune', { body: { days: 30 } }).then(function (r) { V.toast('Signed out ' + V.plural(r.removed, 'device')); V.router.refresh(); }).catch(V.fail);
     if (b.dataset.a === 'pw') {
@@ -632,7 +676,7 @@ V.adminTabs.apps = function (body, A) {
   var loadBackups = function () {
     V.api('/api/admin/backups').then(function (r) {
       V.$('.backups', body).innerHTML = r.list.length ? r.list.map(function (b) { return '<li>' + V.icon('archive', 'tiny') + ' <b>' + V.esc(b.name.replace(/^backup-|\.json\.gz$/g, '').replace(/-manual-(\d\d)(\d\d)/, ' (made by hand at $1:$2)')) + '</b> <span class="dim">· ' + V.fmtSize(b.size) + '</span> <a class="btn sm" href="/api/admin/backups/' + encodeURIComponent(b.name) + '">Download</a> <button class="btn sm" data-brestore="' + V.esc(b.name) + '">Restore</button> <button class="icon-btn sm" data-bdel="' + V.esc(b.name) + '" aria-label="Delete">' + V.icon('trash') + '</button></li>'; }).join('') : '<li class="dim">No backups yet — the first nightly one is made after 3 am.</li>';
-    }).catch(function () {});
+    }).catch(function (e) { var ul = V.$('.backups', body); if (ul) ul.innerHTML = '<li class="err">' + V.esc(e.message) + '</li>'; }); // (not "Loading…" forever)
   };
   var loadUpdate = function () {
     V.api('/api/admin/update').then(function (u) {
@@ -644,15 +688,17 @@ V.adminTabs.apps = function (body, A) {
   loadBackups(); loadUpdate();
   body.onclick = function (e) {
     var c = e.target.closest('[data-copy]'); if (c) V.copy(c.dataset.copy);
-    if (e.target.closest('[data-bnow]')) V.api('/api/admin/backups', { method: 'POST' }).then(function () { V.toast('Backup made'); loadBackups(); }).catch(V.fail);
+    var bn = e.target.closest('[data-bnow]');
+    if (bn) { bn.disabled = true; V.api('/api/admin/backups', { method: 'POST' }).then(function () { V.toast('Backup made'); loadBackups(); }).catch(V.fail).then(function () { bn.disabled = false; }); }
     var br = e.target.closest('[data-brestore]');
     if (br) V.confirm('Replace everything on this server with the backup from ' + br.dataset.brestore + '?', { ok: 'Restore', danger: true }).then(function (ok) { if (ok) V.api('/api/admin/backups/' + encodeURIComponent(br.dataset.brestore) + '/restore', { method: 'POST' }).then(function () { V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 6000); }).catch(V.fail); });
     var bd = e.target.closest('[data-bdel]');
-    if (bd) V.confirm('Delete the backup ' + bd.dataset.bdel + '?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/backups/' + encodeURIComponent(bd.dataset.bdel)).then(loadBackups); });
+    if (bd) V.confirm('Delete the backup ' + bd.dataset.bdel + '?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/backups/' + encodeURIComponent(bd.dataset.bdel)).then(loadBackups).catch(V.fail); });
     if (e.target.closest('[data-newkey]')) V.confirm('Make a new key? Apps using the old addresses stop working.', { ok: 'New key', danger: true }).then(function (ok) { if (ok) V.adminSave({ newExportKey: true }).then(function () { V.router.refresh(); }); });
   };
   body.onchange = function (e) {
-    if (e.target.hasAttribute('data-bdays')) { V.adminSave({ backupDays: +e.target.value }); return; }
+    // (An emptied field would save 0 = no nightly backups at all.)
+    if (e.target.hasAttribute('data-bdays')) { var bdays = V.adminNum(e.target, S.admin.settings.backupDays === undefined ? 7 : S.admin.settings.backupDays); if (bdays !== null) V.adminSave({ backupDays: bdays }).catch(function () {}); return; }
     if (e.target.dataset.update !== undefined) {
       var z = e.target.files[0];
       if (!z) return;

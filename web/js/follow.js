@@ -57,9 +57,10 @@
         onOpen: function (d) {
           d.addEventListener('click', function (e) {
             var b = e.target.closest('.fol-chip');
-            if (!b) return;
+            if (!b || b._busy) return;
+            b._busy = true; // (a double click doesn't follow and unfollow again)
             var o = opts[+b.dataset.i];
-            toggle(o.kind, o.n, !follows(o.kind, o.n)).then(function (on) { b.setAttribute('aria-pressed', on); b.querySelector('.i').outerHTML = V.icon(on ? 'starf' : 'star'); }).catch(V.fail);
+            toggle(o.kind, o.n, !follows(o.kind, o.n)).then(function (on) { b._busy = false; b.setAttribute('aria-pressed', on); b.querySelector('.i').outerHTML = V.icon(on ? 'starf' : 'star'); }, function (e) { b._busy = false; V.fail(e); });
           });
           var f = d.querySelector('.fol-chip');
           if (f) setTimeout(function () { f.focus(); }, 40);
@@ -203,18 +204,24 @@
     getConf(true).then(function () { drawMine(); ask(); }).catch(function (e) { mine.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
     input.addEventListener('input', V.debounce(ask, 200));
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var f = V.$('.fol-chip', sugBox); if (f) f.focus(); } });
+    var busy = false; // (one change at a time: a double click doesn't follow and unfollow again)
+    var done = function () { busy = false; };
     view.addEventListener('click', function (e) {
+      if (busy && e.target.closest('[data-s], [data-add], [data-unf]')) return;
       var s = e.target.closest('[data-s]');
-      if (s) { var o = sug[+s.dataset.s]; toggle(o.kind, o.n, !follows(o.kind, o.n)).then(function () { drawSug(); drawMine(); var again = V.$('[data-s="' + s.dataset.s + '"]', sugBox); if (again) again.focus(); }).catch(V.fail); return; }
+      if (s) { busy = true; var o = sug[+s.dataset.s]; toggle(o.kind, o.n, !follows(o.kind, o.n)).then(function () { done(); drawSug(); drawMine(); var again = V.$('[data-s="' + s.dataset.s + '"]', sugBox); if (again) again.focus(); }, function (e) { done(); V.fail(e); }); return; }
       var a = e.target.closest('[data-add]');
-      if (a) { toggle('team', input.value.trim(), true).then(function () { drawMine(); drawSug(); }).catch(V.fail); return; }
+      if (a) { busy = true; toggle('team', input.value.trim(), true).then(function () { done(); drawMine(); drawSug(); input.focus(); }, function (e) { done(); V.fail(e); }); return; }
       var u = e.target.closest('[data-unf]');
-      if (u) toggle(u.dataset.unf, u.dataset.n, false).then(function () { drawMine(); drawSug(); var f = V.$('[data-unf]', mine) || input; f.focus(); }).catch(V.fail);
+      if (u) { busy = true; toggle(u.dataset.unf, u.dataset.n, false).then(function () { done(); drawMine(); drawSug(); var f = V.$('[data-unf]', mine) || input; f.focus(); }, function (e) { done(); V.fail(e); }); }
     });
     view.addEventListener('change', function (e) {
       if (!e.target.matches('[data-auto], [data-swc]')) return;
-      var body = e.target.hasAttribute('data-auto') ? { auto: e.target.checked } : { sw: e.target.checked };
-      V.put('/api/follow', body).then(function (c) { setConf(c); drawMine(); V.toast('Saved'); }).catch(V.fail);
+      var auto = e.target.hasAttribute('data-auto'), was = e.target.checked;
+      var body = auto ? { auto: was } : { sw: was };
+      // (Drawn again with the answer: the focus stays on the switch, for a remote.)
+      var refocus = function () { var f = V.$(auto ? '[data-auto]' : '[data-swc]', swBox); if (f) f.focus(); };
+      V.put('/api/follow', body).then(function (c) { setConf(c); drawMine(); refocus(); V.toast('Saved'); }, function (err) { e.target.checked = !was; V.fail(err); });
     });
   });
 

@@ -70,6 +70,9 @@
     } else {
       // Left/right: things on the same line come first, so Right along the header doesn't drop into the page below.
       cands.forEach(function (c) { var q = c.r; c.band = q.bottom >= cur.top && q.top <= cur.bottom ? 0 : 1; });
+      // At the left/right edge of the page (the Live TV groups, say), stay put rather than jump up into the header
+      // bar: Up gets there.
+      if (!from.closest('#topbar')) cands = cands.filter(function (c) { return !c.band || !c.el.closest('#topbar'); });
       // At the end of a row of cards, chips or tabs, stay put rather than jumping to another line (or a pop-up note).
       if (row) cands = cands.filter(function (c) { return row.contains(c.el) || (!c.band && !c.el.closest('#toasts')); });
       cands.sort(function (a, b) { return a.band - b.band || a.d - b.d; });
@@ -88,6 +91,14 @@
     }
     return false;
   }
+  // Where focus last was (page position), for when what had it disappears.
+  var last = null;
+  document.addEventListener('focusin', function (e) {
+    var el = e.target;
+    if (!el || el === document.body || !el.getBoundingClientRect) return;
+    var q = rectOf(el);
+    last = { x: q.left + q.width / 2, y: q.top + q.height / 2 + window.pageYOffset, hash: location.hash, root: scope() };
+  }, true);
   V.reduceMotion = function () { return document.documentElement.classList.contains('reduce-motion') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); };
   document.addEventListener('keydown', function (e) {
     var k = e.key;
@@ -106,7 +117,8 @@
       var pl = V.$('#player-layer');
       if (pl && !pl.hidden && !pl.classList.contains('mini')) return;
       e.preventDefault();
-      if (location.hash && location.hash !== '#/home') history.back();
+      // (Opened straight on this page, with nothing of the app's to go back to: Home, rather than leaving the app.)
+      if (location.hash && location.hash !== '#/home') V.router.back('#/home');
       return;
     }
     if (k === '/' && !t.closest('input, textarea, select, [contenteditable]') && S.profile && V.$('#player-layer').hidden !== false) { e.preventDefault(); V.router.go('#/search'); return; }
@@ -139,7 +151,15 @@
     var from = t && t !== document.body ? t : null;
     if (!from) {
       var root = scope();
-      var first = V.$$(root === document.body ? '#view button, #view a, #view .card' : SEL, root).filter(visible)[0];
+      var list = V.$$(root === document.body ? '#view button, #view a, #view .card' : SEL, root).filter(visible);
+      if (!list.length) list = V.$$(SEL, root).filter(visible); // (a page with nothing in it yet: the header, so the remote isn't stuck)
+      // Focus was lost because what had it was drawn again (a list refreshed after removing something, a pop-up
+      // note closing): carry on from the nearest thing to where it was, rather than jumping back to the top.
+      var first = list[0];
+      if (last && last.hash === location.hash && last.root === root) {
+        var bestD = Infinity;
+        list.forEach(function (el) { var q = rectOf(el), dx = q.left + q.width / 2 - last.x, dy = q.top + q.height / 2 + window.pageYOffset - last.y, dd = dx * dx + dy * dy; if (dd < bestD) { bestD = dd; first = el; } });
+      }
       if (first) { first.focus(); e.preventDefault(); }
       return;
     }

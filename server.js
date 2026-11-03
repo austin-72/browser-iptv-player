@@ -6,7 +6,8 @@
 // higher limit (60% of the machine's memory, between 4 and 12 GB; MAX_MEMORY_MB sets it). While the server starts or
 // restarts, the front shows visitors "Back in a moment"; when it stops by itself (an update), the front starts it
 // again. NO_RESPAWN=1 (or NO_FRONT=1) turns this off and runs the server directly.
-if (!process.env.IPTV_CHILD && !process.env.NO_RESPAWN && !process.env.NO_FRONT) {
+// (A one-off command — --set-password — runs on its own, not as a server the front would start again and again.)
+if (!process.env.IPTV_CHILD && !process.env.NO_RESPAWN && !process.env.NO_FRONT && !process.argv.includes('--set-password')) {
   const v8 = require('v8');
   const want = Number(process.env.MAX_MEMORY_MB) || Math.max(4096, Math.min(12288, Math.floor(require('os').totalmem() / 1048576 * 0.6)));
   const have = v8.getHeapStatistics().heap_size_limit / 1048576;
@@ -54,6 +55,7 @@ const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
 const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId, acctId } = require('./lib/streamrelay');
+const frontLink = require('./lib/front'); // (telling the front when this server is about to stop)
 
 let L = { names: {}, list: () => [] };
 try { L = require('./lib/langs'); } catch {}
@@ -373,8 +375,37 @@ function sendJsonGz(req, res, obj) {
 const LOCAL_MEDIA = /\.(mp4|m4v|mkv|avi|mov|webm|wmv|flv|mpg|mpeg|ts|m2ts|mts|vob|3gp|ogv|divx|mp3|m4a|aac|flac|ogg|oga|opus|wav|wma|asf|rm|rmvb)$/i;
 const NATIVE_EXT = /\.(mp4|m4v|webm|mp3|m4a|aac|flac|ogg|oga|opus|wav)$/i;
 const secureReq = (req) => !!req.socket.encrypted || (cfg.trustProxy && /^https/i.test(req.headers['x-forwarded-proto'] || ''));
-const clientIp = (req) => (cfg.trustProxy && (req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '';
+// Behind a proxy, the address it added is the last one in X-Forwarded-For; anything before it came from the visitor
+// and could be made up (say, a local-network address to reach the tuner, or a new one per guess to dodge sign-in
+// limits). So: reading from the end, the first address that isn't a proxy of ours — not a local one, and not
+// Cloudflare's (in front of a local nginx/Caddy/Traefik it's a hop too) — or the first if they're all local (a
+// visitor on the home network).
+const CLOUDFLARE = ['173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22']
+  .map((c) => { const [a, n] = c.split('/'); return [a.split('.').reduce((x, o) => x * 256 + Number(o), 0), 2 ** (32 - Number(n))]; });
+const CLOUDFLARE6 = /^(2400:cb00|2606:4700|2803:f800|2405:b500|2405:8100|2a06:98c[0-7]|2c0f:f248):/i;
+function cloudflareIp(ip) {
+  const v = String(ip || '').replace(/^::ffff:/, '');
+  if (CLOUDFLARE6.test(v)) return true;
+  const m = v.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const n = ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4];
+  return CLOUDFLARE.some(([a, size]) => n >= a && n < a + size);
+}
+const clientIp = (req) => {
+  const peer = req.socket.remoteAddress || '';
+  if (!cfg.trustProxy) return peer;
+  const hops = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!hops.length) return peer;
+  const { privateIp } = require('./lib/outputs');
+  for (let i = hops.length - 1; i >= 0; i--) if (!privateIp(hops[i]) && !cloudflareIp(hops[i])) return hops[i];
+  return hops[0];
+};
 
+/** A JSON body that must be an object (`null`, a number or a string become {} instead of a crash further on). */
+async function readObj(req) {
+  const b = await readJSON(req);
+  return b && typeof b === 'object' && !Array.isArray(b) ? b : {};
+}
 function requireProfile(ctx) {
   if (!ctx.profile) throw new HttpError(403, 'Choose a profile first.');
   return ctx.profile;
@@ -422,13 +453,14 @@ const route = (method, pattern, handler, level = 'profile') => {
 
 // ---- sign in (site password)
 route('POST', '/api/login', async (req, res) => {
-  const { password } = await readJSON(req);
+  const { password } = await readObj(req);
   const token = accounts.login(password, clientIp(req), req.headers['user-agent']);
   res.setHeader('Set-Cookie', accounts.cookie(token, secureReq(req)));
   return { ok: true };
 }, 'public');
 route('POST', '/api/logout', (req, res) => {
   accounts.logout(req);
+  dropStaleConns(); // (this device's live connection too: it stops getting the profile's messages and commands)
   res.setHeader('Set-Cookie', accounts.clearCookie());
   return { ok: true };
 }, 'site');
@@ -446,14 +478,14 @@ route('GET', '/api/boot', (req, res, p, q, ctx) => ({
   languages: L.list ? L.list() : [],
 }), 'site');
 route('POST', '/api/profiles', async (req, res, p, q, ctx) => {
-  const b = await readJSON(req);
+  const b = await readObj(req);
   const prof = accounts.create(b, ctx.sess, settings());
   if (accounts.profiles.length === 1) { accounts.select(ctx.sess, prof.id, String(b.pin || '')); }
   hub.toAll('profiles', {});
   return accounts.summary(prof);
 }, 'site');
 route('POST', '/api/profiles/:id/select', async (req, res, p, q, ctx) => {
-  const { pin, remember } = await readJSON(req);
+  const { pin, remember } = await readObj(req);
   const prof = accounts.select(ctx.sess, p.id, pin === undefined ? undefined : String(pin), remember !== false);
   p5.onSignIn(prof, ctx.sess);
   return { ok: true, profile: accounts.view(prof) };
@@ -471,11 +503,12 @@ route('GET', '/api/me', (req, res, p, q, ctx) => {
 });
 route('PUT', '/api/me', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   const allowed = ['name', 'avatar', 'langs', 'unknownLang', 'interests', 'pin', 'currentPin'];
   const patch = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
   if (prof.kids && ('langs' in patch || 'unknownLang' in patch) && !prof.admin) { /* kids may still choose languages */ }
-  accounts.update(prof.id, patch, { self: true });
+  accounts.update(prof.id, patch, { self: true, sess: ctx.sess });
+  if ('pin' in patch) dropStaleConns(); // (other devices that knew the old PIN)
   if ('langs' in patch || 'unknownLang' in patch || 'interests' in patch) recs.touch(prof.id, 2000);
   hub.toAll('profiles', {});
   return accounts.view(prof);
@@ -508,10 +541,11 @@ route('GET', '/api/avatar/:pid', (req, res, p) => {
 route('PUT', '/api/me/prefs', async (req, res, p, q, ctx) => { const prof = requireProfile(ctx); const r = userdata.setPrefs(prof.id, await readJSON(req)); changed(ctx, prof, 'prefs'); return r; });
 route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const { pin } = await readJSON(req);
+  const { pin } = await readObj(req);
   if (prof.admin) throw new HttpError(400, 'The admin profile can’t be removed. Make someone else the admin first.');
-  if (!accounts.checkPin(prof.id, pin)) throw new HttpError(403, 'Wrong PIN.');
+  if (!accounts.checkPin(prof.id, pin, ctx.sess)) throw new HttpError(403, 'Wrong PIN.');
   accounts.remove(prof.id); userdata.remove(prof.id); social.forgetProfile(prof.id);
+  dropStaleConns(); // (its other devices' live connections)
   hub.toAll('profiles', {});
   return { ok: true };
 });
@@ -779,7 +813,9 @@ route('GET', '/api/epg/now', (req, res, p, q, ctx) => {
   const now = Date.now();
   const out = {};
   for (const it of epgVisible(prof)) {
-    const list = epg.range(it.epg, now - 3 * 3600e3, now + 8 * 3600e3);
+    // (In the guide's own times: a channel shown some hours shifted needs its window moved by as much.)
+    const sh = chanShift(it);
+    const list = epg.range(it.epg, now - 3 * 3600e3 - sh, now + 8 * 3600e3 - sh);
     if (list.length) out[it.k] = list.map(progOut);
   }
   const raw = Buffer.from(JSON.stringify({ at: now, p: out }));
@@ -791,9 +827,12 @@ route('GET', '/api/epg/now', (req, res, p, q, ctx) => {
 route('GET', '/api/epg/range', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const from = Number(q.get('from')) || Date.now() - 3600e3;
-  const to = Math.min(Number(q.get('to')) || from + 6 * 3600e3, from + 3 * 86400e3);
+  const keys = String(q.get('keys') || '').split(',').slice(0, 400);
+  // At most 3 days at a time for many channels (the guide); a channel's own page asks for its catch-up week too (it
+  // used to get only the oldest 3 days of that, so it said "No guide information").
+  const to = Math.min(Number(q.get('to')) || from + 6 * 3600e3, from + (keys.length <= 4 ? 12 : 3) * 86400e3);
   const out = {};
-  for (const k of String(q.get('keys') || '').split(',').slice(0, 400)) {
+  for (const k of keys) {
     const it = catalog.visible(prof, k);
     if (it && it.epg && !(overrides.hasLocks && overrides.isLocked(it) && !overrides.allowed(ctx))) out[k] = epg.range(it.epg, from, to).map(progOut);
   }
@@ -826,7 +865,7 @@ route('POST', '/api/progress', async (req, res, p, q, ctx) => {
 });
 route('POST', '/api/played', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   userdata.played(prof.id, b);
   recs.touch(prof.id);
   changed(ctx, prof, 'history');
@@ -932,9 +971,12 @@ function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it
 /** Streams the household is watching right now from each list (direct or through the server). */
 /** Filled in by lib/routes-p12.js (the DVR): recordings running now, and "rec:<id>" items. */
 const dvrHooks = { dvrConns: null, dvrItem: null, dvrOwnerOk: null };
+// Live TV that other apps (Plex, Jellyfin… through the HDHomeRun tuner) are watching right now: set once the
+// outputs exist (lib/routes-p4.js).
+let otherAppConns = () => [];
 function listUsage() {
-  // (Recordings running now hold a provider connection too.)
-  const conns = dvrHooks.dvrConns ? [...hub.conns, ...dvrHooks.dvrConns()] : hub.conns;
+  // (Recordings running now, and other apps' tuner streams, hold a provider connection too.)
+  const conns = [...hub.conns, ...(dvrHooks.dvrConns ? dvrHooks.dvrConns() : []), ...otherAppConns()];
   return usageOf(conns, { listOf: (k, alt) => { const it = catalog.get(k); return it ? srcList(it, alt) : ''; }, sharedPartyOf: p2Hooks.sharedPartyOf, freed: relayFinished.freed, pooled: relayFinished.pooled });
 }
 // Connections in use per provider, every minute (Admin → Statistics → Watching at once).
@@ -957,6 +999,7 @@ const concurrency = new Concurrency(D, {
  */
 const relayFinished = (() => {
   let done = new Set(), busy = false, downloading = false, v5 = false, seq = 0, runs = new Map(), timer = null;
+  let serving = new Set(); // films the relay is actually fetching or serving for someone (only those share its connections)
   // Just started (a restart): not every device has said what it's watching yet, so for a minute the relay keeps the
   // shares it had — it mustn't take a connection a live viewer is still using.
   const bootAt = Date.now();
@@ -1001,6 +1044,10 @@ const relayFinished = (() => {
       done = next;
       downloading = j.films.some((f) => f.downloading);
       v5 = Number(j.version) >= 5;
+      const sv = new Set();
+      for (const f of j.films) if (f.readers > 0 || f.downloading) for (const i of f.ids || []) sv.add(i);
+      serving = sv;
+      if ((Number(j.seq) || 0) < seq) seq = 0; // (the relay started again: its numbering too)
       // Which list each account id is (the relay only knows the ids).
       const byAcct = new Map(lists.all().map((l) => [acctId(l.id), l.id]));
       runs = new Map();
@@ -1022,14 +1069,27 @@ const relayFinished = (() => {
       if (!done.size || !pl || !pl.k) return false;
       return done.has(playId(pl.k, Number.isInteger(pl.alt) ? pl.alt : -1));
     },
-    /** A film the relay 5 fetches whole (it shares the account's connections with the others). */
-    pooled: (pl) => v5 && !!isFilm(pl),
-    /** Whether a new film from this list would join the relay's shared connections. */
-    joins: (it, alt) => v5 && (it.t === 'movie' || it.t === 'episode') && relayOf.uses(srcList(it, alt)),
+    /**
+     * A film the relay 5 fetches whole for this play (it shares the account's connections with the others) — going by
+     * what the relay itself reports, so a film that plays some other way (HLS, through this server, a watch party)
+     * still counts as a connection of its own.
+     */
+    pooled: (pl) => { if (!v5 || !isFilm(pl)) return false; return serving.has(playId(pl.k, Number.isInteger(pl.alt) ? pl.alt : -1)); },
+    /** Whether a new film from this list would join the relay's shared connections (not an HLS one: those aren't whole). */
+    joins: (it, alt) => {
+      if (!v5 || !(it.t === 'movie' || it.t === 'episode') || !relayOf.uses(srcList(it, alt))) return false;
+      const u = alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].u : it.u;
+      return kindOfUrl(u) !== 'hls';
+    },
     /** Connections the relay uses for a list beyond the one its films count as. */
     extra: (listId) => Math.max(0, (runs.get(listId) || 0) - 1),
     /** Something started or stopped: tell the relay soon (a live channel on the same account takes a connection). */
-    poke: () => { if (poked || !relayOf.conf()) return; poked = setTimeout(() => { poked = null; poll().catch(() => {}); }, 3000); poked.unref(); },
+    poke: (now) => {
+      if (!relayOf.conf()) return;
+      if (now) { clearTimeout(poked); poked = null; poll().catch(() => {}); return; } // (someone is about to start: tell the relay at once)
+      if (poked) return;
+      poked = setTimeout(() => { poked = null; poll().catch(() => {}); }, 3000); poked.unref();
+    },
   };
 })();
 /** Filled in by feature modules (lib/routes-p2.js): watch-party connection sharing. */
@@ -1103,29 +1163,35 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   // Priority profiles: when a provider has no free connection, a priority viewer takes one from someone on a standard
   // profile (their player stops and says who needed it). Standard viewers can't take one from a priority viewer.
   const mePri = !!prof.priority;
-  const isPri = (c) => !!(accounts.profile(c.pid) || {}).priority;
+  // (The films the stream relay shares connections for count as one entry: its plays are in `viewers`.)
+  const members = (c) => (c.relayShared ? c.viewers : [c]);
+  const isPri = (c) => members(c).some((v) => !!(accounts.profile(v.pid) || {}).priority);
+  const mineOnly = (c) => members(c).every((v) => v.id === ctx.conn && !v.tile);
   for (const alt of copies) {
     const lid = srcList(it, alt);
     const l = lid && lists.all().find((x) => x.id === lid);
     const url = alt >= 0 ? it.alts[alt].u : it.u;
     const limit = connLimit(it, alt);
     const joins = relayFinished.joins(it, alt); // (a film the relay shares connections for: the others don't hold it up)
-    const users = (use.get(lid) || []).filter((c) => !(c.id === ctx.conn && !c.tile) && !(joins && c.relayShared)); // (this device's multiview tiles do count)
+    const users = (use.get(lid) || []).filter((c) => !mineOnly(c) && !(joins && c.relayShared)); // (this device's multiview tiles do count)
     let busy = limit > 0 && users.length >= limit;
     const who = (c) => ({ conn: c.id, pid: c.pid, name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n, k: c.playing.k, tile: !!c.tile, mine: c.pid === prof.id, priority: isPri(c) });
+    // (Taking the relay's shared connection back means stopping every film on it.)
+    const whoAll = (c) => members(c).map((v) => who({ ...c, id: v.id, pid: v.pid, tile: v.tile, relayShared: false }));
     let bump = [], locked = false;
     if (busy) {
       const need = users.length - limit + 1;
       // Your own other devices first, then whoever started watching most recently.
       // (A recording is never bumped.)
-      const standard = users.filter((c) => !c.rec && !isPri(c) && c.pid !== prof.id);
-      const own = users.filter((c) => !c.rec && c.pid === prof.id);
+      const ownAll = (c) => members(c).every((v) => v.pid === prof.id);
+      const standard = users.filter((c) => !c.rec && !isPri(c) && !ownAll(c));
+      const own = users.filter((c) => !c.rec && ownAll(c));
       if (mePri && own.length + standard.length >= need) {
-        bump = [...own, ...standard.slice().sort((p1, p2) => (p2.playing.at || 0) - (p1.playing.at || 0))].slice(0, need).map(who);
+        bump = [].concat(...[...own, ...standard.slice().sort((p1, p2) => (p2.playing.at || 0) - (p1.playing.at || 0))].slice(0, need).map(whoAll));
         busy = false;
       } else if (!mePri) {
         // Taking over is only possible from standard viewers (or yourself).
-        locked = users.filter((c) => !c.rec && (!isPri(c) || c.pid === prof.id)).length < need;
+        locked = users.filter((c) => !c.rec && (!isPri(c) || ownAll(c))).length < need;
       }
     }
     const mixed = https && /^http:/i.test(url || '') && !b.mixedOk;
@@ -1141,6 +1207,8 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   const hr = p9Hooks.rank ? p9Hooks.rank(it) : null;
   const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (hr ? hr(x.alt) - hr(y.alt) : 0) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
   const allBusy = out.every((x) => x.busy);
+  // About to start on an account whose films the relay shares: it hears about the new viewer now, not in a few seconds.
+  if (!allBusy && out.some((x) => !x.busy && (use.get(x.list) || []).some((c) => c.relayShared))) relayFinished.poke(true);
   if (allBusy && out.length) concurrency.turnedAway(ctx.sess.id + '|' + it.k, out.map((x) => x.list)); // (Statistics: turned away)
   return { sources: order, allBusy, directAddress: settings().directAddress || '' };
 });
@@ -1203,7 +1271,10 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   if (!pr && (isProto || src.local)) throw new HttpError(502, 'The server couldn’t open that stream.');
   // One-connection accounts: let the provider free the slot the look-inside used before the real connection.
   if (!wasCached && !src.local && oneConnection(it, Number.isInteger(b.alt) ? b.alt : -1)) await new Promise((ok) => setTimeout(ok, 1500));
-  const finite = !!(pr && pr.duration > 0) && b.live !== true;
+  // (A film or episode is finite even when the look inside timed out: then its listed length stands in.)
+  const film = it.t === 'movie' || it.t === 'episode' || b.live === false;
+  const finite = (film || !!(pr && pr.duration > 0)) && b.live !== true;
+  const duration = finite ? (pr && pr.duration > 0 ? pr.duration : Number(it.d) || 0) : 0;
   const live = !finite;
   const codecs = Array.isArray(b.codecs) ? b.codecs.map(String) : ['h264'];
   const height = clampInt(b.height, 0, 2160, 0);
@@ -1220,7 +1291,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   }
   const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
   return {
-    url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration: finite ? pr.duration : 0, mode: transcode ? 'transcode' : 'remux',
+    url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text || x.pic) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
@@ -1417,14 +1488,36 @@ route('GET', '/api/events', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   hub.open(req, res, { pid: prof.id, sess: ctx.sess.id, deviceId: String(q.get('device') || '').slice(0, 40), deviceName: String(q.get('name') || ctx.sess.name).slice(0, 60) });
 });
+// A device's live connection ended: what it was playing stops counting (webhooks "stopped", the viewing dashboard,
+// the stream relay's share). (Can be called twice — on the request closing and on a write error.)
+hub.onClose = (c) => {
+  if (c.closed) return;
+  c.closed = true;
+  const was = c.playing || (c.multi && c.multi.length);
+  try { p5.onClose(c); } catch (e) { log(`Presence clean-up: ${e.message}`); }
+  if (was) relayFinished.poke();
+};
+/**
+ * Ends live connections whose device was signed out (sign out, Admin → Devices, a new site password), whose profile
+ * was removed, or whose profile's PIN was changed since this device entered it. Their page reconnects and is asked
+ * to sign in or choose a profile again.
+ */
+function dropStaleConns() {
+  for (const c of [...hub.conns]) {
+    const s = accounts.sessionById(c.sess);
+    const prof = accounts.profile(c.pid);
+    if (s && s.expires >= Date.now() && prof && accounts.pinCurrent(s, prof)) continue;
+    try { c.res.end(); } catch {}
+  }
+}
 route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   const c = hub.conn(String(b.conn || ''));
   if (c && c.pid === prof.id) {
     const was = c.playing;
     c.playing = b.playing && b.playing.k ? { k: String(b.playing.k), pos: Number(b.playing.pos) || 0, at: was && was.k === String(b.playing.k) ? was.at : Date.now(), n: String(b.playing.n || '').slice(0, 200), alt: Number.isInteger(b.playing.alt) ? b.playing.alt : -1, hidden: !!b.playing.hidden } : null;
-    if ((was && was.k) !== (c.playing && c.playing.k)) relayFinished.poke(); // (what plays changed: the relay's share of the account may too)
+    if ((was && was.k) !== (c.playing && c.playing.k) || (was && was.alt) !== (c.playing && c.playing.alt) || 'multi' in b) relayFinished.poke(); // (what plays changed: the relay's share of the account may too)
     // Multiview: every tile uses a provider connection of its own.
     if ('multi' in b) {
       const old = new Map((c.multi || []).map((t) => [t.k, t.at]));
@@ -1436,7 +1529,9 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
 });
 route('GET', '/api/devices', (req, res, p, q, ctx) => {
   requireProfile(ctx);
-  return [...hub.conns].filter((c) => canControl(ctx, c)).map((c) => ({ conn: c.id, name: c.deviceName, deviceId: c.deviceId, playing: c.playing, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || '') }));
+  // Someone else's private viewing shows as just "playing", without what it is.
+  const shown = (c) => (c.playing && c.playing.hidden && c.pid !== ctx.profile.id ? { k: '', n: 'something', hidden: true, at: c.playing.at, pos: 0, alt: -1 } : c.playing);
+  return [...hub.conns].filter((c) => canControl(ctx, c)).map((c) => ({ conn: c.id, name: c.deviceName, deviceId: c.deviceId, playing: shown(c), at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || '') }));
 });
 const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'prev', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover', 'key', 'nav'];
 const REMOTE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'GoBack', 'ContextMenu'];
@@ -1444,7 +1539,7 @@ const REMOTE_PAGES = ['home', 'live', 'guide', 'movies', 'series', 'mine', 'sear
 route('POST', '/api/devices/:conn/command', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   const c = hub.conn(p.conn);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   // Taking over a provider connection someone else in the household is using: any profile may ask them to stop.
   // A priority viewer's connection can only be taken by another priority viewer (or by themselves on another device).
   if (b.cmd === 'takeover' && c) {
@@ -1513,7 +1608,7 @@ route('GET', '/api/pair/:id', (req, res, p, q) => {
 }, 'public');
 route('POST', '/api/pair/approve', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   sweepPairs();
   const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const x = [...pairs.values()].find((y) => y.code === code);
@@ -1573,7 +1668,7 @@ function mayControl(prof, sessId, c) {
 function canControl(ctx, c) { return mayControl(ctx.profile, ctx.sess && ctx.sess.id, c); }
 route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
-  const b = await readJSON(req);
+  const b = await readObj(req);
   const me = hub.conn(String(b.conn || ''));
   if (!me || me.sess !== ctx.sess.id) return { ok: false };
   for (const id of (Array.isArray(b.to) ? b.to : []).slice(0, 10)) {
@@ -1588,14 +1683,27 @@ route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
 const castSecret = crypto.randomBytes(32);
 const castSign = (pathq, hours = 8) => {
   const exp = Math.floor(Date.now() / 1000) + hours * 3600;
-  const data = Buffer.from(JSON.stringify({ p: pathq.split('?')[0].split('/').slice(0, 4).join('/'), e: exp })).toString('base64url');
+  // (What the link opens: a conversion session's files, a signed proxy address, or one file of a media folder —
+  // not every file in that folder.)
+  const parts = pathq.split('?')[0].split('/');
+  const data = Buffer.from(JSON.stringify({ p: parts.slice(0, parts[2] === 'local' ? 5 : 4).join('/'), e: exp })).toString('base64url');
   const sig = crypto.createHmac('sha256', castSecret).update(data).digest('base64url').slice(0, 24);
   return `/c/${data}.${sig}${pathq}`;
 };
 route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
-  requireProfile(ctx);
-  const { path: pq } = await readJSON(req);
+  const prof = requireProfile(ctx);
+  const { path: pq } = await readObj(req);
   if (!/^\/api\/(session|proxy|local)\b/.test(String(pq || ''))) throw new HttpError(400, 'Only stream addresses can be cast');
+  // A media-folder file or a recording: only one this profile may watch.
+  const lm = String(pq).split('?')[0].match(/^\/api\/local\/([^/]+)\/([^/]+)$/);
+  if (/^\/api\/local\b/.test(String(pq)) && !lm) throw new HttpError(400, 'Only stream addresses can be cast');
+  if (lm && lm[1] === 'dvr') { if (dvrHooks.dvrOwnerOk && !dvrHooks.dvrOwnerOk(prof, lm[2])) throw new HttpError(404, 'File not found'); }
+  else if (lm) {
+    const u = `/api/local/${lm[1]}/${lm[2]}`;
+    const it = catalog.items.find((x) => (x.loc && x.loc.list === lm[1] && x.loc.id === lm[2]) || x.u === u || (x.alts || []).some((a) => a.u === u));
+    if (!it) throw new HttpError(404, 'File not found');
+    item(ctx, it.k); // (hidden or locked for this profile: refused)
+  }
   return { url: castSign(String(pq)) };
 });
 
@@ -1755,8 +1863,9 @@ function adminSettingsView() {
 }
 route('POST', '/api/admin/password', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
-  const { next } = await readJSON(req);
+  const { next } = await readObj(req);
   accounts.setSitePassword(next, ctx.sess._key);
+  dropStaleConns(); // (every other device was signed out)
   return { ok: true };
 });
 route('POST', '/api/admin/lists', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.add(await readJSON(req)); });
@@ -1792,16 +1901,20 @@ route('PUT', '/api/admin/guides/:id', async (req, res, p, q, ctx) => { requireAd
 route('DELETE', '/api/admin/guides/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.removeGuide(p.id); return { ok: true }; });
 route('PUT', '/api/admin/profiles/:id', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
-  const prof = accounts.update(p.id, await readJSON(req), { byAdmin: true });
+  const b = await readObj(req);
+  // (The admin's own PIN changed here: this device keeps it; every other device needs the new one.)
+  const prof = accounts.update(p.id, b, { byAdmin: true, sess: p.id === ctx.profile.id ? ctx.sess : null });
   recs.touch(prof.id, 2000);
   hub.toAll('profiles', {});
   hub.toProfile(prof.id, 'profile', {});
+  if ('pin' in b) dropStaleConns();
   return accounts.view(prof);
 });
 route('DELETE', '/api/admin/profiles/:id', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   accounts.remove(p.id); userdata.remove(p.id); social.forgetProfile(p.id);
   hub.toProfile(p.id, 'removed', {});
+  dropStaleConns();
   hub.toAll('profiles', {});
   return { ok: true };
 });
@@ -1810,9 +1923,12 @@ route('POST', '/api/admin/devices/prune', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const body = await readJSON(req).catch(() => ({}));
   const days = Math.max(1, Math.min(365, +body.days || 30));
-  return { ok: true, removed: accounts.endIdleSessions(days, ctx.sess && ctx.sess.id) };
+  const removed = accounts.endIdleSessions(days, ctx.sess && ctx.sess.id);
+  dropStaleConns();
+  return { ok: true, removed };
 });
-route('DELETE', '/api/admin/devices/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); accounts.endSession(p.id); return { ok: true }; });
+// (Signing a device out also ends its live connection, which would otherwise keep getting messages and commands.)
+route('DELETE', '/api/admin/devices/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); accounts.endSession(p.id); dropStaleConns(); return { ok: true }; });
 route('GET', '/api/admin/groups', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const groups = new Map();
@@ -1955,7 +2071,7 @@ function makeBackup() {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
+      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp|tmp-bg)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full)) files[r] = fs.readFileSync(full).toString('base64');
     }
   };
   walk(D, '');
@@ -2001,7 +2117,7 @@ route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
   if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name');
   const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(BACKUPS, p.name))).toString('utf8'));
   restoreFiles(data);
-  res.on('finish', () => { log(`Restored ${p.name} — restarting.`); setTimeout(() => process.exit(0), 500); });
+  res.on('finish', () => { log(`Restored ${p.name} — restarting.`); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); });
   return { ok: true, restart: true };
 });
 function restoreFiles(data) {
@@ -2046,6 +2162,7 @@ function restartWhenIdle(reason) {
     if (busy && Date.now() - update.pending.since < 30 * 60e3) return;
     clearInterval(tick);
     hub.toAll('restarting', {});
+    frontLink.tellFrontStopping(); // (new visitors get "Back in a moment" from now on, not a server about to go)
     JsonFile.flushAll();
     setTimeout(() => process.exit(0), 800);
   }, 5000);
@@ -2109,7 +2226,7 @@ route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
   let data;
   try { let buf = await readBody(req, 2 * 1024 * 1024 * 1024); if (buf[0] === 0x1f) buf = zlib.gunzipSync(buf); data = JSON.parse(buf.toString('utf8')); } catch { throw new HttpError(400, 'That isn’t a backup file from this app.'); }
   restoreFiles(data);
-  res.on('finish', () => { log('Backup restored — restarting.'); setTimeout(() => process.exit(0), 500); });
+  res.on('finish', () => { log('Backup restored — restarting.'); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); });
   return { ok: true, restart: true };
 });
 
@@ -2127,7 +2244,12 @@ require('./lib/routes-p3')({ route, requireProfile, requireAdmin, readJSON, Http
 const p4 = require('./lib/routes-p4')({
   route, requireProfile, requireAdmin, readJSON, HttpError, catalog, lists, accounts, epg, settings, tmdb, media, proxy, castSign, inputOf, videoViaProxy,
   connLimit, listUsage, serveFile, clientIp, userdata, Catalog, dataDir: D, ready: () => catalogReady,
+  relayExtra: (id) => relayFinished.extra(id),
+  loopbackBase: () => `${tls ? 'https' : 'http'}://127.0.0.1:${cfg.port}`, // (other apps' tuner streams fetch the relay through this server)
 });
+// (Counted like recordings: nobody can take the connection over from an app this server can't tell to stop.)
+otherAppConns = () => [...p4.outputs.active].filter(([, a]) => a.kind === 'hdhr' && a.live)
+  .map(([id, a]) => ({ id, pid: a.pid, deviceName: 'HDHomeRun tuner', playing: { k: a.k, n: a.n, at: a.since, alt: -1 }, rec: true }));
 
 // [routes:p5]
 // Subtitles (OpenSubtitles), Trakt, the live viewing dashboard, the speed test, API keys and webhooks.
@@ -2142,7 +2264,7 @@ reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
 
 // [routes:p11] Screen time and bedtime for profiles (enforced on the server), the profile's default remote buttons.
 require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
-require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks });
+require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
 // [routes:p10] Home rows from Trakt / TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
 const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, trakt: p5.trakt, catalog: () => catalog });
 followsOf = p10.followsOf;
@@ -2227,7 +2349,9 @@ function hostAllowed(hostHeader) {
 }
 
 async function handle(req, res) {
-  const u = new URL(req.url, 'http://x');
+  let u;
+  // (An address like "//" or "//a:b" isn't a path at all: answer it rather than leave the request hanging.)
+  try { u = new URL(req.url, 'http://x'); } catch { return sendJSON(res, 400, { error: 'Bad request' }); }
   let pathname;
   try { pathname = decodeURIComponent(u.pathname); } catch { pathname = u.pathname; }
   const ctx = { sess: null, profile: null, conn: req.headers['x-conn'] || '' };
@@ -2246,7 +2370,7 @@ async function handle(req, res) {
       const sig = crypto.createHmac('sha256', castSecret).update(cm[1]).digest('base64url').slice(0, 24);
       let tok;
       try { tok = JSON.parse(Buffer.from(cm[1], 'base64url').toString('utf8')); } catch {}
-      if (sig !== cm[2] || !tok || tok.e < Date.now() / 1000 || !cm[3].startsWith(tok.p)) throw new HttpError(403, 'This cast link has expired.');
+      if (sig !== cm[2] || !tok || tok.e < Date.now() / 1000 || !(cm[3] === tok.p || cm[3].startsWith(tok.p + '/'))) throw new HttpError(403, 'This cast link has expired.');
       res.setHeader('Access-Control-Allow-Origin', '*');
       if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Headers': 'Range', 'Access-Control-Allow-Methods': 'GET, HEAD' }); return res.end(); }
       req.cast = `/c/${cm[1]}.${cm[2]}`;
@@ -2288,6 +2412,8 @@ async function handle(req, res) {
 
     ctx.sess = accounts.session(req);
     if (ctx.sess && ctx.sess.profileId) ctx.profile = accounts.profile(ctx.sess.profileId);
+    // The profile's PIN was changed since this device entered it: choose the profile again (with the new PIN).
+    if (ctx.profile && !accounts.pinCurrent(ctx.sess, ctx.profile)) ctx.profile = null;
     // Keep the browser's cookie as fresh as the session: renewed once a day when the app is opened, so a device in
     // regular use never has to sign in again.
     if (ctx.sess && (pathname === '/' || pathname === '/api/boot') && Date.now() - (ctx.sess.cookieAt || ctx.sess.created) > 86400e3) {
@@ -2363,8 +2489,12 @@ server.keepAliveTimeout = 65000;
 server.requestTimeout = 0;
 server.headersTimeout = 70000;
 
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   log('Shutting down…');
+  frontLink.tellFrontStopping();
   media.stopAll();
   JsonFile.flushAll();
   setTimeout(() => process.exit(0), 300);

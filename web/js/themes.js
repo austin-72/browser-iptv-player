@@ -31,6 +31,7 @@ V.THEMES = [
 V.theme = function (id) { for (var i = 0; i < V.THEMES.length; i++) if (V.THEMES[i].id === id) return V.THEMES[i]; return V.THEMES[0]; };
 
 V.applyTheme = function (id) {
+  V.themeChosen = id;
   var t = V.theme(id === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'midnight') : id);
   var r = document.documentElement;
   Object.keys(t.c).forEach(function (k) { r.style.setProperty('--' + k, t.c[k]); });
@@ -40,6 +41,14 @@ V.applyTheme = function (id) {
   var meta = V.$('meta[name=theme-color]');
   if (meta) meta.content = t.c.bg;
 };
+
+// "Match my device": follow the device when it switches between light and dark (at sunset, say) without a reload.
+(function () {
+  var mq = window.matchMedia && matchMedia('(prefers-color-scheme: light)');
+  if (!mq) return;
+  var follow = function () { if (V.themeChosen === 'auto') V.applyTheme('auto'); };
+  if (mq.addEventListener) mq.addEventListener('change', follow); else if (mq.addListener) mq.addListener(follow);
+})();
 
 /** A tiny picture of the app in a theme (for the theme picker). */
 V.themePreview = function (t) {

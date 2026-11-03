@@ -35,7 +35,7 @@ const os = require('os');
 const pathMod = require('path');
 const vm = require('vm');
 
-const VERSION = '5';
+const VERSION = '6';
 const SECRET = process.env.RELAY_SECRET || '';
 const PORT = Number(process.env.PORT) || 8090;
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 0;
@@ -172,7 +172,7 @@ function get(url, { method = 'GET', headers = {}, hops = 0, proxy = '' } = {}) {
     try { u = new URL(url); } catch { return reject(new Error('bad address')); }
     // (Through a proxy the provider is looked up and reached by the proxy, so only a literal private address is refused.)
     const check = proxy ? proxyOk(proxy).then((ok) => ok && (ALLOW_PRIVATE || !net.isIP(u.hostname.replace(/^\[|\]$/g, '')) || !isPrivate(u.hostname.replace(/^\[|\]$/g, '')))) : publicHost(u.hostname);
-    check.then(async (ok) => {
+    check.then(async (ok) => { try {
       if (!ok) return reject(Object.assign(new Error(proxy ? 'That proxy (or address) can’t be used' : 'Only public internet addresses can be relayed'), { status: 403 }));
       const mod = u.protocol === 'https:' ? https : http;
       let opts = { method, headers, timeout: 20000 };
@@ -201,7 +201,7 @@ function get(url, { method = 'GET', headers = {}, hops = 0, proxy = '' } = {}) {
         opts = { ...opts, agent: false, createConnection: () => conn };
       }
       finish(mod.request(target, opts, onRes));
-      function onRes(res) {
+      function onRes(res) { try {
         // (The proxy itself said no to the sign-in: a 407 would confuse players, which treat it as their own proxy's.)
         if (proxy && res.statusCode === 407) { res.resume(); return reject(Object.assign(new Error('Proxy: it wants a different username or password'), { status: 502 })); }
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops < 6) {
@@ -211,13 +211,14 @@ function get(url, { method = 'GET', headers = {}, hops = 0, proxy = '' } = {}) {
         }
         res.finalUrl = u.href;
         resolve(res);
-      }
+      } catch (e) { res.resume(); reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { status: 502 })); } } // (a bad redirect)
       function finish(req) {
         req.on('timeout', () => req.destroy(new Error('The provider didn’t answer in time')));
         req.on('error', (e) => reject(proxy ? Object.assign(new Error((e && e.message) || 'The proxy failed'), { status: 502 }) : e));
         req.end();
       }
-    }, reject);
+      // (A header the request can't carry, and the like: an answer, not a promise that never settles.)
+    } catch (e) { reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { status: 502 })); } }, reject);
   });
 }
 
@@ -349,7 +350,7 @@ class Whole {
     if (fd != null) { this.fds.delete(b); this.fds.set(b, fd); return fd; }
     fd = fs.openSync(this.blockFile(b), fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600);
     this.fds.set(b, fd);
-    if (this.fds.size > 24) { const [ob, ofd] = this.fds.entries().next().value; this.fds.delete(ob); try { fs.closeSync(ofd); } catch {} }
+    if (this.fds.size > 12) { const [ob, ofd] = this.fds.entries().next().value; this.fds.delete(ob); try { fs.closeSync(ofd); } catch {} }
     return fd;
   }
   /** Writes buf at byte pos of the film (across pieces as needed). */
@@ -400,10 +401,11 @@ class Whole {
     }
   }
   /** The end (exclusive) of the bytes readable from p onwards: whole MBs that are in, then the running download. */
-  availEnd(p) {
+  availEnd(p, limit) {
     if (!this.have || p >= this.size) return p;
     let i = Math.floor(p / CHUNK);
-    while (i < this.chunks && this.have[i]) i++;
+    const stop = limit ? Math.min(this.chunks, Math.ceil(limit / CHUNK)) : this.chunks;
+    while (i < stop && this.have[i]) i++;
     let end = Math.min(i * CHUNK, this.size);
     const r = this.run;
     if (r && r.from <= end && r.written > end) end = r.written;
@@ -453,12 +455,17 @@ class Whole {
       let total = 0;
       if (up.statusCode === 206) { const m = /\/(\d+)\s*$/.exec(up.headers['content-range'] || ''); total = m ? Number(m[1]) : 0; }
       else if (up.statusCode === 200) { total = Number(up.headers['content-length']) || 0; this.ranges = false; if (from) from = 0; }
-      if (up.statusCode >= 400 || !total || /mpegurl|text\/|json|html/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl || '')) { up.destroy(); return false; }
+      // (Refused — "too many connections", say: no film this time, but try again next time. A playlist, a page or
+      // no size: not something to keep whole.)
+      if (up.statusCode >= 400) { up.destroy(); this.retryLater = true; return false; }
+      if (!total || /mpegurl|text\/|json|html/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl || '')) { up.destroy(); return false; }
       if (!makeRoom(total, this)) { up.destroy(); return false; }
       this.size = total; this.type = ct || 'application/octet-stream';
       this.chunks = Math.ceil(total / CHUNK); this.have = new Uint8Array(this.chunks);
       try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (e) { up.destroy(); return false; }
       this.attach(up, from);
+      this.holdSince = Date.now();
+      this.armIdle(); // (cleared as soon as someone reads)
       return true;
     } finally { this.starting = false; kick(); }
   }
@@ -477,8 +484,10 @@ class Whole {
       const pos = r.at;
       r.at += buf.length;
       up.pause();
-      writing = writing.then(() => this.writeAt(buf, pos).then(() => {
-        if (!this.have) return;
+      // (Writes still queued when the run was stopped are dropped: the part may already be deleted as watched,
+      // or being fetched by another run.)
+      writing = writing.then(() => (r.stop && this.run !== r ? Promise.resolve(false) : this.writeAt(buf, pos).then(() => true)).then((wrote) => {
+        if (!this.have || !wrote) return;
         r.written = pos + buf.length;
         gotBy.set(this.acct, (gotBy.get(this.acct) || 0) + buf.length);
         // The MBs this write finished (runs start on an MB boundary, so every MB from `pos` on is this run's).
@@ -498,7 +507,15 @@ class Whole {
     up.on('error', () => writing.then(() => { if (this.run === r && !r.stop) { this.errors++; this.endRun(r, true); } }));
     up.on('close', () => writing.then(() => { if (this.run === r && !r.stop) { this.errors++; this.endRun(r, true); } }));
   }
-  stopRun() { if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } kick(); }
+  /** Lets go of the open pieces (they're opened again when needed): a finished film, or nobody watching. */
+  closeFds() { for (const fd of this.fds.values()) { try { fs.closeSync(fd); } catch {} } this.fds.clear(); }
+  /** Nobody reading: after IDLE_STOP the download stops, so the provider connection is free again. */
+  armIdle() {
+    if (this.readers.size) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => { if (!this.readers.size) { if (this.run) this.stopRun(); this.closeFds(); } }, IDLE_STOP);
+  }
+  stopRun() { if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } this.holdSince = 0; kick(); }
   endRun(r, broken) {
     r.stop = true; try { r.up.destroy(); } catch {}
     if (this.run === r) this.run = null;
@@ -506,6 +523,8 @@ class Whole {
     if (broken && this.errors > 4) return this.fail(new Error('The provider keeps dropping the connection'));
     const later = broken ? Math.min(5000, 500 * this.errors) : 0;
     this.retryAt = Date.now() + later;
+    // (Another film of this account is waiting for a connection: the scheduler decides who has it next.)
+    if (!broken && budgetOf(this.acct) && othersWaiting(this)) { this.holdSince = 0; return kick(); }
     setTimeout(() => this.next(), later);
   }
   /** The first MB not here at or after byte p (-1: none). */
@@ -516,7 +535,10 @@ class Whole {
   }
   complete() {
     if (!this.done) log(`whole ${this.key.slice(0, 8)}: all ${(this.size / 1e9).toFixed(2)} GB here in ${Math.round((Date.now() - this.started) / 1000)} s`);
-    this.done = true; this.run = null;
+    this.done = true;
+    if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
+    this.holdSince = 0;
+    if (!this.readers.size) this.closeFds();
     this.wake(); kick();
   }
   fail(e) { this.failed = e; if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; } this.wake(); kick(); }
@@ -535,6 +557,7 @@ class Whole {
   }
   startAt(from) {
     if (!this.ranges) from = 0;
+    if (!this.holdSince) this.holdSince = Date.now();
     if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
     this.done = false;
     const r = { stop: false };
@@ -575,16 +598,13 @@ class Whole {
     this.lastUse = Date.now();
     kick();
     if (this.readers.size) return;
-    clearTimeout(this.idleTimer);
-    // Nobody watching for a while: stop downloading, so the provider connection is free again.
-    this.idleTimer = setTimeout(() => { if (!this.readers.size && this.run) this.stopRun(); }, IDLE_STOP);
+    this.armIdle();
   }
   remove() {
     clearTimeout(this.idleTimer);
     if (this.run) { this.run.stop = true; try { this.run.up.destroy(); } catch {} this.run = null; }
     if (this.grantWait) { const g = this.grantWait; this.grantWait = null; g(false); }
-    for (const fd of this.fds.values()) { try { fs.closeSync(fd); } catch {} }
-    this.fds.clear();
+    this.closeFds();
     const blocks = this.size ? Math.ceil(this.size / BLOCK) : 0;
     for (let b = 0; b < blocks; b++) { try { fs.unlinkSync(this.blockFile(b)); } catch {} }
     this.have = null;
@@ -600,6 +620,8 @@ class Whole {
 // ---------------------------------------------------------------- sharing an account's connections between films
 /** How many provider connections films of this account may use at once (0: as many as they need). */
 function budgetOf(a) { const b = a && budgets.get(a); return b ? b.n : 0; }
+/** Another film of this account wants a connection and has none. */
+const othersWaiting = (w) => { for (const x of wholes.values()) if (x !== w && x.acct === w.acct && !x.run && !x.starting && !x.failed && !x.bypass && x.wants()) return true; return false; };
 const runningIn = (a, except) => { let n = 0; for (const w of wholes.values()) if (w !== except && w.acct === a && (w.run || w.starting)) n++; return n; };
 /** May this film open a provider connection now (it has none, and its account has one free)? */
 function mayStart(w) {
@@ -644,11 +666,11 @@ function schedule() {
       if (!v) break;
       v.w.parked = true; v.w.stopRun(); running = running.filter((s) => s !== v);
     }
-    const waiting = st.filter((s) => s.wants && !s.w.run && !s.w.starting).sort((x, y) => x.ahead - y.ahead);
+    const waiting = st.filter((s) => s.wants && !s.w.run && !s.w.starting && (s.w.grantWait || !(s.w.retryAt > now))).sort((x, y) => x.ahead - y.ahead);
     for (const c of waiting) {
       if (running.length < n) { resume(c.w); running.push(c); continue; }
       if (c.ahead >= AHEAD) break;
-      const v = running.filter((s) => s.w.run && !s.w.starting && (!s.w.readers.size || now - (s.w.run.t0 || 0) >= MIN_RUN)).sort((x, y) => y.ahead - x.ahead)[0];
+      const v = running.filter((s) => s.w.run && !s.w.starting && (!s.w.readers.size || now - (s.w.holdSince || s.w.run.t0 || 0) >= MIN_RUN)).sort((x, y) => y.ahead - x.ahead)[0];
       if (!v || !(!v.w.readers.size || v.ahead >= AHEAD + 60 || v.ahead - c.ahead >= SWAP)) break;
       v.w.parked = true; v.w.stopRun();
       running = running.filter((s) => s !== v);
@@ -730,7 +752,7 @@ function stopUnwatched(activeIds) {
 setInterval(() => {
   const now = Date.now();
   for (const w of [...wholes.values()]) {
-    if (w.readers.size || w.grantWait) continue;
+    if (w.readers.size || w.grantWait || w.starting || w.asking > 0) continue;
     const old = now - w.started > 2 * (w.len || GUESS_LEN) * 1000;
     if (old || now - w.lastUse > KEEP_FOR || (w.bypass && now - w.started > 10 * 60e3)) w.remove();
   }
@@ -748,7 +770,10 @@ async function whole(req, res, o) {
   if (!w) {
     w = new Whole(key, o);
     wholes.set(key, w);
-    w.ready = w.begin(m && m[1] === '' ? 0 : a).catch(() => false).then((ok) => { if (!ok && wholes.get(key) === w && !w.have) w.bypass = true; return ok; });
+    w.ready = w.begin(m && m[1] === '' ? 0 : a).catch(() => { w.retryLater = true; return false; }).then((ok) => {
+      if (!ok && wholes.get(key) === w && !w.have) { if (w.retryLater) w.remove(); else w.bypass = true; }
+      return ok;
+    });
   }
   if (o.i) w.ids.add(String(o.i));
   if (Number(o.d) > 0 && !w.len) w.len = Number(o.d);
@@ -759,19 +784,19 @@ async function whole(req, res, o) {
   res.on('close', left);
   let ok;
   try { ok = await w.ready; } finally { left(); }
-  if (res.destroyed) return;
+  if (res.destroyed) { if (ok) w.armIdle(); return; }
   if (!ok || w.bypass) return relay(req, res, o);
   const size = w.size;
   let b = size - 1;
   if (m) {
     if (m[1] === '') { a = Math.max(0, size - Number(m[2] || 0)); }
     else if (m[2] !== '') b = Math.min(Number(m[2]), size - 1);
-    if (a >= size || a > b) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+    if (a >= size || a > b) { w.armIdle(); res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
   }
   const head = { 'Content-Type': w.type, 'Accept-Ranges': 'bytes', 'Content-Length': b - a + 1, 'Cache-Control': 'no-store' };
   if (m) head['Content-Range'] = `bytes ${a}-${b}/${size}`;
   res.writeHead(m ? 206 : 200, head);
-  if (req.method === 'HEAD') return res.end();
+  if (req.method === 'HEAD') { w.armIdle(); return res.end(); }
   const reader = { pos: a, t0: Date.now(), waitSince: 0 };
   w.addReader(reader);
   res.on('close', () => w.dropReader(reader));
@@ -780,7 +805,7 @@ async function whole(req, res, o) {
     const buf = Buffer.allocUnsafe(CHUNK);
     while (p <= b && !res.destroyed) {
       if (!w.have) throw new Error('gone');
-      const end = Math.min(w.availEnd(p), b + 1);
+      const end = Math.min(w.availEnd(p, Math.min(b + 1, p + 2 * CHUNK)), b + 1);
       if (end > p) {
         reader.waitSince = 0;
         let got;

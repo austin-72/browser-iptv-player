@@ -67,11 +67,24 @@ V.downloads = (function () {
     });
   }
 
+  /** The device has no room left (not something the provider or the server did). */
+  var full = function (e) { return !!e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || '')); };
+  var FULL_MSG = 'There’s no room left on this device. Delete some downloads and try again.';
+
   function load() {
     return V.idb.all('dl').then(function (list) {
       items.clear();
       // An interrupted download starts over; waiting ones go back in the queue (they'd otherwise wait forever).
-      (list || []).forEach(function (r) { if (r.status === 'downloading') r.status = 'failed'; items.set(r.k, r); if (r.status === 'queued' && queue.indexOf(r) < 0) queue.push(r); });
+      // (It runs again on a profile switch: the one downloading now keeps going, and nothing is queued twice.)
+      (list || []).forEach(function (r) {
+        if (active && active.r.k === r.k) { items.set(r.k, active.r); return; }
+        if (r.status === 'downloading') r.status = 'failed';
+        items.set(r.k, r);
+        if (r.status === 'queued') {
+          var i = queue.map(function (x) { return x.k; }).indexOf(r.k);
+          if (i >= 0) queue[i] = r; else queue.push(r);
+        }
+      });
       V.emit('downloads');
       if (queue.length && S.profile && S.profile.id) pump();
     });
@@ -134,7 +147,7 @@ V.downloads = (function () {
     active = { r: r, ac: new AbortController() };
     r.status = 'downloading'; save(r);
     if (r.u && !r.viaServer) {
-      var ac = active.ac, wd = null;
+      var ac = active.ac, wd = null, cur0 = active;
       r.direct = true;
       navigator.storage.getDirectory().then(function (dir) { return dir.getFileHandle(fileName(r.k), { create: true }); })
         .then(function (fh) { return fh.createWritable(); })
@@ -144,10 +157,17 @@ V.downloads = (function () {
           r.status = 'done'; r.doneAt = Date.now();
           return navigator.storage.getDirectory().then(function (dir) { return dir.getFileHandle(fileName(r.k)); }).then(function (fh) { return fh.getFile(); }).then(function (f) { r.size = r.bytes = f.size; });
         })
-        .then(function () { save(r); V.toast('Downloaded: ' + r.n); active = null; pump(); }, function (e) {
-          var stop = function () { active = null; };
+        .then(function () { save(r); V.toast('Downloaded: ' + r.n); active = null; if (cur0.done) cur0.done(); pump(); }, function (e) {
+          var stop = function () { if (active === cur0) active = null; if (cur0.done) cur0.done(); };
           (wd ? wd.abort().catch(function () {}) : Promise.resolve()).then(function () {
-            if (e && e.name === 'AbortError' || ac.signal.aborted) { r.status = 'cancelled'; stop(); remove(r.k, true); pump(); return; }
+            if (e && e.name === 'AbortError' || ac.signal.aborted) { r.status = 'cancelled'; stop(); if (!cur0.removing) remove(r.k, true); pump(); return; }
+            // No room left: fetching it again through the server wouldn't help.
+            if (full(e)) {
+              r.status = 'failed'; r.error = FULL_MSG; stop(); save(r);
+              V.toast('Download failed: ' + FULL_MSG, { error: true });
+              navigator.storage.getDirectory().then(function (dir) { return dir.removeEntry(fileName(r.k)); }).catch(function () {}).then(pump);
+              return;
+            }
             // The provider doesn't let web pages read it (or the file is something else): the server does it.
             r.viaServer = true; r.direct = false; r.bytes = 0; r.progress = 0; stop();
             queue.unshift(r); pump();
@@ -155,7 +175,7 @@ V.downloads = (function () {
         });
       return;
     }
-    var res, w, reader, last = 0;
+    var res, w, reader, last = 0, cur = active;
     // Copy the download into the app's private storage piece by piece.
     var copy = function () {
       return reader.read().then(function (chunk) {
@@ -183,14 +203,30 @@ V.downloads = (function () {
         save(r);
         V.toast('Downloaded: ' + r.n);
       }, function (e) {
-        if (e.name === 'AbortError') { r.status = 'cancelled'; remove(r.k, true); } else { r.status = 'failed'; r.error = e.message; save(r); V.toast('Download failed: ' + e.message, { error: true }); }
-      }).then(function () { active = null; pump(); });
+        // Close the half-written file first (an open one can't be deleted, and its part would stay and use space).
+        if (reader) reader.cancel().catch(function () {});
+        return (w ? w.abort().catch(function () {}) : Promise.resolve()).then(function () {
+          if (e && e.name === 'AbortError' || cur.ac.signal.aborted) { r.status = 'cancelled'; if (active === cur) active = null; if (!cur.removing) return remove(r.k, true); return; }
+          r.status = 'failed'; r.error = full(e) ? FULL_MSG : (e && e.message) || 'unknown error'; save(r);
+          V.toast('Download failed: ' + r.error, { error: true });
+          return navigator.storage.getDirectory().then(function (dir) { return dir.removeEntry(fileName(r.k)); }).catch(function () {});
+        });
+      }).then(function () { if (active === cur) active = null; if (cur.done) cur.done(); pump(); });
   }
 
   function remove(k, quiet) {
-    if (active && active.r.k === k) active.ac.abort();
     queue = queue.filter(function (x) { return x.k !== k; });
-    var gone = navigator.storage && navigator.storage.getDirectory ? navigator.storage.getDirectory().then(function (dir) { return dir.removeEntry(fileName(k)); }).catch(function () {}) : Promise.resolve();
+    // Downloading now: stop it, and wait until its file is closed before deleting it.
+    var stopped = Promise.resolve();
+    if (active && active.r.k === k) {
+      var a = active;
+      a.removing = true;
+      stopped = new Promise(function (res) { a.done = res; setTimeout(res, 5000); }); // (not forever, whatever happens)
+      a.ac.abort();
+    }
+    var gone = stopped.then(function () {
+      return navigator.storage && navigator.storage.getDirectory ? navigator.storage.getDirectory().then(function (dir) { return dir.removeEntry(fileName(k)); }).catch(function () {}) : null;
+    });
     return gone.then(function () {
       items.delete(k);
       return V.idb.del(k, 'dl');
@@ -207,6 +243,11 @@ V.downloads = (function () {
       .then(function (fh) { return fh.getFile(); })
       .then(function (file) {
         var url = URL.createObjectURL(file);
+        // Let the file go once the player has moved on (checked just after a teardown: a retry or "Watch again" loads
+        // this same file again; closing the player or playing something else doesn't).
+        var off = V.on('player-teardown', function (p) {
+          setTimeout(function () { if (!p.it || p.it.offlineUrl !== url) { off(); URL.revokeObjectURL(url); } }, 0);
+        });
         var base = V.entry(k) || { k: r.k, n: r.n, t: r.t, i: r.i, sk: r.sk, s: r.s, e: r.e, et: r.et, d: r.dur || r.d };
         V.play(Object.assign({}, base, { offlineUrl: url, d: r.dur || base.d }));
       }).catch(function () { V.toast('That download is missing. Download it again.', { error: true }); });

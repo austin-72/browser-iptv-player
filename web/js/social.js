@@ -9,6 +9,7 @@ V.route('messages', function (view, r) {
   view.innerHTML = '<div class="msg-page' + (conv ? ' has-conv' : '') + '"><aside class="convs"><h1>Messages</h1><div class="presence"></div><div class="conv-list"><div class="spinner"></div></div></aside><section class="thread" aria-live="polite"></section></div>';
   var listBox = V.$('.conv-list', view), thread = V.$('.thread', view);
   V.loadSharedLists().then(function (soc) {
+    if (!document.contains(view)) return; // (another page by now: nothing to draw, and its clean-up isn't ours)
     var drawList = function () {
       var convs = soc.conversations;
       var byId = {};
@@ -35,7 +36,9 @@ V.route('messages', function (view, r) {
     var offs = [
       V.on('message', function (m) { var c = m.to === 'all' ? 'all' : m.from === S.profile.id ? m.to : m.from; var cv = soc.conversations.filter(function (x) { return x.id === c; })[0]; if (!cv) soc.conversations.push(cv = { id: c, unread: 0, count: 0 }); cv.last = m; if (c !== conv && m.from !== S.profile.id) cv.unread++; drawList(); }),
     ];
-    V.pageCleanup = function () { offs.forEach(function (f) { f(); }); };
+    // (Added to the conversation's own clean-up, which openThread has just set.)
+    var prev = V.pageCleanup;
+    V.pageCleanup = function () { offs.forEach(function (f) { f(); }); if (prev) prev(); };
   }).catch(function (e) { listBox.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
 
   function openThread(id, soc, drawList) {
@@ -167,6 +170,8 @@ V.party = (function () {
   }
 
   function enter(p, host) {
+    // Already in another party: leave it first (the server would go on counting you in it).
+    if (cur && cur.id !== p.id) leave();
     cur = p;
     var it = V.entry(p.k);
     if (!it) { V.toast('That isn’t available on your profile', { error: true }); return leave(); }

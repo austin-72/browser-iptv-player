@@ -69,7 +69,7 @@
     var u = a.url || '';
     return u.charAt(0) === '/' || u.indexOf(location.origin + '/') === 0;
   };
-  var label = function (ms) { return !ms ? 'Off' : (ms > 0 ? '+' : '−') + Math.abs(ms) + ' ms'; };
+  var label = function (ms) { return !ms ? 'Off' : (ms > 0 ? '+' : '−') + Math.abs(ms) + '\u00a0ms'; }; // (no break between number and unit)
   var describe = function (ms) { return !ms ? 'Audio sync off' : 'Audio sync ' + label(ms) + (ms > 0 ? ' · sound later' : ' · picture held back'); };
 
   /** Applies this player's offset (p.avOffset, ms). */
@@ -103,8 +103,8 @@
   V.on('player-started', function (p) {
     var want = store.get(keyOf(p.it));
     p.avOffset = want;
-    if (want || p._picture || (p._delay && p._delay.delayTime.value)) p.applyAvSync(false);
-    if (want) p.osd(describe(want), 1600);
+    // (Announced only once it's really applied: not when it can't be, or while it switches to the relay.)
+    if (want || p._picture || (p._delay && p._delay.delayTime.value)) p.applyAvSync(!!want);
   });
   V.on('player-teardown', function (p) { stopPicture(p); });
   // Something new is played: it may try the relay again if it needs to.
@@ -134,7 +134,7 @@
     };
     pic.size = size;
     size();
-    if (window.ResizeObserver) { pic.ro = new ResizeObserver(size); pic.ro.observe(p.el); } else window.addEventListener('resize', size);
+    if (window.ResizeObserver) { pic.ro = new ResizeObserver(size); pic.ro.observe(p.el); } else { pic.onResize = size; window.addEventListener('resize', size); }
     pic.flush = function () { pic.q.forEach(function (x) { release(pic, x); }); pic.q = []; };
     v.addEventListener('seeking', pic.flush);
     capture(p, pic);
@@ -148,6 +148,7 @@
     pic.on = false;
     cancelAnimationFrame(pic.raf);
     if (pic.ro) pic.ro.disconnect();
+    if (pic.onResize) window.removeEventListener('resize', pic.onResize);
     pic.video.removeEventListener('seeking', pic.flush);
     if (pic.vfcb && pic.video.cancelVideoFrameCallback) try { pic.video.cancelVideoFrameCallback(pic.vfcb); } catch (e) {}
     pic.flush();
@@ -247,7 +248,7 @@
     var edge = { shadow: '0 2px 4px rgba(0,0,0,.9)', outline: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 4px #000', raised: '1px 1px 0 #000, 2px 2px 0 #000', none: 'none' }[st.edge] || 'none';
     var font = { sans: 'system-ui, sans-serif', serif: 'Georgia, serif', mono: 'ui-monospace, monospace', casual: '"Comic Sans MS", "Comic Neue", cursive', large: 'system-ui, sans-serif' }[st.font] || 'system-ui, sans-serif';
     var el = V.$('#av-cue-style') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'av-cue-style' }));
-    el.textContent = '.vp .av-cues span { color: ' + st.color + '; background: ' + st.bg + '; text-shadow: ' + edge + '; font-family: ' + font + '; }';
+    el.textContent = '.vp .av-cues span { color: ' + (st.color || '#fff') + '; background: ' + (st.bg || 'rgba(0,0,0,0.6)') + '; text-shadow: ' + edge + '; font-family: ' + font + '; }';
   }
   V.on('prefs', function (k) { if (k === 'subStyle') styleCues(); });
 
@@ -257,14 +258,18 @@
     var cur = p.avOffset || 0;
     main.push({ label: 'Audio sync', value: label(cur), page: 'avsync' });
     var adj = function (d) { return function () { p.setAvSync((p.avOffset || 0) + d); }; };
+    var def = +V.ls.get('avsyncDefault', 0) || 0;
     pages.avsync = [
-      { label: 'Now: ' + (cur ? label(cur) + (cur > 0 ? ' (sound later)' : ' (sound earlier)') : 'in sync'), on: false, fn: function () {}, back: 'avsync' },
+      { label: cur ? 'Sound ' + label(cur) + (cur > 0 ? ' (later)' : ' (earlier)') : 'Sound in sync', on: false, inert: true, fn: function () {}, back: 'avsync' },
       { label: 'Sound earlier', value: '−' + STEP + ' ms', fn: adj(-STEP), back: 'avsync' },
       { label: 'Sound later', value: '+' + STEP + ' ms', fn: adj(STEP), back: 'avsync' },
       { label: 'Sound much earlier', value: '−250 ms', fn: adj(-250), back: 'avsync' },
       { label: 'Sound much later', value: '+250 ms', fn: adj(250), back: 'avsync' },
-      { label: 'Back in sync (0)', fn: function () { p.setAvSync(0); }, back: 'avsync' },
-      { label: 'Use ' + label(cur) + ' for everything', value: 'Default: ' + label(+V.ls.get('avsyncDefault', 0) || 0), fn: function () { store.setDefault(cur); p.osd('Audio sync ' + label(cur) + ' is now the default on this device', 2000); }, back: 'avsync' },
+      { label: 'Reset', value: '0 ms', fn: function () { p.setAvSync(0); }, back: 'avsync' },
+      { label: 'Set as default', value: cur === def ? 'Current' : label(cur), fn: function () {
+        store.setDefault(cur);
+        p.osd(cur ? 'Audio sync ' + label(cur) + ' is now the default on this device' : 'Audio sync is off by default on this device', 2000);
+      }, back: 'avsync' },
     ];
   };
 })();

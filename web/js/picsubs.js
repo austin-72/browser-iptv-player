@@ -99,7 +99,7 @@
       var gen = tr.gen;
       V.api(base + '?alt=' + alt + '&from=' + tr.ents.length).then(function (r) {
         if (gen !== tr.gen) return; // (stopped and started again meanwhile: that one carries on)
-        if (r.err && !r.idx.length && r.done) { tr.failed = r.err; tr.running = false; if (V.player && V.player._pic === tr) V.player.osd('Subtitles: ' + r.err, 4000); return; }
+        if (r.err && !(r.idx && r.idx.length) && r.done) { tr.failed = r.err; tr.running = false; if (V.player && V.player._pic === tr) V.player.osd('Subtitles: ' + r.err, 4000); return; }
         if (r.codec) tr.kind = r.codec;
         if (r.priv && !tr.palette) { var ix = D.parseIdx(r.priv); tr.palette = ix.palette; tr.plane = { w: ix.w, h: ix.h }; }
         (r.idx || []).forEach(function (x) { tr.ents.push({ t: x[0], d: x[1], off: x[2], len: x[3], f: x[4], data: null }); });

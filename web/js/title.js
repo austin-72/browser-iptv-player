@@ -7,7 +7,7 @@ V.similar = function (it, n) {
   var scored = [];
   for (var i = 0; i < pool.length; i++) {
     var x = pool[i];
-    if (x.k === it.k || S.data.hidden.indexOf(x.k) >= 0) continue;
+    if (x.k === it.k || V.inList('hidden', x.k)) continue;
     var s = 0;
     (x.gn || []).forEach(function (g) { if (gn.has(g.toLowerCase())) s += 2; });
     if (x.g === it.g) s += 1.5;
@@ -53,17 +53,20 @@ V.route('title', function (view, r) {
       html += '<button class="btn primary lg" data-a="play">' + V.icon('play') + ' ' + (resume ? 'Resume' : 'Play') + '</button>';
       if (resume) html += '<button class="btn lg" data-a="restart">' + V.icon('restart') + ' From the start</button>';
     }
+    // The round buttons: only what's used most (My List, rating, download, new-episode alerts). Queue, Send and Watch
+    // together are under More — a long row of icons wrapped onto two or three lines, and was hard to read.
     var inList = V.inList('list', it.k), rate = V.ratingOf(it.k);
-    html += '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
-      (V.queue ? '<button class="icon-btn lg" data-a="queue" data-qk="' + V.esc(it.k) + '" aria-pressed="' + V.queue.has(it.k) + '" title="Queue: play next or later" aria-label="Queue: play next or later">' + V.icon('playlist') + '</button>' : '') +
+    html += '<div class="tp-icons">' +
+      '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
       '<button class="icon-btn lg" data-a="up" aria-pressed="' + (rate > 0) + '" title="I like this" aria-label="I like this">' + V.icon(rate > 0 ? 'thumbupf' : 'thumbup') + '</button>' +
       '<button class="icon-btn lg" data-a="down" aria-pressed="' + (rate < 0) + '" title="Not for me" aria-label="Not for me">' + V.icon(rate < 0 ? 'thumbdownf' : 'thumbdown') + '</button>' +
-      '<button class="icon-btn lg" data-a="share" title="Send to someone" aria-label="Send to someone">' + V.icon('send') + '</button>' +
-      (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" title="Watch together" aria-label="Watch together">' + V.icon('party') + '</button>' : '') +
       (!isShow && S.settings.allowDownloads ? '<button class="icon-btn lg" data-a="dl" title="Download" aria-label="Download">' + V.icon('download') + '</button>' : '') +
       (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
-      '<button class="icon-btn lg" data-a="more" title="More" aria-label="More">' + V.icon('dots') + '</button>';
+      '<button class="icon-btn lg" data-a="more" title="More: queue, send, watch together…" aria-label="More">' + V.icon('dots') + '</button></div>';
+    // (Drawn again — the episodes arrived, a rating — the button that had the focus keeps it: on a TV it would be lost.)
+    var had = document.activeElement && V.$('.tp-acts', view).contains(document.activeElement) ? document.activeElement.getAttribute('data-a') : null;
     V.$('.tp-acts', view).innerHTML = html;
+    if (had) { var back = V.$('.tp-acts [data-a="' + had + '"]', view); if (back) back.focus({ preventScroll: true }); }
     // Short names under the round buttons (shown on touch screens and TVs, where there's no hover to explain them).
     var names = { list: 'My List', queue: 'Queue', up: 'Like', down: 'Not for me', share: 'Send', party: 'Together', dl: 'Download', bell: 'Alerts', more: 'More' };
     V.$$('.tp-acts .icon-btn', view).forEach(function (b) { var n = names[b.dataset.a] || b.getAttribute('aria-label') || ''; if (n) b.setAttribute('data-l', n); });
@@ -78,7 +81,7 @@ V.route('title', function (view, r) {
     else if (a === 'restart') V.play(it, { startAt: 0 });
     else if (a === 'shuffle') V.shuffleShow(it);
     else if (a === 'list') V.toggle('list', it.k).then(function (on) { b.innerHTML = V.icon(on ? 'check' : 'plus'); b.setAttribute('aria-pressed', on); V.toast(on ? 'Added to My List' : 'Removed from My List'); });
-    else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var cur = V.ratingOf(it.k); V.rate(it.k, cur === v ? 0 : v); drawActs(it._eps); if (cur !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
+    else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var cur = V.ratingOf(it.k); V.rate(it.k, cur === v ? 0 : v); drawActs(it._eps || S.epsByShow.get(it.k)); if (cur !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
     else if (a === 'share') V.shareDialog(it);
     else if (a === 'party') V.party.startDialog(it);
     else if (a === 'dl') V.downloads.start(it);
@@ -112,6 +115,7 @@ V.route('title', function (view, r) {
         V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };
       } else drawEpisodes(eps);
       drawActs(eps);
+      if (typeof drawBookmarks === 'function') drawBookmarks(); // (episode bookmarks, now the episodes are known)
     }
   }).catch(function (e) {
     if (!isShow) return;
@@ -134,8 +138,9 @@ V.route('title', function (view, r) {
         var pct = V.pctOf(e.k);
         var img = e.i || it.i;
         var isNew = V.isNewEpisode(it.k, e.k);
+        // (The number before the title shows only on phones, where the number column is hidden: "3 · Low Tide".)
         return '<div class="ep' + (rp.ep && rp.ep.k === e.k ? ' cur' : '') + '" data-k="' + V.esc(e.k) + '"><button class="ep-play" data-ep="play" aria-label="Play ' + V.esc(V.epLabel(e) + ' ' + (e.et || '')) + '"><span class="ep-n num">' + e.e + '</span><span class="ep-art" style="--tint:' + V.tint(e.n) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '<span class="ep-pl">' + V.icon('play') + '</span>' + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span></button>' +
-          '<div class="ep-body"><div class="ep-t"><b>' + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + (e.d ? V.fmtLen(e.d) : '') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
+          '<div class="ep-body"><div class="ep-t"><b>' + (e.et && e.e != null ? '<span class="ep-tn num">' + e.e + ' · </span>' : '') + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + (e.d ? V.fmtLen(e.d) : '') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
           '<button class="icon-btn" data-ep="menu" aria-label="More for this episode">' + V.icon('dots') + '</button></div>';
       }).join('');
     };
@@ -160,14 +165,22 @@ V.route('title', function (view, r) {
     };
   }
 
-  // Bookmarks for this title.
+  // Bookmarks for this title (drawn again once a series' episodes are known: theirs are found by the episode).
+  var drawBookmarks = function () {
   var bms = S.data.bookmarks.filter(function (b) { var x = V.entry(b.k); return b.k === it.k || (x && x.sk === it.k); });
   if (bms.length) {
     var bs = V.$('.tp-bm', view);
     bs.hidden = false;
-    bs.innerHTML = '<h2>Your bookmarks</h2><ul class="bms">' + bms.map(function (b) { var x = V.entry(b.k); return '<li><button class="btn sm" data-bm="' + b.id + '">' + V.icon('play') + ' ' + V.fmtDur(b.t) + '</button><span>' + (x && x.t === 'episode' ? '<b>' + V.esc(V.epLabel(x)) + '</b> ' : '') + V.esc(b.note || '') + '</span></li>'; }).join('') + '</ul>';
+    // In order (by episode, then time); bookmarks with nothing to say but the time sit side by side.
+    bms = bms.slice().sort(function (a, b) { var xa = V.entry(a.k) || {}, xb = V.entry(b.k) || {}; return ((xa.s || 0) - (xb.s || 0)) || ((xa.e || 0) - (xb.e || 0)) || (a.t - b.t); });
+    // (The same moment saved twice shows once.)
+    bms = bms.filter(function (b, i) { return !bms.slice(0, i).some(function (o) { return o.k === b.k && Math.abs(o.t - b.t) < 3 && (o.note || '') === (b.note || ''); }); });
+    var bare = bms.every(function (b) { var x = V.entry(b.k); return !b.note && !(x && x.t === 'episode'); });
+    bs.innerHTML = '<h2>Your bookmarks</h2><ul class="bms' + (bare ? ' bare' : '') + '">' + bms.map(function (b) { var x = V.entry(b.k); return '<li><button class="btn sm" data-bm="' + b.id + '">' + V.icon('play') + ' ' + V.fmtDur(b.t) + '</button><span>' + (x && x.t === 'episode' ? '<b>' + V.esc(V.epLabel(x)) + '</b> ' : '') + V.esc(b.note || '') + '</span></li>'; }).join('') + '</ul>';
     bs.onclick = function (e) { var b = e.target.closest('[data-bm]'); if (!b) return; var bm = bms.filter(function (x) { return x.id === b.dataset.bm; })[0]; V.play(V.entry(bm.k), { startAt: bm.t }); };
   }
+  };
+  drawBookmarks();
   var more = V.row({ id: 'similar', title: 'More like this', items: V.similar(it) });
   if (more) V.$('.tp-more', view).appendChild(more);
 });

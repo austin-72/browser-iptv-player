@@ -1,0 +1,12 @@
+/* Refinements: Admin → Channels filters on phones, and a small touch on Your channel lists. */
+
+/* ---- Admin → Channels on phones: the search on its own line, then the four filters two by two (not 2 + 1 + 1) */
+@media (max-width: 600px) {
+  .ce-tools { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .ce-tools > * { min-width: 0; }
+  .ce-tools .input { width: 100%; min-width: 0; }
+  .ce-tools .input[type=search] { grid-column: 1 / -1; }
+}
+
+/* ---- Your channel lists: "No channels match" sits close under the search box */
+.mych-found > p { margin: .2rem .2rem .4rem; }

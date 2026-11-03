@@ -37,7 +37,7 @@ V.route('mine', function (view, r) {
     body.innerHTML = bms.length ? '<ul class="bm-list">' + bms.map(function (b) {
       var it = V.entry(b.k);
       var show = it && it.t === 'episode' ? V.showOf(it) : null;
-      return '<li data-id="' + b.id + '">' + V.art(it ? it.i || (show || {}).i : '', b.n, 'art bm-art') + '<div class="bm-b"><b>' + V.esc(show ? show.n + ' · ' + V.epLabel(it) : (it ? it.n : b.n)) + '</b><span class="dim">at ' + V.fmtDur(b.t) + ' · ' + V.fmtAgo(b.at) + '</span>' + (b.note ? '<p>' + V.esc(b.note) + '</p>' : '') + '</div>' +
+      return '<li data-id="' + V.esc(b.id) + '">' + V.art(it ? it.i || (show || {}).i : '', b.n, 'art bm-art') + '<div class="bm-b"><b>' + V.esc(show ? show.n + ' · ' + V.epLabel(it) : (it ? it.n : b.n)) + '</b><span class="dim">at ' + V.fmtDur(b.t) + ' · ' + V.fmtAgo(b.at) + '</span>' + (b.note ? '<p>' + V.esc(b.note) + '</p>' : '') + '</div>' +
         '<div class="bm-acts">' + (it ? '<button class="btn sm primary" data-bm="play">' + V.icon('play') + ' Play</button>' : '<span class="dim">No longer available</span>') + '<button class="icon-btn" data-bm="note" aria-label="Edit note">' + V.icon('edit') + '</button><button class="icon-btn" data-bm="share" aria-label="Send to someone">' + V.icon('send') + '</button><button class="icon-btn" data-bm="del" aria-label="Delete">' + V.icon('trash') + '</button></div></li>';
     }).join('') + '</ul>' : V.empty('No bookmarks yet', 'While watching, press ' + V.icon('bookmark', 'tiny') + ' (or B) to bookmark a moment and add a note.');
     body.onclick = function (e) {
@@ -60,15 +60,15 @@ V.route('mine', function (view, r) {
         var sec = document.createElement('section');
         sec.className = 'shared-list';
         var owner = names[l.owner];
-        sec.innerHTML = '<div class="row-h"><h2>' + V.esc(l.name) + '</h2><span class="dim">' + (owner ? 'by ' + V.esc(owner.name) + ' · ' : '') + V.plural(items.length, 'title') + '</span><span class="sp"></span>' + (l.owner === S.profile.id || S.profile.admin ? '<button class="icon-btn" data-l-ren="' + l.id + '" aria-label="Rename">' + V.icon('edit') + '</button><button class="icon-btn" data-l-del="' + l.id + '" aria-label="Delete list">' + V.icon('trash') + '</button>' : '') + '</div><div class="grid-host"></div>';
+        sec.innerHTML = '<div class="row-h"><h2>' + V.esc(l.name) + '</h2><span class="dim">' + (owner ? 'by ' + V.esc(owner.name) + ' · ' : '') + V.plural(items.length, 'title') + '</span><span class="sp"></span>' + (l.owner === S.profile.id || S.profile.admin ? '<button class="icon-btn" data-l-ren="' + V.esc(l.id) + '" aria-label="Rename">' + V.icon('edit') + '</button><button class="icon-btn" data-l-del="' + V.esc(l.id) + '" aria-label="Delete list">' + V.icon('trash') + '</button>' : '') + '</div><div class="grid-host"></div>';
         body.appendChild(sec);
         if (items.length) V.grid(V.$('.grid-host', sec), items); else V.$('.grid-host', sec).innerHTML = '<p class="dim">Add titles with the “…” menu on any movie or series.</p>';
       });
       body.onclick = function (e) {
         var b;
         if (e.target.closest('[data-new]')) V.prompt('Name the shared list', { placeholder: 'Movie night', max: 60 }).then(function (n) { if (n) V.api('/api/lists', { body: { name: n } }).then(function () { V.router.refresh(); }).catch(V.fail); });
-        else if ((b = e.target.closest('[data-l-del]'))) V.confirm('Delete this shared list for everyone?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/lists/' + b.dataset.lDel).then(function () { V.router.refresh(); }).catch(V.fail); });
-        else if ((b = e.target.closest('[data-l-ren]'))) V.prompt('Rename', { max: 60 }).then(function (n) { if (n) V.put('/api/lists/' + b.dataset.lRen, { name: n }).then(function () { V.router.refresh(); }).catch(V.fail); });
+        else if ((b = e.target.closest('[data-l-del]'))) V.confirm('Delete this shared list for everyone?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/lists/' + encodeURIComponent(b.dataset.lDel)).then(function () { V.router.refresh(); }).catch(V.fail); });
+        else if ((b = e.target.closest('[data-l-ren]'))) V.prompt('Rename', { max: 60 }).then(function (n) { if (n) V.put('/api/lists/' + encodeURIComponent(b.dataset.lRen), { name: n }).then(function () { V.router.refresh(); }).catch(V.fail); });
       };
     }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
   } else if (tab === 'history') {
@@ -102,12 +102,12 @@ V.route('mine', function (view, r) {
           '<button class="btn sm" data-h="play" aria-label="' + (pct > 0 && pct < 1 ? 'Resume' : 'Play') + '">' + V.icon('play') + (pct > 0 && pct < 1 ? ' Resume' : '') + '</button><button class="icon-btn" data-h="del" aria-label="Remove from history">' + V.icon('x') + '</button></li>';
       }).join('') + '</ul>' : V.empty('Nothing watched yet', 'Things you watch (or start) show up here.'));
     V.$('[data-pause]', body).onchange = function (e) { V.setPref('historyPaused', e.target.checked); V.toast(e.target.checked ? 'History paused' : 'History on'); };
-    V.$('[data-clear]', body).onclick = function () { V.confirm('Clear your whole watch history, progress and searches? Recommendations start over.', { ok: 'Clear', danger: true }).then(function (ok) { if (!ok) return; V.del('/api/history').then(function () { S.data.history = []; S.data.progress = {}; S.data.searches = []; V.router.refresh(); }); }); };
+    V.$('[data-clear]', body).onclick = function () { V.confirm('Clear your whole watch history, progress and searches? Recommendations start over.', { ok: 'Clear', danger: true }).then(function (ok) { if (!ok) return; V.del('/api/history').then(function () { S.data.history = []; S.data.progress = {}; S.data.searches = []; V.router.refresh(); }).catch(V.fail); }); }; // (not cleared: say so)
     body.addEventListener('click', function (e) {
       var b = e.target.closest('[data-h]'); if (!b) return;
       var h = hist[+b.closest('[data-i]').dataset.i];
       if (b.dataset.h === 'play') { var e2 = V.entry(h.k); if (e2) V.play(e2); else if (h.sk && S.byKey.get(h.sk)) V.router.go(V.hrefOf(S.byKey.get(h.sk))); }
-      else V.del('/api/history?k=' + encodeURIComponent(h.k)).then(function () { S.data.history = S.data.history.filter(function (x) { return x.k !== h.k; }); delete S.data.progress[h.k]; V.router.refresh(); });
+      else V.del('/api/history?k=' + encodeURIComponent(h.k)).then(function () { S.data.history = S.data.history.filter(function (x) { return x.k !== h.k; }); delete S.data.progress[h.k]; V.router.refresh(); }).catch(V.fail);
     });
   }
 });

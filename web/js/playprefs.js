@@ -28,7 +28,7 @@
         var k = t.dataset.lsSel, v = k === 'rewindMin' ? +t.value : t.value;
         V.ls.set(k, v);
         if (k === 'onOpen') { var box = V.$('[data-open-ch]', view); if (box) box.hidden = v !== 'channel'; }
-        V.toast(k === 'bufferSize' || k === 'rewindMin' ? 'Saved — from the next channel or video' : 'Saved');
+        V.toast(k === 'bufferSize' || k === 'rewindMin' ? 'Saved — applies from the next channel or video' : 'Saved');
       }
     });
   };
@@ -58,13 +58,25 @@
     var left = 10;
     var text = function () { return '“' + r.t + '” is starting on ' + c.n + ' — switching in ' + left + ' s'; };
     t.innerHTML = '<span data-t>' + V.esc(text()) + '</span><button class="toast-act" data-go>Switch now</button><button class="toast-act" data-no>Cancel</button>';
-    var timer;
-    var close = function () { clearInterval(timer); t.classList.add('out'); setTimeout(function () { t.remove(); }, 250); };
-    var go = function () { close(); V.play(c); };
+    var timer, before = document.activeElement;
+    var close = function () {
+      clearInterval(timer);
+      // (Focus was on its buttons: back to where it was, so a remote's arrows still have somewhere to start.)
+      var had = t.contains(document.activeElement);
+      t.classList.add('out');
+      setTimeout(function () { t.remove(); }, 250);
+      if (had && before && before !== document.body && before.focus && document.documentElement.contains(before)) { try { before.focus({ preventScroll: true }); } catch (e) {} }
+    };
+    var go = function () { close(); if (!(V.watch && V.watch.it && V.watch.it.k === c.k)) V.play(c); };
     V.$('[data-go]', t).onclick = go;
     V.$('[data-no]', t).onclick = close;
     box.appendChild(t);
-    timer = setInterval(function () { left--; if (left <= 0) go(); else V.$('[data-t]', t).textContent = text(); }, 1000);
+    timer = setInterval(function () {
+      // Taken away meanwhile (signed out, toasts cleared): no switching.
+      if (!t.isConnected) return clearInterval(timer);
+      left--;
+      if (left <= 0) go(); else V.$('[data-t]', t).textContent = text();
+    }, 1000);
     // On a TV the remote can reach it at once.
     if (V.tvMode) setTimeout(function () { var b = V.$('[data-no]', t); if (b) b.focus(); }, 50);
   };

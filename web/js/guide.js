@@ -9,8 +9,9 @@ V.route('guide', function (view, r) {
   var onlyEpg = V.ls.get('guideOnlyEpg', true);
   var maxPast = Math.max(0, Math.min(7, S.live.reduce(function (m, c) { return c.cu ? Math.max(m, (c.cu.days || 7)) : m; }, 0)));
   var day0 = new Date(); day0.setHours(0, 0, 0, 0);
-  var start = day0.getTime() + dayOff * 86400e3;
-  var end = start + 86400e3;
+  // (Midnight to midnight of that day by the calendar: a day the clocks change is 23 or 25 hours long.)
+  var start = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + dayOff).getTime();
+  var end = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + dayOff + 1).getTime();
   var groups = V.groupsOf('live').sort(function (a, b) { return a.name.localeCompare(b.name); });
   // Only channels in your languages (Settings → Languages): ones whose language couldn't be worked out stay out
   // of the guide (they're still on the Live TV page). Favourites always show.
@@ -19,7 +20,7 @@ V.route('guide', function (view, r) {
   var mine = g === '__fav' || g.indexOf('__my:') === 0;
   var chans = (g ? V.channelsFor(g, 'live') : S.live).filter(function (c) { return (!onlyEpg || c.E) && (mine || langOk(c)); });
   var dayOpts = [];
-  for (var d = -maxPast; d <= 7; d++) dayOpts.push('<option value="' + d + '"' + (d === dayOff ? ' selected' : '') + '>' + V.fmtDay(day0.getTime() + d * 86400e3 + 3600e3) + '</option>');
+  for (var d = -maxPast; d <= 7; d++) dayOpts.push('<option value="' + d + '"' + (d === dayOff ? ' selected' : '') + '>' + V.fmtDay(new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + d, 12).getTime()) + '</option>');
   view.innerHTML = V.pageHead('TV guide', '<div class="page-tools">' +
     '<select class="input" data-day aria-label="Day">' + dayOpts.join('') + '</select>' +
     '<select class="input" data-grp aria-label="Group">' + V.channelGroups('live', { recent: false, empty: true }).map(function (x) { return '<option value="' + V.esc(x.v) + '"' + (x.v === g ? ' selected' : '') + '>' + V.esc(x.l) + '</option>'; }).join('') + '</select>' +
@@ -61,20 +62,47 @@ V.route('guide', function (view, r) {
           if (rr - l < 2) return;
           var cls = (p.e <= now ? (V.catchup.canPlay(c, p) ? 'past arch' : 'past') : p.s <= now ? 'now' : '') + (p.ph ? ' ph' : colours ? ' k-' + (V.progKind(p, c) || 'none') : '');
           var rem = V.hasReminder(c, p);
-          html += '<button class="gp ' + cls + '" style="top:' + i * ROW + 'px;left:' + l + 'px;width:' + (rr - l - 2) + 'px" data-k="' + V.esc(c.k) + '" data-s="' + p.s + '" title="' + V.esc(p.t + ' · ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e)) + '"><b class="truncate">' + (rem ? V.icon('bellf', 'tiny') : '') + V.esc(p.t) + '</b><small class="truncate">' + V.fmtClock(p.s) + (p.st ? ' · ' + V.esc(p.st) : '') + '</small></button>';
+          html += '<button class="gp ' + cls + '" data-r="' + i + '" style="top:' + i * ROW + 'px;left:' + l + 'px;width:' + (rr - l - 2) + 'px" data-k="' + V.esc(c.k) + '" data-s="' + p.s + '" title="' + V.esc(p.t + ' · ' + V.fmtClock(p.s) + '–' + V.fmtClock(p.e)) + '"><b class="truncate">' + (rem ? V.icon('bellf', 'tiny') : '') + V.esc(p.t) + '</b><small class="truncate">' + V.fmtClock(p.s) + (p.st ? ' · ' + V.esc(p.st) : '') + '</small></button>';
         });
         // The listings stop part-way through the day: say so in the empty space rather than leave it blank.
         var last = list.length ? list[list.length - 1].e : 0;
         if (last && last < end - 30 * 60e3) { var ll = Math.max(0, px(last)); html += '<div class="gp none" style="top:' + i * ROW + 'px;left:' + ll + 'px;width:' + (width - ll) + 'px"><span class="gp-stick">' + (last > start ? 'No listings after ' + V.fmtClock(last) : 'No listings') + '</span></div>'; }
       });
       canvas.insertAdjacentHTML('beforeend', html);
+      queueShift();
       if (wantNow) focusNow();
     });
   }
   var placeNow = function () { var n = Date.now(); nowline.hidden = n < start || n > end; nowline.style.left = px(n) + 'px'; nowline.style.height = chans.length * ROW + 'px'; };
   placeNow();
+  // A programme that began before the visible part of the guide: its title and time move along to the left edge, so
+  // "World Today" doesn't read "rld Today". (Padding on just the rows on screen, once a frame: older TV browsers
+  // don't keep position: sticky inside a box scrolled sideways.)
+  var shifted = [], shiftQueued = false, pad0 = null;
+  function shiftTitles() {
+    shiftQueued = false;
+    var x = body.scrollLeft, a = Math.floor(body.scrollTop / ROW), b = Math.min(chans.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW));
+    shifted.forEach(function (el) { el.style.paddingLeft = ''; el.classList.remove('gp-sliver'); });
+    shifted = [];
+    if (x <= 0) return;
+    for (var i = a; i < b; i++) V.$$('.gp[data-s][data-r="' + i + '"]', canvas).forEach(function (el) {
+      var l = parseFloat(el.style.left), w = parseFloat(el.style.width);
+      if (l >= x || l + w <= x) return;
+      if (pad0 === null) pad0 = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+      // (Never more than the block is wide: the text just gets cut short with "…" when only a sliver shows.)
+      el.style.paddingLeft = pad0 + Math.max(0, Math.min(x - l, w - pad0 * 2 - 8)) + 'px';
+      // (Too thin a sliver to read anything in: blank, rather than a stray letter.)
+      if (l + w - x < 32) el.classList.add('gp-sliver');
+      shifted.push(el);
+    });
+  }
+  function queueShift() {
+    if (shiftQueued) return;
+    shiftQueued = true;
+    (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(shiftTitles);
+  }
   var tdraw = V.throttle(draw, 80);
-  body.addEventListener('scroll', function () { times.scrollLeft = body.scrollLeft; side.scrollTop = body.scrollTop; tdraw(); }, { passive: true });
+  body.addEventListener('scroll', function () { times.scrollLeft = body.scrollLeft; side.scrollTop = body.scrollTop; queueShift(); tdraw(); }, { passive: true });
   // From the start of the current half hour, so what's on now shows with its title (and the now line just after).
   var scrollNow = function () { body.scrollLeft = Math.max(0, px(Math.floor(Date.now() / 1800e3) * 1800e3) - 16); };
   if (dayOff === 0) scrollNow(); else body.scrollLeft = px(start + 18 * 3600e3);
@@ -106,11 +134,17 @@ V.route('guide', function (view, r) {
     e.preventDefault(); e.stopPropagation();
     if (cur.classList.contains('none')) return;
     var top = parseFloat(cur.style.top), left = parseFloat(cur.style.left), w = parseFloat(cur.style.width);
-    var all = V.$$('.gp[data-s]', canvas);
+    // Up/Down: the nearest row that has programmes to move to (a channel without listings is passed over).
+    // (Only this row's programmes, or the next row's that has any — not every programme drawn so far.)
+    var r0 = parseInt(cur.dataset.r, 10), all = [], rowTop = null;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      for (var step = 1; step <= 60 && !all.length; step++) { all = V.$$('.gp[data-s][data-r="' + (r0 + (e.key === 'ArrowDown' ? step : -step)) + '"]', canvas); }
+      if (all.length) rowTop = parseFloat(all[0].style.top);
+    } else all = V.$$('.gp[data-s][data-r="' + r0 + '"]', canvas);
     var best = null, bd = Infinity;
     all.forEach(function (x) {
       var t2 = parseFloat(x.style.top), l2 = parseFloat(x.style.left), w2 = parseFloat(x.style.width);
-      var ok = e.key === 'ArrowRight' ? t2 === top && l2 > left : e.key === 'ArrowLeft' ? t2 === top && l2 < left : e.key === 'ArrowDown' ? t2 === top + ROW : t2 === top - ROW;
+      var ok = e.key === 'ArrowRight' ? t2 === top && l2 > left : e.key === 'ArrowLeft' ? t2 === top && l2 < left : rowTop !== null && t2 === rowTop;
       if (!ok) return;
       var dd = e.key === 'ArrowRight' ? l2 - left : e.key === 'ArrowLeft' ? left - l2 : Math.abs((l2 + w2 / 2) - (left + w / 2));
       if (dd < bd) { bd = dd; best = x; }
@@ -127,7 +161,7 @@ V.route('guide', function (view, r) {
     V.$('[data-day]', view).onchange = function (e) { go('d', e.target.value === '0' ? '' : e.target.value); };
     V.$('[data-grp]', view).onchange = function (e) { V.ls.set('guidegroup', e.target.value); go('g', e.target.value); };
     V.$('[data-only]', view).onchange = function (e) { V.ls.set('guideOnlyEpg', e.target.checked); V.router.refresh(); };
-    V.$('[data-now]', view).onclick = function () { if (dayOff) go('d', ''); else scrollNow(); };
+    V.$('[data-now]', view).onclick = function () { if (dayOff) go('d', ''); else if (typeof scrollNow === 'function') scrollNow(); }; // (the empty guide has none)
     var lc = V.$('[data-colours]', view);
     if (lc) lc.onchange = function () { V.setPref('guideColours', lc.checked); V.router.refresh(); };
     V.$('[data-sf]', view).onsubmit = function (e) { e.preventDefault(); var q = V.$('[data-sq]', view).value.trim(); if (q) V.programmeSearch(q); };

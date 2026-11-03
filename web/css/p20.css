@@ -1,0 +1,21 @@
+/* p20: small fixes for Statistics (watching at once), Find guides and the admin's live sections. */
+
+/* "Watching at once": the chart's tooltip is placed against this box. */
+.cc-one { position: relative; }
+
+/* Statistics while another period loads: dimmed, not blanked. */
+.admin-body.st-loading { opacity: .55; transition: opacity .15s; }
+
+/* Find guides: a little room between the back button and the card. */
+.gf-tools { margin-bottom: .9rem; }
+
+/* Phones: the "watching at once" table and week grid fit the screen instead of scrolling sideways. */
+@media (max-width: 560px) {
+  .cc .cc-table th { white-space: normal; letter-spacing: 0; line-height: 1.2; vertical-align: bottom; font-size: .7rem; }
+  .cc .cc-table th, .cc .cc-table td { padding-left: .25rem; padding-right: .25rem; }
+  .cc .cc-table td.r { white-space: normal; }
+  .cc .cc-table td.truncate { max-width: 6.5rem; white-space: normal; overflow-wrap: anywhere; }
+  .cc .cc-bar { width: 2.6rem; }
+  .cc-grid { min-width: 0; grid-template-columns: 2rem repeat(24, minmax(0, 1fr)); gap: 1px; }
+  .cc-c { height: 15px; border-radius: 2px; }
+}

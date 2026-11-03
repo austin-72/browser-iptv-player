@@ -91,20 +91,23 @@
   V.adminTabs.health = function (body) {
     var A = null, timer = null;
     var qs = function () { return 'list=' + encodeURIComponent(mem.list) + '&show=' + encodeURIComponent(mem.show) + '&q=' + encodeURIComponent(mem.q) + '&n=200'; };
+    var seq = 0;
     var load = function () {
+      var mine = ++seq;
       return V.api('/api/admin/health?' + qs()).then(function (r) {
-        if (!body.isConnected) return;
+        // (An older answer arriving after a newer one — typing in the search — mustn't draw over it.)
+        if (!body.isConnected || mine !== seq) return;
         A = r; draw();
         clearTimeout(timer);
         if (r.providers.some(function (p) { return (p.job && !p.job.done) || p.current; })) timer = setTimeout(load, 3000);
-      }).catch(function (e) { body.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; });
+      }).catch(function (e) { if (body.isConnected && mine === seq) body.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; });
     };
     var draw = function () {
       var o = A.opts, sm = A.summary;
       var keep = focusKey();
       var hours = function (cur) { var h = ''; for (var i = 0; i < 24; i++) h += '<option value="' + i + '"' + (i === cur ? ' selected' : '') + '>' + hh(i) + '</option>'; return h; };
       body.innerHTML =
-        '<section class="card-sec"><h2>Channel health</h2>' +
+        '<section class="card-sec"><h2>Summary</h2>' +
         '<p class="dim">Each time someone plays a channel, their device already tells the server whether it worked, from which provider and what went wrong. That’s counted here per channel and per provider, without opening anything extra. Channels whose every copy keeps failing get a “May be down” badge in Live TV, the guide and the channel’s page, so nobody keeps trying them.</p>' +
         '<div class="stats">' + [['Failing now', sm.failing], ['No copy works', sm.down], ['A backup works', sm.backup], ['Marked “may be down”', sm.marked]].map(function (x) { return '<div class="stat"><b class="num">' + x[1] + '</b><span>' + x[0] + '</span></div>'; }).join('') + '</div></section>' +
         '<section class="card-sec"><h2>Providers</h2>' + (A.providers.length ? '<ul class="hl-provs">' + A.providers.map(function (p) { return provHtml(p, A); }).join('') + '</ul>' : '<p class="dim">No lists yet.</p>') + '</section>' +
@@ -146,8 +149,8 @@
       var b = e.target.closest('button');
       if (!b) return;
       var pv = b.closest('[data-id]'), row = b.closest('[data-k]');
-      if (b.hasAttribute('data-check')) { b.disabled = true; V.api('/api/admin/health/lists/' + pv.dataset.id + '/check', { method: 'POST' }).then(load).catch(function (x) { V.fail(x); load(); }); }
-      else if (b.hasAttribute('data-stop')) V.del('/api/admin/health/lists/' + pv.dataset.id + '/check').then(load).catch(V.fail);
+      if (b.hasAttribute('data-check')) { b.disabled = true; V.api('/api/admin/health/lists/' + encodeURIComponent(pv.dataset.id) + '/check', { method: 'POST' }).then(load).catch(function (x) { V.fail(x); load(); }); }
+      else if (b.hasAttribute('data-stop')) V.del('/api/admin/health/lists/' + encodeURIComponent(pv.dataset.id) + '/check').then(load).catch(V.fail);
       else if (b.hasAttribute('data-prefer')) V.api('/api/admin/health/prefer', { body: { k: row.dataset.k, id: b.dataset.prefer } }).then(function () { V.toast(b.dataset.prefer ? 'That backup plays first from now on' : 'Back to the usual order'); load(); }).catch(V.fail);
       else if (b.hasAttribute('data-forget')) V.api('/api/admin/health/forget', { body: { k: row.dataset.k } }).then(load).catch(V.fail);
       else if (b.hasAttribute('data-forgetall')) V.confirm('Forget every failure recorded so far? The providers’ 7-day history goes too.', { ok: 'Forget' }).then(function (ok) { if (ok) V.api('/api/admin/health/forget', { body: {} }).then(load).catch(V.fail); });
@@ -166,7 +169,8 @@
     };
     body.addEventListener('toggle', function (e) { if (e.target.classList && e.target.classList.contains('hl-set')) mem.setOpen = e.target.open; }, true);
     body.oninput = V.debounce(function (e) { if (e.target.dataset.f === 'q') { mem.q = e.target.value.trim(); load(); } }, 300);
-    V.pageCleanup = function () { clearTimeout(timer); };
+    var prevCleanup = V.pageCleanup;
+    V.pageCleanup = function () { clearTimeout(timer); if (prevCleanup) prevCleanup(); };
     load();
   };
 })();

@@ -590,7 +590,7 @@ test('relay 5: films of one account share its connections (everyone kept ahead),
     assert.ok(ra.got >= SIZE / 60 * 8 && rb.got >= SIZE / 60 * 6, `both kept playing (${(ra.got / MB).toFixed(1)} MB and ${(rb.got / MB).toFixed(1)} MB)`);
     assert.ok(ra.longest < 2500 && rb.longest < 2500, `no long waits (${ra.longest} ms, ${rb.longest} ms)`);
     let d = await downloads();
-    assert.strictEqual(d.version, '5');
+    assert.strictEqual(d.version, '6');
     assert.strictEqual(d.accounts.acc1.budget, 1);
     assert.ok(!d.strain.some((e) => e.a === 'acc1'), 'it kept up: ' + JSON.stringify(d.strain));
 
@@ -638,7 +638,7 @@ test('relay 5 on the server: films it shares connections for count once; budgets
   const L = use.get('L');
   assert.deepStrictEqual(L.map((c) => c.id), ['a', 'b'], 'f1 and f2 together once, f3 not at all (the relay has it)');
   assert.ok(L[0].relayShared);
-  assert.deepStrictEqual(L[0].viewers, ['a', 'c']);
+  assert.deepStrictEqual(L[0].viewers.map((v) => v.id), ['a', 'c']);
   // The relay is told each account's share, signed, and answers with what it couldn't do.
   const crypto = require('crypto');
   const { relayDownloads, acctId } = require('../lib/streamrelay');
@@ -661,4 +661,52 @@ test('relay 5 on the server: films it shares connections for count once; budgets
   assert.strictEqual(r.strain.length, 1);
   assert.strictEqual(r.strain[0].name, 'Main');
   assert.strictEqual(r.providers[0].strain, 1);
+});
+
+test('relay 5: a film nobody reads stops downloading; a request the provider can’t be asked doesn’t hang; a refusal is tried again', { timeout: 60000 }, async () => {
+  const SIZE = 8 * 1048576;
+  let open = 0, refuse = true;
+  const prov = http.createServer((req, res) => {
+    if (req.url === '/busy.mp4' && refuse) { res.writeHead(403, { 'content-type': 'text/plain' }); return res.end('too many connections'); }
+    open++; res.on('close', () => open--);
+    const m = /bytes=(\d+)-/.exec(req.headers.range || ''); const a = m ? +m[1] : 0;
+    res.writeHead(206, { 'content-type': 'video/mp4', 'content-length': SIZE - a, 'content-range': `bytes ${a}-${SIZE - 1}/${SIZE}` });
+    let p = a;
+    const step = () => { if (res.destroyed) return; if (p >= SIZE) return res.end(); res.write(Buffer.alloc(65536, 1)); p += 65536; setTimeout(step, 50); };
+    step();
+  });
+  await new Promise((ok) => prov.listen(0, '127.0.0.1', ok));
+  const P = prov.address().port;
+  const relay = await startRelay({ RELAY_ALLOW_PRIVATE: '1', RELAY_CACHE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'relay5b-')), RELAY_IDLE_STOP_MS: '800' });
+  try {
+    // A HEAD request starts the film, but nobody reads it: the provider connection goes after the idle time.
+    const u = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/a.mp4`, {}, 3600, { w: 1, i: 'a' });
+    const h = await fetch(u, { method: 'HEAD' });
+    assert.strictEqual(h.headers.get('content-length'), String(SIZE));
+    await wait(400);
+    assert.strictEqual(open, 1);
+    await wait(1500);
+    assert.strictEqual(open, 0, 'the download stopped');
+    // A header the request can't carry: an answer, not a request that waits forever.
+    // (Sealed by hand: the server's own relayUrl() leaves such a header out.)
+    const crypto = require('crypto');
+    const iv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', crypto.createHash('sha256').update('relay-key:' + SECRET).digest(), iv);
+    const body = Buffer.concat([c.update(JSON.stringify({ u: `http://127.0.0.1:${P}/b.mp4`, h: { 'X-Bad': 'caf\u0101' }, e: Math.floor(Date.now() / 1000) + 600, w: 1, i: 'b' })), c.final()]);
+    const bad = `${relay.base}/e/${Buffer.concat([iv, body, c.getAuthTag()]).toString('base64url')}/b.mp4`;
+    const t0 = Date.now();
+    const r = await fetch(bad, { signal: AbortSignal.timeout(8000) });
+    assert.ok(r.status >= 400 && Date.now() - t0 < 5000, 'answered ' + r.status);
+    // "Too many connections" at the start: next time it's tried again as a whole film (not relayed as it comes).
+    const busy = relayUrl(relay.base, SECRET, `http://127.0.0.1:${P}/busy.mp4`, {}, 3600, { w: 1, i: 'busy' });
+    assert.strictEqual((await fetch(busy, { headers: { Range: 'bytes=0-99' } })).status, 403);
+    refuse = false;
+    const ok = await fetch(busy, { headers: { Range: 'bytes=0-99' } });
+    assert.strictEqual(ok.status, 206);
+    await ok.arrayBuffer();
+    const t = String(Math.floor(Date.now() / 1000));
+    const sig = require('crypto').createHmac('sha256', SECRET).update('downloads::' + t).digest('base64url').slice(0, 32);
+    const d = await (await fetch(`${relay.base}/downloads?t=${t}&s=${sig}`)).json();
+    assert.ok(d.films.some((f) => f.ids.includes('busy')), 'kept whole this time');
+  } finally { relay.p.kill(); prov.close(); }
 });

@@ -348,7 +348,7 @@
       var b = e.target.closest('[data-t]'); if (!b) return;
       var a = b.dataset.t;
       if (a === 'connect') { b.disabled = true; V.api('/api/trakt/connect', { method: 'POST' }).then(function (p) { showCode(box, p); }).catch(function (err) { b.disabled = false; V.fail(err); }); }
-      else if (a === 'disconnect') V.confirm('Disconnect Trakt from this profile?', { ok: 'Disconnect', danger: true }).then(function (ok) { if (ok) V.api('/api/trakt/disconnect', { method: 'POST' }).then(function () { drawTrakt(box); }); });
+      else if (a === 'disconnect') V.confirm('Disconnect Trakt from this profile?', { ok: 'Disconnect', danger: true }).then(function (ok) { if (ok) V.api('/api/trakt/disconnect', { method: 'POST' }).then(function () { V.toast('Trakt disconnected'); drawTrakt(box); }).catch(V.fail); });
       else {
         b.disabled = true;
         var label = b.textContent;
@@ -393,10 +393,17 @@
               [ROUTE[s.route] || s.route, s.h ? s.h + 'p' : '', s.bitrate ? 'stream ' + fmtK(s.bitrate) : '', s.bandwidth ? 'connection ' + fmtK(s.bandwidth) : '', 'buffer ' + s.buffer + ' s',
                 s.stalls ? V.plural(s.stalls, 'pause') + ' to load (' + s.stallSecs + ' s) in ' + V.plural(s.minutes, 'min') : 'no pauses to load', s.droppedPct ? s.droppedPct + '% frames dropped' : ''].filter(Boolean).map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</li>';
         });
-        sec.innerHTML = '<div class="sec-h"><h2>Watching now</h2><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div>' +
+        var html = '<div class="sec-h"><h2>Watching now</h2><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div>' +
           (rows.length ? '<ul class="simple aw-list">' + rows.join('') + '</ul>' : '<p class="dim">Nobody is watching right now.</p>') +
           (w.lists.length ? '<p class="small"><b>Provider connections in use:</b> ' + w.lists.map(function (l) { return V.esc(l.name) + ' ' + l.used + (l.limit ? ' of ' + l.limit : ''); }).join(' · ') + '</p>' : '');
-        V.$('[data-a=speedtest]', sec).onclick = function () { V.speedTest({ admin: true }); };
+        // (Every 5 seconds: redraw only when something changed, and keep focus on the button — a TV remote is often on it.)
+        if (html !== sec._html) {
+          var had = document.activeElement && sec.contains(document.activeElement);
+          sec._html = html;
+          sec.innerHTML = html;
+          V.$('[data-a=speedtest]', sec).onclick = function () { V.speedTest({ admin: true }); };
+          if (had) try { V.$('[data-a=speedtest]', sec).focus({ preventScroll: true }); } catch (e) {}
+        }
         clearTimeout(sec._t);
         sec._t = setTimeout(draw, 5000);
       }).catch(function () { clearTimeout(sec._t); sec._t = setTimeout(draw, 15000); });
@@ -406,8 +413,15 @@
 
   // ------------------------------------------------------------ Admin → Integrations
   var secretField = function (name, label, val, hint) { return '<label class="field"><span>' + label + '</span><input class="input" data-f="' + name + '" value="' + V.esc(val || '') + '" autocomplete="off" spellcheck="false">' + (hint ? '<small class="dim">' + hint + '</small>' : '') + '</label>'; };
-  V.adminTabs.integrations = function (body) {
-    body.innerHTML = '<div class="spinner"></div>';
+  // (After a save reloads a tab: the button to put focus back on.)
+  var focusBack = function (body, sel) {
+    var el = null;
+    try { el = sel && V.$(sel, body); } catch (e) {}
+    if (el) try { el.focus({ preventScroll: true }); } catch (e) {}
+  };
+  V.adminTabs.integrations = function (body, A, refocus) {
+    // (Reloading after a save: keep the page as it is until the new one is ready, rather than a spinner.)
+    if (!refocus) body.innerHTML = '<div class="spinner"></div>';
     V.api('/api/admin/integrations').then(function (I) {
       var o = I.opensubtitles, t = I.trakt, sd = I.subdl || {}, src = I.sources || {};
       var left = o.quota && o.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(o.quota.remaining, 'download') + ' left today (checked ' + V.fmtAgo(o.quota.at) + '). Fetching automatically leaves the last ' + (o.reserve || 2) + ' for choosing by hand.</p>' : '';
@@ -423,17 +437,22 @@
         '<section class="card-sec"><h2>Trakt</h2><p class="dim">Each profile can then connect its Trakt account (Settings → Trakt) to log what it watches and keep its watchlist and ratings in step. Create an app at trakt.tv → Settings → Your API Apps (redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>) and paste its Client ID and Client Secret here. Home rows from public Trakt lists need only the Client ID.</p>' +
         '<div class="int-fields">' + secretField('tr.clientId', 'Client ID', t.clientId) + '<label class="field"><span>Client Secret</span><input class="input" type="password" data-f="tr.clientSecret" value="' + V.esc(t.clientSecret) + '" autocomplete="new-password"></label></div>' +
         '<p class="dim small">' + (t.profiles ? V.plural(t.profiles, 'profile') + ' connected.' : 'No profiles connected yet.') + '</p><button class="btn primary" data-save="tr">Save</button></section>';
+      focusBack(body, refocus);
       body.onclick = function (e) {
         var s = e.target.closest('[data-save]');
-        if (s) {
+        if (s && !s.disabled) {
           var val = function (k) { var el = V.$('[data-f="' + k + '"]', body); return el ? el.value : undefined; };
           var on = function (k) { var el = V.$('[data-src="' + k + '"]', body); return !!(el && el.checked); };
           var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } }
             : s.dataset.save === 'sd' ? { subdl: { apiKey: val('sd.apiKey') }, sources: { gestdown: on('gestdown') } }
             : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
-          V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body); }).catch(V.fail);
+          s.disabled = true;
+          V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body, A, '[data-save="' + s.dataset.save + '"]'); }).catch(function (err) { s.disabled = false; V.fail(err); });
         }
         var tb = e.target.closest('[data-test]');
+        if (tb && tb.disabled) return;
+        if (tb) tb.disabled = true;
+        var again = function () { tb.disabled = false; };
         if (tb && tb.dataset.test === 'all') {
           var box = V.$('.all-test', body);
           box.textContent = 'Testing…';
@@ -445,13 +464,14 @@
                 V.icon('check', 'tiny ok') + ' works' + (k === 'gestdown' ? ' (episodes only)' : x.found !== undefined ? ' — ' + V.plural(x.found, 'result') + ' for The Matrix' : '');
               return '<li><b>' + NAMES[k] + '</b>: ' + msg + '</li>';
             }).join('') + '</ul>';
-          }).catch(function (e) { box.innerHTML = '<span class="err">' + V.esc(e.message) + '</span>'; });
+          }).catch(function (e) { box.innerHTML = '<span class="err">' + V.esc(e.message) + '</span>'; }).then(again);
           return;
         }
         if (tb) {
           var out = V.$('.os-test', body);
           out.textContent = 'Testing…';
-          V.api('/api/admin/integrations/opensubtitles/test', { method: 'POST' }).then(function (r) { out.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' The API key works' + (r.account ? ', and the account signed in.' : r.error ? ', but the account didn’t sign in: ' + V.esc(r.error) : '.') : '<span class="err">' + V.esc(r.error) + '</span>'; });
+          V.api('/api/admin/integrations/opensubtitles/test', { method: 'POST' }).then(function (r) { out.innerHTML = r.ok ? V.icon('check', 'tiny ok') + ' The API key works' + (r.account ? ', and the account signed in.' : r.error ? ', but the account didn’t sign in: ' + V.esc(r.error) : '.') : '<span class="err">' + V.esc(r.error || 'It didn’t work.') + '</span>'; })
+            .catch(function (e) { out.innerHTML = '<span class="err">' + V.esc(e.message) + '</span>'; }).then(again);
         }
       };
     }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
@@ -459,43 +479,60 @@
 
   // ------------------------------------------------------------ Admin → API & automations
   var SCOPE = { read: 'Read only — what’s playing, devices, search, channels', control: 'Control devices — also play, pause, stop, change channel, volume', admin: 'Admin — everything, including list refreshes' };
-  V.adminTabs.api = function (body, A) {
-    body.innerHTML = '<div class="spinner"></div>';
+  V.adminTabs.api = function (body, A, refocus) {
+    if (!refocus) body.innerHTML = '<div class="spinner"></div>';
+    var reload = function (sel) { V.adminTabs.api(body, A, sel || '[data-a=newkey]'); };
     V.api('/api/admin/integrations').then(function (I) {
       var base = location.origin + '/api/v1';
       var profOpts = '<option value="">Any profile (sees everything)</option>' + ((A && A.profiles) || []).map(function (p) { return '<option value="' + p.id + '">Only ' + V.esc(p.name) + '’s devices and titles</option>'; }).join('');
       body.innerHTML = '<section class="card-sec"><h2>API keys</h2><p class="dim">For Home Assistant, scripts and other automations. Send the key as <code>Authorization: Bearer &lt;key&gt;</code> to <code>' + V.esc(base) + '</code>. A key is shown once, when it’s made.</p>' +
-        (I.apiKeys.length ? '<ul class="simple">' + I.apiKeys.map(function (k) { return '<li class="row-between"><span><b>' + V.esc(k.name) + '</b> <span class="dim">· ' + V.esc(k.scope) + ' · <code>' + V.esc(k.hint) + '</code> · ' + (k.lastUsed ? 'used ' + V.fmtAgo(k.lastUsed) : 'never used') + '</span></span><button class="btn sm danger" data-revoke="' + k.id + '">Revoke</button></li>'; }).join('') + '</ul>' : '<p class="dim">No keys yet.</p>') +
+        (I.apiKeys.length ? '<ul class="simple">' + I.apiKeys.map(function (k) { return '<li class="row-between"><span><b>' + V.esc(k.name) + '</b> <span class="dim">· ' + V.esc(k.scope) + ' · <code>' + V.esc(k.hint) + '</code> · ' + (k.lastUsed ? 'used ' + V.fmtAgo(k.lastUsed) : 'never used') + '</span></span><button class="btn sm danger" data-revoke="' + V.esc(k.id) + '">Revoke</button></li>'; }).join('') + '</ul>' : '<p class="dim">No keys yet.</p>') +
         '<div class="grid2"><label class="field"><span>Name</span><input class="input" data-k="name" placeholder="Home Assistant" maxlength="60"></label><label class="field"><span>It may</span><select class="input" data-k="scope">' + I.scopes.map(function (s) { return '<option value="' + s + '"' + (s === 'control' ? ' selected' : '') + '>' + V.esc(SCOPE[s]) + '</option>'; }).join('') + '</select></label>' +
         '<label class="field"><span>Profile</span><select class="input" data-k="profile">' + profOpts + '</select></label></div><button class="btn primary" data-a="newkey">' + V.icon('plus') + ' Make a key</button>' +
         '<details class="api-ref"><summary>What the API can do</summary><ul class="small">' +
         ['GET /now — what each device is playing', 'GET /devices — signed-in devices (the id is used below)', 'POST /devices/{id}/play — {"k": "…"} or {"channel": 101} or {"title": "…"}', 'POST /devices/{id}/command — {"cmd": "pause" | "resume" | "toggle" | "stop" | "zap" (+ "dir": 1 or -1) | "channel" (+ "n") | "volume" (+ "v": 0–1) | "mute" | "seek" (+ "pos") | "sleep" (+ "min")}', 'GET /search?q=… — titles and channels', 'GET /channels — every channel with its number', 'GET /items/{k} — one title', 'GET /status — lists, accounts (admin keys)', 'POST /lists/{id}/refresh — refresh a list (admin keys)'].map(function (x) { return '<li><code>' + V.esc(x) + '</code></li>'; }).join('') + '</ul></details></section>' +
         '<section class="card-sec"><h2>Webhooks</h2><p class="dim">The server sends a short JSON message to these addresses when something happens. Each is signed: <code>X-Signature: sha256=…</code> (HMAC-SHA256 of the body with the webhook’s secret). Failed deliveries are tried again three times.</p>' +
-        (I.webhooks.length ? '<ul class="simple">' + I.webhooks.map(function (h) { return '<li><div class="row-between"><span><b>' + V.esc(h.name) + '</b> <span class="dim">· ' + V.esc(h.url) + '</span>' + (h.enabled ? '' : ' <span class="chip sm">off</span>') + '</span><span class="btn-row"><button class="btn sm" data-htest="' + h.id + '">Send a test</button><button class="btn sm" data-hsecret="' + h.id + '">Secret</button><button class="btn sm danger" data-hdel="' + h.id + '">Delete</button></span></div><div class="dim small">' + h.events.map(function (e) { return V.esc(I.events[e] || e); }).join(' · ') + '</div></li>'; }).join('') + '</ul>' : '<p class="dim">No webhooks yet.</p>') +
+        (I.webhooks.length ? '<ul class="simple">' + I.webhooks.map(function (h) { return '<li><div class="row-between"><span><b>' + V.esc(h.name) + '</b> <span class="dim">· ' + V.esc(h.url) + '</span>' + (h.enabled ? '' : ' <span class="chip sm">off</span>') + '</span><span class="btn-row"><button class="btn sm" data-htest="' + V.esc(h.id) + '">Send a test</button><button class="btn sm" data-hsecret="' + V.esc(h.id) + '">Secret</button><button class="btn sm danger" data-hdel="' + V.esc(h.id) + '">Delete</button></span></div><div class="dim small">' + h.events.map(function (e) { return V.esc(I.events[e] || e); }).join(' · ') + '</div></li>'; }).join('') + '</ul>' : '<p class="dim">No webhooks yet.</p>') +
         '<div class="grid2"><label class="field"><span>Address</span><input class="input" data-h="url" placeholder="http://homeassistant.local:8123/api/webhook/iptv" spellcheck="false"></label><label class="field"><span>Name</span><input class="input" data-h="name" placeholder="Home Assistant" maxlength="60"></label></div>' +
         '<div class="chips">' + Object.keys(I.events).map(function (e) { return '<label class="chip-check"><input type="checkbox" data-ev="' + e + '"' + (/^playback/.test(e) ? ' checked' : '') + '><span>' + V.esc(I.events[e]) + '</span></label>'; }).join('') + '</div>' +
         '<button class="btn primary" data-a="newhook">' + V.icon('plus') + ' Add webhook</button>' +
         '<h3>Recent deliveries</h3>' + (I.deliveries.length ? '<ul class="simple small">' + I.deliveries.map(function (d) { return '<li>' + (d.ok ? V.icon('check', 'tiny ok') : V.icon('x', 'tiny err')) + ' <b>' + V.esc(d.event) + '</b> → ' + V.esc(d.name) + ' <span class="dim">· ' + V.fmtAgo(d.at) + ' · ' + (d.status ? 'HTTP ' + d.status : V.esc(d.error || 'no answer')) + (d.attempt > 1 ? ' · try ' + d.attempt : '') + '</span></li>'; }).join('') + '</ul>' : '<p class="dim small">None yet.</p>') + '</section>';
+      focusBack(body, refocus);
+      // A key or secret to copy (V.copy also works on plain-http addresses, where the clipboard API doesn't).
+      var showSecret = function (title, intro, value, copy) {
+        return V.dialog({ title: title, body: (intro ? '<p>' + intro + '</p>' : '') + '<input class="input mono" readonly value="' + V.esc(value) + '" onfocus="this.select()">', actions: (copy ? [{ label: 'Copy', fn: function () { V.copy(value); return false; } }] : []).concat([{ label: 'Done', primary: true }]) });
+      };
+      // One request per button at a time.
+      var once = function (b, req) { if (b.disabled) return; b.disabled = true; req().catch(V.fail).then(function () { if (b.isConnected) b.disabled = false; }); };
       body.onclick = function (e) {
         var b;
         if ((b = e.target.closest('[data-a=newkey]'))) {
-          V.api('/api/admin/apikeys', { body: { name: V.$('[data-k=name]', body).value, scope: V.$('[data-k=scope]', body).value, profile: V.$('[data-k=profile]', body).value } }).then(function (r) {
-            V.dialog({ title: 'Your new API key', body: '<p>Copy it now — it won’t be shown again.</p><input class="input mono" readonly value="' + V.esc(r.key) + '" onfocus="this.select()">', actions: [{ label: 'Copy', fn: function () { try { navigator.clipboard.writeText(r.key); V.toast('Copied'); } catch (x) {} return false; } }, { label: 'Done', primary: true }] }).then(function () { V.adminTabs.api(body, A); });
-          }).catch(V.fail);
+          once(b, function () {
+            return V.api('/api/admin/apikeys', { body: { name: V.$('[data-k=name]', body).value, scope: V.$('[data-k=scope]', body).value, profile: V.$('[data-k=profile]', body).value } }).then(function (r) {
+              showSecret('Your new API key', 'Copy it now — it won’t be shown again.', r.key, true).then(function () { reload(); });
+            });
+          });
         } else if ((b = e.target.closest('[data-revoke]'))) {
-          V.confirm('Revoke this key? Anything using it stops working.', { ok: 'Revoke', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/apikeys/' + b.dataset.revoke).then(function () { V.adminTabs.api(body, A); }).catch(V.fail); });
+          V.confirm('Revoke this key? Anything using it stops working.', { ok: 'Revoke', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/apikeys/' + encodeURIComponent(b.dataset.revoke)).then(function () { V.toast('Key revoked'); reload(); }).catch(V.fail); });
         } else if ((b = e.target.closest('[data-a=newhook]'))) {
           var evs = V.$$('[data-ev]', body).filter(function (x) { return x.checked; }).map(function (x) { return x.dataset.ev; });
-          V.api('/api/admin/webhooks', { body: { url: V.$('[data-h=url]', body).value, name: V.$('[data-h=name]', body).value, events: evs } }).then(function (h) {
-            V.dialog({ title: 'Webhook added', body: '<p>Its signing secret (also under “Secret” later):</p><input class="input mono" readonly value="' + V.esc(h.secret) + '" onfocus="this.select()">', actions: [{ label: 'Done', primary: true }] }).then(function () { V.adminTabs.api(body, A); });
-          }).catch(V.fail);
+          once(b, function () {
+            return V.api('/api/admin/webhooks', { body: { url: V.$('[data-h=url]', body).value, name: V.$('[data-h=name]', body).value, events: evs } }).then(function (h) {
+              showSecret('Webhook added', 'Its signing secret (also under “Secret” later):', h.secret).then(function () { reload('[data-a=newhook]'); });
+            });
+          });
         } else if ((b = e.target.closest('[data-hdel]'))) {
-          V.confirm('Delete this webhook?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/webhooks/' + b.dataset.hdel).then(function () { V.adminTabs.api(body, A); }); });
+          V.confirm('Delete this webhook?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/webhooks/' + encodeURIComponent(b.dataset.hdel)).then(function () { V.toast('Webhook deleted'); reload('[data-a=newhook]'); }).catch(V.fail); });
         } else if ((b = e.target.closest('[data-htest]'))) {
-          b.disabled = true;
-          V.api('/api/admin/webhooks/' + b.dataset.htest + '/test', { method: 'POST' }).then(function (d) { b.disabled = false; V.toast(d.ok ? 'Delivered (HTTP ' + d.status + ')' : 'Not delivered: ' + (d.status ? 'HTTP ' + d.status : d.error)); setTimeout(function () { V.adminTabs.api(body, A); }, 300); }).catch(function (x) { b.disabled = false; V.fail(x); });
+          var hid = b.dataset.htest;
+          once(b, function () {
+            return V.api('/api/admin/webhooks/' + encodeURIComponent(hid) + '/test', { method: 'POST' }).then(function (d) {
+              V.toast(d.ok ? 'Delivered (HTTP ' + d.status + ')' : 'Not delivered: ' + (d.status ? 'HTTP ' + d.status : d.error), d.ok ? {} : { error: true });
+              setTimeout(function () { reload('[data-htest="' + hid + '"]'); }, 300);
+            });
+          });
         } else if ((b = e.target.closest('[data-hsecret]'))) {
-          V.api('/api/admin/webhooks/' + b.dataset.hsecret + '/secret').then(function (r) { V.dialog({ title: 'Signing secret', body: '<input class="input mono" readonly value="' + V.esc(r.secret) + '" onfocus="this.select()">', actions: [{ label: 'Done', primary: true }] }); });
+          once(b, function () { return V.api('/api/admin/webhooks/' + encodeURIComponent(b.dataset.hsecret) + '/secret').then(function (r) { showSecret('Signing secret', '', r.secret); }); });
         }
       };
     }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });

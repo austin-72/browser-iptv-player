@@ -160,6 +160,13 @@
         var f = V.$('input, select, button, a[href]', s);
         if (f) setTimeout(function () { f.focus({ preventScroll: true }); }, 350);
       });
+      // "#/settings?s=look" and the like: straight to that section (the remote buttons have their own: keymap.js).
+      var want = r.q && r.q.get ? String(r.q.get('s') || '').toLowerCase() : '';
+      if (want && want !== 'remote') {
+        var hit = V.$$('[data-jump]', nav).filter(function (a) { return a.textContent.trim().toLowerCase().indexOf(want) === 0; })[0];
+        var target = hit && document.getElementById(hit.dataset.jump);
+        if (target) target.scrollIntoView({ block: 'start' });
+      }
     }, 0);
   });
 })();

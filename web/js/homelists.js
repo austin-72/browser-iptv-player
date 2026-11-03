@@ -139,7 +139,7 @@
         });
         var mine = V.$('.hl-mine', d);
         if (mine) V.api('/api/homelists/trakt-mine').then(function (r) {
-          mine.innerHTML = r.lists.length ? '<div class="chips">' + r.lists.map(function (l) { return '<button class="chip" data-hl-mine="' + V.esc(l.ref) + '">' + V.esc(l.name) + ' <small>' + l.n + '</small></button>'; }).join('') + '</div>' : '<p class="dim small">You have no lists on Trakt yet.</p>';
+          mine.innerHTML = r.lists.length ? '<div class="chips">' + r.lists.map(function (l) { return '<button class="chip" data-hl-mine="' + V.esc(l.ref) + '">' + V.esc(l.name) + ' <small>' + V.esc(l.n) + '</small></button>'; }).join('') + '</div>' : '<p class="dim small">You have no lists on Trakt yet.</p>';
         }).catch(function (e) { mine.innerHTML = '<p class="dim small">' + V.esc(e.message) + '</p>'; });
       },
     });
@@ -186,11 +186,15 @@
         if (m) {
           var x = list[+m.getAttribute('data-miss')];
           var w = wishFor(x);
-          if (w) V.del('/api/wishlist/' + w.id).then(function () { wishes = wishes.filter(function (y) { return y !== w; }); V.toast('Removed from your wishlist'); redrawMiss(m, x); }).catch(V.fail);
+          // (Off until the answer: a second press would add it twice, or remove it twice.)
+          if (m.disabled) return;
+          m.disabled = true;
+          var undo = function (er) { m.disabled = false; V.fail(er); };
+          if (w) V.del('/api/wishlist/' + w.id).then(function () { wishes = wishes.filter(function (y) { return y !== w; }); V.toast('Removed from your wishlist'); redrawMiss(m, x); }).catch(undo);
           else V.api('/api/wishlist', { body: { t: x.t, n: x.n, y: x.y, tmdb: x.tmdb, p: x.p } }).then(function (res2) {
             if (res2.here) { V.toast('It’s here!'); V.router.go(V.hrefOf(V.entry(res2.here) || { t: x.t, k: res2.here })); return; }
             wishes.push(res2.item); V.toast('On your wishlist — you’ll get an alert when it arrives'); redrawMiss(m, x);
-          }).catch(V.fail);
+          }).catch(undo);
         }
       };
       function redrawMiss(el, x) { var i = el.getAttribute('data-miss'); el.outerHTML = missCard(x).replace('data-miss="i"', 'data-miss="' + i + '"'); var n = V.$('[data-miss="' + i + '"]', box); if (n) n.focus(); }
@@ -263,7 +267,8 @@
       var d = e.target.closest('[data-wdel]');
       if (d) {
         var w = wishes[+d.getAttribute('data-wdel')];
-        V.del('/api/wishlist/' + w.id).then(function () { wishes = wishes.filter(function (y) { return y !== w; }); drawList(); V.toast('Removed from your wishlist'); var f = V.$('[data-wdel]', listBox) || V.$('[data-wq]', view); if (f) f.focus(); }).catch(V.fail);
+        d.disabled = true; // (a second press would delete it again: "not found")
+        V.del('/api/wishlist/' + w.id).then(function () { wishes = wishes.filter(function (y) { return y !== w; }); drawList(); V.toast('Removed from your wishlist'); var f = V.$('[data-wdel]', listBox) || V.$('[data-wq]', view); if (f) f.focus(); }).catch(function (er) { d.disabled = false; V.fail(er); });
       }
     });
     load();

@@ -51,7 +51,7 @@ V.router = {
       V.announce((h1 ? h1.textContent : r.name) + ' page');
       if (!V.tvMode) view.focus({ preventScroll: true });
       // (Unless the page has already put focus somewhere itself, like the guide on what's on now.)
-      else setTimeout(function () { var a = document.activeElement, vw = V.$('#view'); if (a && a !== document.body && vw && vw.contains(a)) return; var f = V.$('#view .hero-acts .btn, #view .tp-acts .btn, #view .card, #view button, #view a'); if (f) f.focus({ preventScroll: true }); }, 60);
+      else setTimeout(function () { var a = document.activeElement, vw = V.$('#view'); if (a && a !== document.body && vw && vw.contains(a)) return; var pick = ['#view .hero-acts .btn', '#view .tp-acts .btn', '#view .grp.on', '#view .card', '#view button', '#view a']; var f = null; for (var i = 0; i < pick.length && !f; i++) f = V.$(pick[i]); if (f) f.focus({ preventScroll: true }); }, 60); // (in that order: Play on a title page, not the first genre chip)
     }
   },
 };
@@ -180,8 +180,8 @@ document.addEventListener('contextmenu', function (e) {
   document.addEventListener('click', function (e) { var a = e.target.closest('a.card'); if (a && a._long) { a._long = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 })();
 
-/** A title's or channel's options. opts.onPage: the title's own page, whose buttons already do Play, My List, Queue,
- *  Send, Watch together, Download and Shuffle — the menu then has only what the page doesn't. */
+/** A title's or channel's options. opts.onPage: the title's own page, whose buttons already do Play, My List,
+ *  Download and Shuffle — the menu then has only what the page doesn't (queue, send, watch together…). */
 V.itemMenu = function (anchor, it, opts) {
   opts = opts || {};
   var u = V.unit(it);
@@ -210,8 +210,8 @@ V.itemMenu = function (anchor, it, opts) {
   ];
   if (V.itemMenuExtras) V.itemMenuExtras(items, it, isCh);
   if (opts.onPage) {
-    var onPage = { play: 1, info: 1, plus: 1, check: 1, send: 1, party: 1, download: 1, shuffle: 1, skipnext: 1, playlist: 1 };
-    items = items.filter(function (x) { return !x || x.sep || x.header || !(onPage[x.icon] || x.label === 'Remove from queue'); });
+    var onPage = { play: 1, info: 1, plus: 1, check: 1, download: 1, shuffle: 1 };
+    items = items.filter(function (x) { return !x || x.sep || x.header || !onPage[x.icon]; });
     // (No separator first or last, nor two in a row.)
     items = items.filter(function (x, i, a) { return x && !(x.sep && (i === 1 || i === a.length - 1 || (a[i - 1] && a[i - 1].sep))); });
     if (items.length <= 1) { V.toast('Everything for this is on the page'); return; }

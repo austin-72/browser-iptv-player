@@ -29,19 +29,32 @@ V.mychNext = function () {
 // ---------------------------------------------------------------- Admin → My channels
 V.adminTabs.mychannels = function (body) {
   body.innerHTML = '<div class="spinner"></div>';
-  var data = null;
+  var data = null, busy = false, focusAfter = null;
+  var focusOf = function (a) {
+    var li = a && body.contains(a) ? a.closest('[data-id]') : null;
+    return li ? { id: li.getAttribute('data-id'), attr: ['data-mc-edit', 'data-mc-shuffle', 'data-mc-onoff', 'data-mc-del'].filter(function (x) { return a.hasAttribute(x); })[0] } : null;
+  };
   var draw = function () {
     var chans = data.channels;
+    // (What had focus, to put it back after the redraw: a TV remote would otherwise be left nowhere.)
+    var keep = focusAfter || focusOf(document.activeElement);
+    focusAfter = null;
     body.innerHTML = '<section class="card-sec"><h2>Your own 24/7 channels</h2><p class="dim">Make a channel from a category, a genre, a film series or titles you pick. It plays them one after another, all day, and shows in Live TV and the TV guide like any channel. Tuning in starts whatever is on at that moment. Nothing extra runs on the server.</p>' +
       '<div class="btn-row"><button class="btn primary" data-mc-add>' + V.icon('plus') + ' Make a channel</button></div></section>' +
       (chans.length ? '<ul class="mc-list">' + chans.map(function (c) {
         var what = c.source.type === 'titles' ? V.plural(c.source.keys.length, 'title') + ' you picked' : (c.source.type === 'category' ? 'Category' : c.source.type === 'genre' ? 'Genre' : 'Film series') + ': ' + V.esc(c.source.type === 'collection' ? V.mcColName(c.source.value) : c.source.value);
-        return '<li class="card-sec mc-item" data-id="' + c.id + '"><img class="mc-logo" alt="" src="' + V.esc(c.logo || '/api/mychannels/' + c.id + '/logo.svg?v=' + c.builtAt) + '"><div class="mc-b"><b>' + V.esc(c.num ? c.num + ' · ' : '') + V.esc(c.name) + '</b>' + (c.enabled ? '' : ' <span class="chip sm">Off</span>') +
-          '<div class="dim small">' + what + ' · ' + ({ order: 'in order', shuffle: 'shuffled', year: 'by year' })[c.order] + ' · ' + V.plural(c.count, 'programme') + ' · ' + c.hours + ' hours before it repeats</div>' +
+        return '<li class="card-sec mc-item" data-id="' + V.esc(c.id) + '"><img class="mc-logo" alt="" src="' + V.esc(c.logo || '/api/mychannels/' + encodeURIComponent(c.id) + '/logo.svg?v=' + c.builtAt) + '"><div class="mc-b"><b>' + V.esc(c.num ? c.num + ' · ' : '') + V.esc(c.name) + '</b>' + (c.enabled ? '' : ' <span class="chip sm">Off</span>') +
+          '<div class="dim small">' + what + ' · ' + (({ order: 'in order', shuffle: 'shuffled', year: 'oldest first' })[c.order] || 'shuffled') + ' · ' + V.plural(c.count, 'programme') + ' · ' + c.hours + ' hours before it repeats</div>' +
           (c.now ? '<div class="small">' + V.icon('play', 'tiny') + ' Now: ' + V.esc(c.now) + '</div>' : '') +
           '<div class="btn-row"><button class="btn sm" data-mc-edit>' + V.icon('edit') + ' Edit</button><button class="btn sm" data-mc-shuffle>' + V.icon('refresh') + ' ' + (c.order === 'shuffle' ? 'Shuffle again' : 'Update') + '</button><button class="btn sm" data-mc-onoff>' + (c.enabled ? 'Turn off' : 'Turn on') + '</button><button class="btn sm danger" data-mc-del>' + V.icon('trash') + ' Delete</button></div></div></li>';
-      }).join('') + '</ul>' : '<p class="dim">No channels yet.</p>') +
+      }).join('') + '</ul>' : '<p class="dim">No channels yet. Press “Make a channel” to start one — a favourite category or a film series makes a good first channel.</p>') +
       '<p class="dim small">24/7 channels are played by this app (any device with it open). They aren’t in the playlist for other apps or the tuner, because those would need the server to stitch the programmes together.</p>';
+    if (keep) {
+      var li = V.$$('[data-id]', body).filter(function (x) { return x.getAttribute('data-id') === keep.id; })[0];
+      var el = li && keep.attr ? V.$('[' + keep.attr + ']', li) : null;
+      if (!el) el = V.$('[data-mc-add]', body); // (it was deleted)
+      if (el) try { el.focus({ preventScroll: true }); } catch (e) {}
+    }
   };
   V.mcColName = function (id) { var c = (data.options.collections || []).filter(function (x) { return String(x.id) === String(id); })[0]; return c ? c.name : 'Collection ' + id; };
   var load = function () { return V.api('/api/admin/mychannels').then(function (r) { data = r; draw(); }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; }); };
@@ -51,10 +64,19 @@ V.adminTabs.mychannels = function (body) {
     var li = e.target.closest('[data-id]');
     if (!li) return;
     var c = data.channels.filter(function (x) { return x.id === li.dataset.id; })[0];
+    if (!c) return;
+    var path = '/api/admin/mychannels/' + encodeURIComponent(c.id);
+    // One change at a time: the buttons stay disabled until the list has been reloaded.
+    var run = function (b, req) {
+      if (busy) return;
+      busy = true; focusAfter = focusOf(b); b.disabled = true;
+      req().then(load).catch(function (err) { focusAfter = null; V.fail(err); }).then(function () { busy = false; if (b.isConnected) b.disabled = false; });
+    };
+    var b = e.target.closest('button');
     if (e.target.closest('[data-mc-edit]')) V.mcDialog(c, data.options).then(function (ok) { if (ok) load(); });
-    else if (e.target.closest('[data-mc-shuffle]')) { V.toast('Updating “' + c.name + '”…'); V.put('/api/admin/mychannels/' + c.id, c.order === 'shuffle' ? { reshuffle: true } : { rebuild: true }).then(function () { V.toast('Done'); load(); }).catch(V.fail); }
-    else if (e.target.closest('[data-mc-onoff]')) V.put('/api/admin/mychannels/' + c.id, { enabled: !c.enabled }).then(load).catch(V.fail);
-    else if (e.target.closest('[data-mc-del]')) V.confirm('Delete the channel “' + c.name + '”?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/mychannels/' + c.id).then(load).catch(V.fail); });
+    else if (e.target.closest('[data-mc-shuffle]')) run(b, function () { V.toast('Updating “' + c.name + '”…'); return V.put(path, c.order === 'shuffle' ? { reshuffle: true } : { rebuild: true }).then(function () { V.toast('“' + c.name + '” is up to date'); }); });
+    else if (e.target.closest('[data-mc-onoff]')) run(b, function () { return V.put(path, { enabled: !c.enabled }).then(function () { V.toast(c.enabled ? '“' + c.name + '” is off' : '“' + c.name + '” is on'); }); });
+    else if (e.target.closest('[data-mc-del]')) V.confirm('Delete the channel “' + c.name + '”?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) run(b, function () { return V.del(path).then(function () { V.toast('Deleted “' + c.name + '”'); }); }); });
   };
 };
 
@@ -85,8 +107,10 @@ V.mcDialog = function (c, o) {
       var type = fd.get('type');
       var b = { name: fd.get('name'), num: fd.get('num'), order: fd.get('order'), group: fd.get('group'), logo: fd.get('logo'), source: { type: type, kind: fd.get('kind') } };
       if (type === 'titles') b.source.keys = picked.map(function (x) { return x.k; }); else b.source.value = fd.get(type);
-      V.$('.err', d).textContent = 'Working out the running order… (series’ episodes may have to be fetched)';
-      return (c ? V.put('/api/admin/mychannels/' + c.id, b) : V.api('/api/admin/mychannels', { body: b })).then(function (r) { V.toast((c ? 'Saved “' : 'Made “') + r.name + '” · ' + V.plural(r.count, 'programme')); return true; }, function (e) { V.$('.err', d).textContent = e.message; return false; });
+      // (A progress note, not an error: shown plainly until the answer comes.)
+      var msg = V.$('[role=alert]', d);
+      msg.className = 'dim small'; msg.textContent = 'Working out the running order… (series’ episodes may have to be fetched)';
+      return (c ? V.put('/api/admin/mychannels/' + encodeURIComponent(c.id), b) : V.api('/api/admin/mychannels', { body: b })).then(function (r) { V.toast((c ? 'Saved “' : 'Made “') + r.name + '” · ' + V.plural(r.count, 'programme')); return true; }, function (e) { msg.className = 'err'; msg.textContent = e.message; return false; });
     } }],
     onOpen: function (d) {
       var f = V.$('form', d);
@@ -100,12 +124,16 @@ V.mcDialog = function (c, o) {
       };
       f.type.onchange = show; f.kind.onchange = show;
       show(); drawPicked();
-      var t = null;
+      var t = null, seq = 0;
       f.q.oninput = function () {
         clearTimeout(t);
+        var q = f.q.value.trim(), my = ++seq, out = V.$('.mc-results', f);
+        if (q.length < 2) { out.innerHTML = ''; return; } // (the server looks from 2 letters)
         t = setTimeout(function () {
-          V.api('/api/admin/mychannels/titles?q=' + encodeURIComponent(f.q.value)).then(function (r) {
-            V.$('.mc-results', f).innerHTML = r.map(function (x) { return '<li><button type="button" class="btn ghost block" data-pick="' + V.esc(x.k) + '" data-n="' + V.esc(x.n) + '">' + V.icon('plus', 'tiny') + ' ' + V.esc(x.n) + (x.y ? ' (' + x.y + ')' : '') + ' <span class="dim">· ' + (x.t === 'show' ? 'series' : 'film') + '</span></button></li>'; }).join('');
+          V.api('/api/admin/mychannels/titles?q=' + encodeURIComponent(q)).then(function (r) {
+            if (my !== seq) return; // (typed more since: a newer search is coming)
+            out.innerHTML = r.length ? r.map(function (x) { return '<li><button type="button" class="btn ghost block" data-pick="' + V.esc(x.k) + '" data-n="' + V.esc(x.n) + '">' + V.icon('plus', 'tiny') + ' ' + V.esc(x.n) + (x.y ? ' (' + V.esc(x.y) + ')' : '') + ' <span class="dim">· ' + (x.t === 'show' ? 'series' : 'film') + '</span></button></li>'; }).join('')
+              : '<li class="dim small">Nothing found for “' + V.esc(q) + '”.</li>';
           }).catch(function () {});
         }, 250);
       };
@@ -113,7 +141,13 @@ V.mcDialog = function (c, o) {
         var p = e.target.closest('[data-pick]');
         if (p) { if (!picked.some(function (x) { return x.k === p.dataset.pick; })) picked.push({ k: p.dataset.pick, n: p.dataset.n }); drawPicked(); }
         var u = e.target.closest('[data-unpick]');
-        if (u) { picked.splice(+u.dataset.unpick, 1); drawPicked(); }
+        if (u) {
+          var i = +u.dataset.unpick;
+          picked.splice(i, 1); drawPicked();
+          // (Focus to the chip that took its place, or back to the search box.)
+          var next = V.$$('[data-unpick]', f)[Math.min(i, picked.length - 1)] || f.q;
+          next.focus();
+        }
       });
     },
   });

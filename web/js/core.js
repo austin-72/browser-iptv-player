@@ -144,16 +144,18 @@ V.emit = function (n, d) { (V._ev[n] || []).slice().forEach(function (fn) { try 
 // ---------- server calls
 V.api = function (path, opts) {
   opts = opts || {};
+  var offline = function (e) { var err = new Error(navigator.onLine === false ? 'You’re offline.' : 'Can’t reach the server.'); err.offline = true; err.cause = e; return err; };
   var h = { 'X-App': '1' };
   if (S.conn) h['X-Conn'] = S.conn;
   var body = opts.body;
   if (body !== undefined && !(body instanceof Blob) && !(body instanceof ArrayBuffer) && typeof body !== 'string') { h['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
   return fetch(path, { method: opts.method || (body !== undefined ? 'POST' : 'GET'), headers: Object.assign(h, opts.headers || {}), body: body, keepalive: !!opts.keepalive, credentials: 'same-origin', signal: opts.signal })
-    .catch(function (e) { var err = new Error(navigator.onLine === false ? 'You’re offline.' : 'Can’t reach the server.'); err.offline = true; err.cause = e; throw err; })
+    .catch(function (e) { if (e && e.name === 'AbortError') throw e; throw offline(e); }) // (a cancelled request stays a cancel, which V.fail says nothing about)
     .then(function (r) {
       if (opts.raw) return r;
       if (r.status === 401 && !opts.allow401) { V.emit('signedout'); }
-      return r.text().then(function (t) {
+      // (The connection dropping half-way through the answer is the network too, not a bug.)
+      return r.text().catch(function (e) { if (e && e.name === 'AbortError') throw e; throw offline(e); }).then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) {}
         if (!r.ok) {
@@ -182,7 +184,13 @@ V.toast = function (msg, o) {
   var close = function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 250); };
   if (o.action) t.querySelector('.toast-act').onclick = function () { o.action.fn(); close(); };
   t.querySelector('.toast-x').onclick = close;
+  // The same message again (saving twice, say) takes the old one's place instead of stacking up.
+  t._said = (o.error ? '!' : '') + msg + (o.action ? '|' + o.action.label : '');
+  Array.prototype.slice.call(box.children).forEach(function (x) { if (x._said === t._said) x.remove(); });
   box.appendChild(t);
+  // At most three at once: the oldest plain ones go first (ones waiting for an answer stay a little longer).
+  var plain = Array.prototype.filter.call(box.children, function (x) { return x !== t && x._said && !x.querySelector('.toast-act'); });
+  while (box.children.length > 3 && plain.length) plain.shift().remove();
   while (box.children.length > 4) box.firstChild.remove();
   setTimeout(close, o.ms || (o.action ? 8000 : 4200));
   return close;
@@ -207,7 +215,15 @@ V.dialog = function (o) {
     if (typeof o.body === 'string') b.innerHTML = o.body; else if (o.body) b.appendChild(o.body);
     var done = false;
     var veil = null, escKey = null;
-    var finish = function (v) { if (done) return; done = true; try { d.close(); } catch (e) {} d.remove(); if (veil) veil.remove(); if (escKey) document.removeEventListener('keydown', escKey, true); if (o.onClose) o.onClose(v); resolve(v); };
+    // (What had focus before, to go back to when it closes: browsers without <dialog> — and older TVs — leave focus
+    // nowhere, so a remote's arrows have nothing to move from.)
+    var before = document.activeElement;
+    var finish = function (v) {
+      if (done) return; done = true; try { d.close(); } catch (e) {} d.remove(); if (veil) veil.remove(); if (escKey) document.removeEventListener('keydown', escKey, true);
+      var a = document.activeElement;
+      if ((!a || a === document.body) && before && before !== document.body && before.focus && document.documentElement.contains(before)) { try { before.focus({ preventScroll: true }); } catch (e) {} }
+      if (o.onClose) o.onClose(v); resolve(v);
+    };
     (o.actions || []).forEach(function (a) {
       var btn = document.createElement('button');
       btn.className = 'btn' + (a.primary ? ' primary' : '') + (a.danger ? ' danger' : '');
@@ -221,11 +237,15 @@ V.dialog = function (o) {
       };
       d.querySelector('.dlg-f').appendChild(btn);
     });
-    d.addEventListener('click', function (e) { if (e.target.closest('[data-x]')) finish(null); if (e.target === d && o.dismiss !== false) finish(null); });
+    // A click on the dimmed backdrop closes it, but not the second click of a double-click that just opened it (it
+    // lands on the backdrop), nor a drag that started inside it (selecting text in a box) and ended outside.
+    var opened = Date.now(), downOut = false;
+    var outside = function (e, el) { if (e.type === 'mousedown') { downOut = e.target === el; return false; } return e.target === el && downOut && Date.now() - opened > 500 && o.dismiss !== false; };
+    d.addEventListener('mousedown', function (e) { outside(e, d); });
+    d.addEventListener('click', function (e) { if (e.target.closest('[data-x]')) finish(null); if (outside(e, d)) finish(null); });
     d.addEventListener('cancel', function (e) { e.preventDefault(); if (o.dismiss !== false) finish(null); });
     d._finish = finish;
     // Going to another page (Back on a remote or phone) closes it: it belongs to the page it was opened on.
-    var opened = Date.now();
     d._routeClose = function () { if (o.dismiss !== false && Date.now() - opened > 400) finish(null); };
     d._dismiss = function () { if (o.dismiss !== false) finish(null); }; // (the Back button on a TV remote)
     document.body.appendChild(d);
@@ -236,7 +256,8 @@ V.dialog = function (o) {
       d.className += ' dlg-fallback';
       veil = document.createElement('div');
       veil.className = 'dlg-veil';
-      veil.onclick = function () { if (o.dismiss !== false) finish(null); };
+      veil.onmousedown = function (e) { outside(e, veil); };
+      veil.onclick = function (e) { if (outside(e, veil)) finish(null); };
       document.body.insertBefore(veil, d);
       // Escape closes only the top dialog (each one listens, so the others must not hear it too).
       escKey = function (e) {
@@ -310,7 +331,8 @@ V.menu = function (anchor, items, o) {
 };
 V.closeMenus = function () { V.$$('.popmenu').forEach(function (m) { var a = m._anchor; m.remove(); if (a && document.activeElement === document.body) a.focus(); }); };
 document.addEventListener('pointerdown', function (e) { if (!e.target.closest('.popmenu')) V.closeMenus(); }, true);
-document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && V.$('.popmenu')) { e.stopPropagation(); V.closeMenus(); } }, true);
+// (Escape closes only the menu, not the dialog it was opened from as well.)
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && V.$('.popmenu')) { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); else e.stopPropagation(); V.closeMenus(); } }, true);
 
 V.copy = function (text, msg) {
   var done = function () { V.toast(msg || 'Copied'); };
