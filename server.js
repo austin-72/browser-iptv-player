@@ -594,7 +594,7 @@ route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
   // A huge catalogue can take a while to put together (and other profiles' copies are made one at a time): rather
   // than keep the device waiting past what a proxy allows (Cloudflare: 100 s), say "not yet" and let it ask again.
   const making = catalog.payloadAsync(prof);
-  const out = await Promise.race([making, new Promise((r) => setTimeout(r, 60e3, null).unref())]);
+  const out = await Promise.race([making, new Promise((r) => setTimeout(r, 50e3, null).unref())]);
   if (!out) { res.setHeader('Retry-After', '5'); throw new HttpError(503, 'The catalogue is still being put together.'); }
   // In pages (see Catalog._payloadSteps): page 0 says how many there are, and the device fetches the rest with
   // ?page=N&v=<the ETag of page 0>. A later page of a version that has since been replaced: 409, start again.
@@ -2444,7 +2444,12 @@ async function handle(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     // Just started: the page loads straight away; what needs the catalogue waits for it to be ready.
-    if (catalogReady && /^\/(api|c|k|h)\//.test(pathname) && !/^\/api\/(login|boot|pair\/|events)/.test(pathname)) await catalogReady;
+    // (At most 40 s — with the catalogue's own wait, under 100 s in all: a huge catalogue can take longer after a restart than a proxy waits — Cloudflare gives up after
+    // 100 s and the page gets its error page. "Starting up" instead, and the page asks again by itself.)
+    if (catalogReady && /^\/(api|c|k|h)\//.test(pathname) && !/^\/api\/(login|boot|pair\/|events|profiles\/[^/]+\/select$|profiles\/leave$)/.test(pathname)) {
+      const ready = await Promise.race([catalogReady.then(() => true, () => true), new Promise((r) => setTimeout(r, 40e3, false).unref())]);
+      if (!ready) { res.setHeader('Retry-After', '5'); return sendJSON(res, 503, { error: 'The server is starting up — the catalogue is nearly ready.', starting: true }); }
+    }
 
     // Cast links: /c/<token>/api/session/... etc. — no cookie needed, CORS open, valid for a few hours.
     const cm = pathname.match(/^\/c\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(\/api\/(?:session|proxy|local)\/?.*)$/);

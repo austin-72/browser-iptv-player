@@ -42,3 +42,10 @@ html.tv .ac-o.on { background: var(--card2); box-shadow: inset 0 0 0 3px #fff; }
    under it. */
 .view-home > h1.sr-only + .moods { margin-top: var(--top); }
 .view-home > h1.sr-only + .rows { margin-top: var(--top); }
+
+/* See-through suggestions: what's behind shows through, blurred so the words stay easy to read. (Browsers without
+   color-mix keep the solid background above.) */
+.ac-list { background: color-mix(in srgb, var(--bg2) 62%, transparent); -webkit-backdrop-filter: blur(5px) saturate(1.2); backdrop-filter: blur(5px) saturate(1.2); }
+.ac-list .ac-o { text-shadow: 0 1px 3px color-mix(in srgb, var(--bg2) 85%, transparent); }
+.ac-o.on { background: color-mix(in srgb, var(--card2) 80%, transparent); }
+.ac-ic { background: color-mix(in srgb, var(--card) 75%, transparent); }

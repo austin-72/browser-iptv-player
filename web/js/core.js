@@ -171,6 +171,12 @@ V.api = function (path, opts) {
       return r.text().catch(function (e) { if (e && e.name === 'AbortError') throw e; throw offline(e); }).then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (e) {}
+        // The server is starting up (a big catalogue still being put together): it didn't do anything with this
+        // request, so ask again in a few seconds — for up to about four minutes — instead of showing an error.
+        if (r.status === 503 && j && j.starting && (opts._tries || 0) < 48) {
+          if (V.loadMsg && V.$('#loading') && !V.$('#loading').hidden) V.loadMsg('The server is starting up — getting the channels and films ready…');
+          return new Promise(function (ok) { setTimeout(ok, 5000); }).then(function () { return V.api(path, Object.assign({}, opts, { _tries: (opts._tries || 0) + 1 })); });
+        }
         if (!r.ok) {
           // (No message from the app: a proxy in front of it — Cloudflare — answered instead. Say what that means.)
           var plain = { 502: 'The server couldn’t be reached just now (or it’s restarting). Try again in a moment.', 503: 'The server is busy or restarting. Try again in a moment.', 504: 'The server took too long to answer. Try again in a moment.', 520: 'The server gave an unexpected answer. Try again in a moment.', 521: 'The server is down or restarting. Try again in a moment.', 522: 'The server took too long to answer. Try again in a moment.', 523: 'The server can’t be reached just now.', 524: 'The server took too long to answer (more than 100 seconds). It may still be working on it — check again in a minute.' }[r.status];
