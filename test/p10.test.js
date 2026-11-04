@@ -1,4 +1,4 @@
-// Home rows from Trakt / TMDB lists, the Wishlist and its alerts, the bell on series, and "Your viewing".
+// Home rows from TMDB lists, the Wishlist and its alerts, the bell on series, and "Your viewing".
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -7,38 +7,24 @@ const path = require('path');
 const net = require('net');
 const http = require('http');
 const { spawn } = require('child_process');
-const integ = require('./mock/integrations');
 const tmdbMock = require('./mock/tmdb');
 const { HomeLists, parseSource } = require('../lib/homelists');
 const { Wishlist } = require('../lib/wishlist');
 const { Viewing } = require('../lib/viewing');
-const { Trakt } = require('../lib/trakt');
 const { Tmdb } = require('../lib/tmdb');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'p10-'));
 const freePort = () => new Promise((ok) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const tl = (type, title, year, ids = {}) => ({ type, [type]: { title, year, ids } });
-
-const TRAKT_LISTS = {
-  'alex/sci-fi': { name: 'Sci-fi classics', items: [tl('movie', 'The Matrix', 1999, { trakt: 1, tmdb: 1, imdb: 'tt0133093' }), tl('movie', 'Inception', 2010, { tmdb: 2 }), tl('movie', 'Blade Runner', 1982, { tmdb: 7 }), tl('show', 'Night Train', 2021, { tmdb: 43 }), tl('movie', 'Interstellar', 2014, {}), { type: 'person', person: { name: 'Someone' } }] },
-  'alex/secret': { name: 'Secret', private: true, items: [] },
-  oscars: { name: 'Oscar winners', items: [tl('movie', 'Titanic', 1997, { tmdb: 5 })] },
-};
-const TRAKT_CHARTS = { movies: [tl('movie', 'Blade Runner', 1982, { tmdb: 7 }), tl('movie', 'Toy Story', 1995, { tmdb: 6 })] };
-
-test('parseSource understands Trakt and TMDB links', () => {
-  assert.deepStrictEqual(parseSource('https://trakt.tv/users/alex/lists/sci-fi?sort=rank,asc'), { kind: 'trakt-list', ref: 'alex/sci-fi' });
-  assert.deepStrictEqual(parseSource('alex/sci-fi'), { kind: 'trakt-list', ref: 'alex/sci-fi' });
-  assert.deepStrictEqual(parseSource('https://trakt.tv/lists/2142753'), { kind: 'trakt-list', ref: '2142753' });
-  assert.deepStrictEqual(parseSource('https://trakt.tv/movies/trending'), { kind: 'trakt-chart', ref: 'movies/trending' });
+test('parseSource understands TMDB links, and says Trakt is gone', () => {
   assert.deepStrictEqual(parseSource('https://www.themoviedb.org/list/7001-best-of-sci-fi'), { kind: 'tmdb-list', ref: '7001' });
   assert.deepStrictEqual(parseSource('https://www.themoviedb.org/collection/100-the-matrix-collection'), { kind: 'tmdb-collection', ref: '100' });
   assert.deepStrictEqual(parseSource('https://www.themoviedb.org/keyword/9715-superhero/movie'), { kind: 'tmdb-keyword', ref: '9715:movie' });
-  assert.deepStrictEqual(parseSource({ kind: 'trakt-chart', ref: 'shows/popular' }), { kind: 'trakt-chart', ref: 'shows/popular' });
-  assert.throws(() => parseSource('https://example.com/list'), /isn’t a Trakt or TMDB list/);
+  assert.deepStrictEqual(parseSource({ kind: 'tmdb-keyword', ref: '9715' }), { kind: 'tmdb-keyword', ref: '9715:movie' });
+  assert.throws(() => parseSource('https://trakt.tv/users/alex/lists/sci-fi'), /Trakt lists aren’t supported/);
+  assert.throws(() => parseSource({ kind: 'trakt-chart', ref: 'movies/popular' }), /isn’t a list/);
+  assert.throws(() => parseSource('https://example.com/list'), /isn’t a TMDB list/);
   assert.throws(() => parseSource(''), /Paste/);
-  assert.throws(() => parseSource({ kind: 'trakt-chart', ref: 'movies/worst' }), /Unknown/);
 });
 
 /** A small catalogue with the shape lists and matching need. */
@@ -54,7 +40,6 @@ function fakeCatalog(list) {
 }
 
 test('lists are fetched once, matched by id then title and year, and only what is here is shown', async () => {
-  const m = await integ.start({ traktLists: TRAKT_LISTS, traktCharts: TRAKT_CHARTS, traktMine: { 'my-faves': { name: 'My faves', items: [tl('movie', 'Toy Story', 1995, { tmdb: 6 })] } } });
   const tm = await tmdbMock.start();
   const dir = tmp();
   try {
@@ -64,53 +49,31 @@ test('lists are fetched once, matched by id then title and year, and only what i
       { k: 'mi', t: 'movie', n: 'Interstellar', y: 2014 },
       { k: 'mx', t: 'movie', n: 'Inception', y: 2010, tmdb: '999' }, // same name, another film
       { k: 's43', t: 'show', n: 'Night Train', y: 2021 },
-      { k: 'm6', t: 'movie', n: 'Toy Story', y: 1995 },
     ]);
-    let conf = { clientId: '', clientSecret: '' };
-    const trakt = new Trakt({ dataDir: dir, getConf: () => conf, fetch, base: m.traktBase, lib: { catalog: () => cat } });
     let key = '';
     const tmdb = new Tmdb({ dataDir: dir, getKey: () => key, base: tm.base });
-    const hl = new HomeLists({ dataDir: dir, catalog: () => cat, tmdb, trakt });
+    const hl = new HomeLists({ dataDir: dir, catalog: () => cat, tmdb });
     const vis = () => true;
 
-    await assert.rejects(hl.addRow('p1', 'alex/sci-fi'), /Trakt app.*Client ID is enough/);
     await assert.rejects(hl.addRow('p1', 'https://www.themoviedb.org/list/7001'), /TMDB key/);
-    conf = { clientId: 'cid', clientSecret: '' }; // public lists: the client id alone
-    const r = await hl.addRow('p1', 'https://trakt.tv/users/alex/lists/sci-fi');
-    assert.strictEqual(r.row.name, 'Sci-fi classics');
+    await assert.rejects(hl.addRow('p1', 'https://trakt.tv/users/alex/lists/sci-fi'), /Trakt lists aren’t supported/);
+    key = 'testkey';
+    // A list (several pages), a collection and a keyword.
+    const r = await hl.addRow('p1', 'https://www.themoviedb.org/list/7001-best-of-sci-fi');
     const [row] = hl.rowsView({ id: 'p1' }, vis);
-    assert.strictEqual(row.total, 5, 'people are skipped');
-    assert.deepStrictEqual(row.keys, ['m1', 'm7', 's43', 'mi'], 'Inception here is another film (different TMDB id)');
+    assert.strictEqual(row.total, 5);
+    assert.deepStrictEqual(row.keys, ['m1', 'mi', 'm7', 's43'], 'Inception here is another film (different TMDB id)');
     assert.strictEqual(row.here, 4);
     const full = hl.fullView({ id: 'p1' }, row.id, vis);
     assert.deepStrictEqual(full.items.filter((x) => !x.k).map((x) => x.n), ['Inception']);
+    assert.ok(full.items.find((x) => x.n === 'Inception').p.startsWith('https://image.tmdb.org/'));
     // The same list for another profile: no second fetch.
-    const reads = m.state.trakt.listReads;
-    await hl.addRow('p2', 'alex/sci-fi');
-    assert.strictEqual(m.state.trakt.listReads, reads);
-    assert.strictEqual((await hl.addRow('p1', 'alex/sci-fi')).existed, true);
+    const reads = tm.state.hits.filter((h) => h.startsWith('/list/')).length;
+    await hl.addRow('p2', 'https://www.themoviedb.org/list/7001');
+    assert.strictEqual(tm.state.hits.filter((h) => h.startsWith('/list/')).length, reads);
+    assert.strictEqual((await hl.addRow('p1', 'https://www.themoviedb.org/list/7001')).existed, true);
     // Visibility per profile.
     assert.strictEqual(hl.rowsView({ id: 'p2' }, (k) => k !== 'm1')[0].here, 3);
-    await assert.rejects(hl.addRow('p1', 'alex/secret'), /doesn’t know that list/);
-    await assert.rejects(hl.addRow('p1', 'trakt.tv/users/alex/lists/nope'), /doesn’t know/);
-    // Charts.
-    const ch = await hl.addRow('p1', { kind: 'trakt-chart', ref: 'movies/popular' });
-    assert.strictEqual(ch.row.name, 'Popular films on Trakt');
-    assert.deepStrictEqual(hl.rowsView({ id: 'p1' }, vis).find((x) => x.id === ch.row.id).keys, ['m7', 'm6']);
-    // The profile's own Trakt lists need it connected.
-    await assert.rejects(hl.addRow('p1', { kind: 'trakt-mine', ref: 'my-faves' }), /Connect Trakt/);
-    trakt.store.data.profiles.p1 = { access: m.state.trakt.token, refresh: 'r', expires: Date.now() + 30 * 86400e3, opts: {} };
-    assert.deepStrictEqual((await hl.myTraktLists('p1')).map((l) => l.ref), ['my-faves']);
-    const mine = await hl.addRow('p1', { kind: 'trakt-mine', ref: 'my-faves' });
-    assert.strictEqual(mine.row.name, 'My faves');
-
-    // TMDB: a list (several pages), a collection and a keyword.
-    key = 'testkey';
-    const tl1 = await hl.addRow('p1', 'https://www.themoviedb.org/list/7001-best-of-sci-fi');
-    const v1 = hl.rowsView({ id: 'p1' }, vis).find((x) => x.id === tl1.row.id);
-    assert.strictEqual(v1.total, 5);
-    assert.deepStrictEqual(v1.keys, ['m1', 'mi', 'm7', 's43']);
-    assert.ok(hl.fullView({ id: 'p1' }, tl1.row.id, vis).items.find((x) => x.n === 'Inception').p.startsWith('https://image.tmdb.org/'));
     const col = await hl.addRow('p1', 'https://www.themoviedb.org/collection/100');
     assert.strictEqual(col.row.name, 'The Matrix Collection');
     const kw = await hl.addRow('p1', 'https://www.themoviedb.org/keyword/9715-superhero');
@@ -120,18 +83,23 @@ test('lists are fetched once, matched by id then title and year, and only what i
     cat.set(cat.items.concat([{ k: 'm2', t: 'movie', n: 'Inception', y: 2010, tmdb: '2' }]));
     assert.ok(hl.rowsView({ id: 'p1' }, vis)[0].keys.includes('m2'));
 
+    // A row from a Trakt list made before Trakt was removed: not shown, not fetched, nothing breaks.
+    hl.store.data.sources['trakt-list:alex/sci-fi'] = { id: 'trakt-list:alex/sci-fi', kind: 'trakt-list', ref: 'alex/sci-fi', name: 'Old', at: Date.now() - 3 * 86400e3, err: '', n: 3 };
+    hl.store.data.profiles.p1.rows.push({ id: 'xl:old', src: 'trakt-list:alex/sci-fi', name: 'Old' });
+    assert.ok(!hl.rowsView({ id: 'p1' }, vis).some((x) => x.id === 'xl:old'));
+    await hl.refreshDue({ gap: 0 });
+
     // Refresh: lists more than a day old are fetched again; unused ones are forgotten after a week.
-    const src = hl.store.data.sources['trakt-list:alex/sci-fi'];
-    src.at = Date.now() - 2 * 86400e3; src.tried = 0;
-    TRAKT_LISTS['alex/sci-fi'].items.push(tl('movie', 'Titanic', 1997, { tmdb: 5 }));
+    const id = 'tmdb-list:7001';
+    hl.store.data.sources[id].at = Date.now() - 2 * 86400e3; hl.store.data.sources[id].tried = 0;
     await hl.refreshDue({ gap: 0 });
-    assert.strictEqual(hl.store.data.sources['trakt-list:alex/sci-fi'].n, 6);
+    assert.ok(hl.store.data.sources[id].at > Date.now() - 60e3, 'fetched again');
     hl.removeRow('p1', r.row.id); hl.removeRow('p2', r.row.id);
-    hl.store.data.sources['trakt-list:alex/sci-fi'].at = Date.now() - 8 * 86400e3;
-    hl.store.data.sources['trakt-list:alex/sci-fi'].tried = 0;
+    hl.store.data.sources[id].at = Date.now() - 8 * 86400e3;
+    hl.store.data.sources[id].tried = 0;
     await hl.refreshDue({ gap: 0 });
-    assert.ok(!hl.store.data.sources['trakt-list:alex/sci-fi'], 'unused and old: forgotten');
-  } finally { m.close(); tm.close(); }
+    assert.ok(!hl.store.data.sources[id], 'unused and old: forgotten');
+  } finally { tm.close(); }
 });
 
 test('wishlist: arrivals, one alert per title, the bell', () => {
@@ -239,7 +207,6 @@ function client(base) {
 }
 
 test('the real server: list rows, wishlist arrivals, the bell and your viewing', { timeout: 120000 }, async () => {
-  const m = await integ.start({ traktLists: TRAKT_LISTS, traktCharts: TRAKT_CHARTS });
   const tm = await tmdbMock.start();
   const entry = (name, url, group) => `#EXTINF:-1 group-title="${group}",${name}\n${url}\n`;
   let m3u = '#EXTM3U\n' + entry('News One', 'http://127.0.0.1:1/live/1.m3u8', 'News') + entry('The Matrix (1999)', 'http://127.0.0.1:1/movie/1.mp4', 'Films') + entry('Blade Runner (1982)', 'http://127.0.0.1:1/movie/7.mp4', 'Films') +
@@ -248,7 +215,7 @@ test('the real server: list rows, wishlist arrivals, the bell and your viewing',
   await new Promise((r) => pl.once('listening', r));
   const port = await freePort();
   const dir = tmp();
-  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', TRAKT_BASE: m.traktBase, TMDB_BASE: tm.base }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', TMDB_BASE: tm.base }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   app.stdout.on('data', (d) => { out += d; });
   app.stderr.on('data', (d) => { out += d; });
@@ -270,23 +237,24 @@ test('the real server: list rows, wishlist arrivals, the bell and your viewing',
     await api('POST', '/api/me/list', {}).catch(() => {});
     assert.strictEqual((await api('POST', '/api/toggle', { field: 'list', k: harbor, on: true })).status, 200);
 
-    // Nothing set up yet: clear messages.
-    let r = await api('POST', '/api/homelists/rows', { text: 'alex/sci-fi' });
+    // No TMDB key yet: clear messages.
+    let r = await api('POST', '/api/homelists/rows', { text: 'https://www.themoviedb.org/list/7001' });
     assert.strictEqual(r.status, 400);
-    assert.match(r.body.error, /Admin → Integrations/);
-    assert.strictEqual((await api('GET', '/api/wishlist/search?q=incep')).status, 400);
-    assert.strictEqual((await api('PUT', '/api/admin/integrations', { trakt: { clientId: 'cid' } })).status, 200);
-    assert.deepStrictEqual((await api('GET', '/api/boot')).body.homeLists, { trakt: true, tmdb: false });
+    assert.match(r.body.error, /TMDB key/);
     r = await api('POST', '/api/homelists/rows', { text: 'https://trakt.tv/users/alex/lists/sci-fi' });
+    assert.strictEqual(r.status, 400);
+    assert.match(r.body.error, /Trakt lists aren’t supported/);
+    assert.strictEqual((await api('GET', '/api/wishlist/search?q=incep')).status, 400);
+    assert.deepStrictEqual((await api('GET', '/api/boot')).body.homeLists, { tmdb: false });
+    assert.strictEqual((await api('POST', '/api/trakt/connect')).status, 404, 'Trakt is gone');
+    assert.strictEqual((await api('PUT', '/api/admin/settings', { tmdbKey: 'testkey' })).status, 200);
+    r = await api('POST', '/api/homelists/rows', { text: 'https://www.themoviedb.org/list/7001-best-of-sci-fi' });
     assert.strictEqual(r.status, 200, r.text);
     const rowId = r.body.row.id;
     let rows = (await api('GET', '/api/homelists')).body.rows;
-    assert.strictEqual(rows[0].name, 'Sci-fi classics');
+    assert.strictEqual(rows[0].name, 'Best of Sci-Fi');
     assert.deepStrictEqual(rows[0].keys, [matrix, key('Blade Runner'), nightTrain]);
     assert.ok(rows[0].total >= 5);
-    r = await api('POST', '/api/homelists/rows', { text: 'https://www.themoviedb.org/list/7001' });
-    assert.strictEqual(r.status, 400);
-    assert.match(r.body.error, /TMDB key/);
     // The whole list: the missing ones can go on the wishlist.
     let full = (await api('GET', `/api/homelists/rows/${rowId}`)).body;
     const missing = full.items.filter((x) => !x.k);
@@ -296,11 +264,10 @@ test('the real server: list rows, wishlist arrivals, the bell and your viewing',
     assert.ok((await api('GET', `/api/homelists/rows/${rowId}`)).body.items.find((x) => x.n === 'Inception').wished);
     assert.strictEqual((await api('POST', '/api/wishlist', { t: 'movie', n: 'The Matrix', y: 1999 })).body.here, matrix, 'already here');
 
-    // With a TMDB key: TMDB rows and searching for anything.
-    assert.strictEqual((await api('PUT', '/api/admin/settings', { tmdbKey: 'testkey' })).status, 200);
-    r = await api('POST', '/api/homelists/rows', { text: 'https://www.themoviedb.org/list/7001-best-of-sci-fi', name: 'Sci-fi (TMDB)' });
+    // A row with its own name, and searching for anything.
+    r = await api('POST', '/api/homelists/rows', { text: 'https://www.themoviedb.org/keyword/9715-superhero', name: 'Superheroes' });
     assert.strictEqual(r.status, 200, r.text);
-    assert.strictEqual(r.body.row.name, 'Sci-fi (TMDB)');
+    assert.strictEqual(r.body.row.name, 'Superheroes');
     const s = (await api('GET', '/api/wishlist/search?q=unaired')).body.results;
     assert.deepStrictEqual(s.map((x) => [x.t, x.n, x.y]), [['show', 'Unaired Saga', 2026]]);
     assert.ok((await api('GET', '/api/wishlist/search?q=matrix')).body.results.find((x) => x.n === 'The Matrix').k, 'says when it’s here');
@@ -351,6 +318,6 @@ test('the real server: list rows, wishlist arrivals, the bell and your viewing',
   } finally {
     app.kill();
     pl.close();
-    m.close(); tm.close();
+    tm.close();
   }
 });

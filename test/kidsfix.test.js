@@ -1,6 +1,5 @@
 'use strict';
-// Fixes: 24/7 channels' guide and "what's on" respect each profile's restrictions; Trakt brings nothing a profile
-// can't see into it; HLS playlists are read with a size limit; media folders don't serve files through symlinks that
+// Fixes: 24/7 channels' guide and "what's on" respect each profile's restrictions; HLS playlists are read with a size limit; media folders don't serve files through symlinks that
 // lead out of them; screen time on the night the clocks change, and a bedtime after midnight.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -91,37 +90,6 @@ test('My channels: what’s on now for a profile, and a channel the profile can�
   const other = await mc.create({ name: 'Grown-up Films', group: 'Films', source: { type: 'titles', keys: [kidK, adultK] } });
   cat.build();
   await assert.rejects(now(null, null, { id: other.id }, q(), { profile: KIDS }), (e) => e.status === 404);
-});
-
-test('Trakt: a watchlist or history entry this profile can’t see isn’t brought in', { timeout: 20000 }, async () => {
-  const mock = require('./mock/integrations');
-  const { Trakt } = require('../lib/trakt');
-  const m = await mock.start({});
-  try {
-    const items = new Map([['m3', { k: 'm3', t: 'movie', n: 'Remote Film', y: 2020, tmdb: '777', d: 6000, adult: true }]]);
-    const cat = { get: (k) => items.get(k) || null, items: [...items.values()], version: 1, findTitle: () => [] };
-    const users = new Map();
-    const ud = {
-      of: (pid) => { if (!users.has(pid)) users.set(pid, { data: { list: [], ratings: {}, progress: {} } }); return users.get(pid); },
-      toggle(pid, f, k, on) { const d = this.of(pid).data; d[f] = d[f].filter((x) => x !== k); if (on) d[f].unshift(k); },
-      rate(pid, k, v) { this.of(pid).data.ratings[k] = v; },
-      progress(pid, r) { this.of(pid).data.progress[r.k] = { w: true }; },
-    };
-    const byTmdb = (id, type) => { for (const it of items.values()) if (it.t === type && it.tmdb === id) return it.k; return null; };
-    const visible = (pid, k) => pid !== 'kid' || !items.get(k).adult;
-    const tr = new Trakt({ dataDir: tmp(), getConf: () => ({ clientId: 'cid', clientSecret: 'sec' }), fetch, base: m.traktBase, lib: { catalog: () => cat, userdata: ud, tmdbOf: (it) => it.tmdb || '', byTmdb, episodes: async () => [], visible } });
-    m.state.trakt.ratings = [{ rating: 9, movie: { title: 'Remote Film', year: 2020, ids: { tmdb: 777 } } }];
-    for (const pid of ['kid', 'mum']) tr.store.data.profiles[pid] = { access: 'tok1', refresh: 'r', expires: Date.now() + 30 * 86400e3, opts: {} };
-    await tr.sync('kid');
-    await tr.importHistory('kid');
-    assert.deepStrictEqual(ud.of('kid').data.list, [], 'not added to the kids profile’s My List');
-    assert.deepStrictEqual(ud.of('kid').data.ratings, {});
-    assert.deepStrictEqual(ud.of('kid').data.progress, {});
-    await tr.sync('mum');
-    await tr.importHistory('mum');
-    assert.deepStrictEqual(ud.of('mum').data.list, ['m3'], 'a profile that may see it still gets it');
-    assert.ok(ud.of('mum').data.progress.m3);
-  } finally { m.close(); }
 });
 
 test('HLS playlists are read with a size limit (a provider sending without end)', { timeout: 20000 }, async () => {

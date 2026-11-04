@@ -403,7 +403,10 @@ V.adminTabs.profiles = function (body, A) {
 V.adminTabs.content = function (body, A) {
   var s = A.settings;
   body.innerHTML = '<section class="card-sec"><h2>Default languages</h2><p class="dim">Profiles see only these languages unless they choose their own. Leave all unticked to show everything.</p><div class="lang-pick">' + V.langChecks(s.defaultLangs) + '</div>' +
-    '<label class="check"><input type="checkbox" data-unknown' + (s.showUnknownLang ? ' checked' : '') + '><span>Show things whose language can’t be worked out</span></label><button class="btn primary" data-save-l>Save languages</button><div class="lang-stats dim small"></div></section>' +
+    '<label class="check"><input type="checkbox" data-unknown' + (s.showUnknownLang ? ' checked' : '') + '><span>Show things whose language can’t be worked out</span></label>' +
+    '<label class="check"><input type="checkbox" data-tmdblang' + (s.tmdbLangs !== false ? ' checked' : '') + '><span>Use TMDB’s original language when a film’s or series’ language is only guessed</span></label>' +
+    '<p class="dim small">When a provider only says “EN” for a whole category, or nothing at all, a Korean film in it counts as Korean, so profiles see the languages they chose. Not for cartoons and children’s titles (usually dubbed), multi-language copies, or a copy whose name says its language. Needs a TMDB key.</p>' +
+    '<button class="btn primary" data-save-l>Save languages</button><div class="lang-stats dim small"></div></section>' +
     '<section class="card-sec"><h2>Hidden categories</h2><p class="dim">Hidden for everyone (the admin too). Tick to hide.</p><input class="input" type="search" data-gf placeholder="Filter categories"><div class="groups-adm"><div class="spinner"></div></div><button class="btn primary" data-save-g>Save hidden categories</button></section>';
   V.api('/api/admin/groups').then(function (g) {
     var hidden = new Set(s.hiddenGroups || []);
@@ -422,7 +425,7 @@ V.adminTabs.content = function (body, A) {
     body.addEventListener('change', function (e) { if (e.target.closest('.groups-adm')) { if (e.target.checked) hidden.add(e.target.value); else hidden.delete(e.target.value); } });
     V.$('[data-save-g]', body).onclick = function () { V.adminSave({ hiddenGroups: Array.from(hidden) }, 'Saved — the catalogue is being rebuilt'); };
   }).catch(function (e) { var gb = V.$('.groups-adm', body); if (gb) gb.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; V.$('[data-save-g]', body).disabled = true; }); // (not a spinner forever, nor a Save that does nothing)
-  V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked }, 'Saved — everyone using the default sees the change (a language nobody had before takes a few minutes to appear)'); };
+  V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked, tmdbLangs: V.$('[data-tmdblang]', body).checked }, 'Saved — everyone using the default sees the change (a language nobody had before takes a few minutes to appear)'); };
 };
 
 V.adminTabs.playback = function (body, A) {

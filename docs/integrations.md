@@ -1,4 +1,4 @@
-# Subtitles, Trakt, rows from lists, the wishlist, your viewing, the viewing dashboard, speed test, error reports and automations
+# Subtitles, rows from lists, the wishlist, your viewing, the viewing dashboard, speed test, error reports and automations
 
 [← Back to the README](../README.md)
 
@@ -19,31 +19,21 @@ Each subtitle is downloaded once, converted to WebVTT and kept on the server (up
 - **Setup (admin):** Admin → **Integrations** → *Subtitles found online*: the SubDL key, the Addic7ed switch, and *Test all sources*. OpenSubtitles is the section below it; an account there only helps with a VIP subscription.
 - When OpenSubtitles' downloads are used up, the message says so; the other sources keep working.
 
-## Trakt
+## Home rows from TMDB lists
 
-Each profile can connect its own [Trakt](https://trakt.tv) account in **Settings → Trakt**. The screen shows a short code to type at trakt.tv/activate, so it works on a TV too. Once connected:
+**Home → Add a row from a list** (at the bottom of Home, and in *Customise this page*) puts a list on your home page. Paste a link to:
 
-- **Log what I watch:** films and episodes go into your Trakt history as you watch them (start, pause, stop and how far you got). They're matched by TMDB id when known, otherwise by a Trakt search on title and year.
-- **Watchlist ↔ My List:** kept the same both ways every few hours, or with *Sync now*. Something removed on one side since the last sync is removed on the other.
-- **Thumbs ↔ ratings:** thumbs up is 8/10 and thumbs down is 3/10. A Trakt rating of 7 or more is a thumbs up here, and 4 or less is a thumbs down.
-- **Copy Trakt history here** marks what you've watched elsewhere as watched. **Copy my history to Trakt** sends the other way.
+- a **TMDB list** (`themoviedb.org/list/…`): lists people share, such as Oscar winners or a director's films;
+- a **collection** (`themoviedb.org/collection/…`): every film of a series, in order;
+- a **keyword** (`themoviedb.org/keyword/…`, films, or `/tv` for series): "christmas", "time travel"…
 
-Tokens stay on the server and are refreshed before they run out. **Setup (admin):** create an app at trakt.tv → Settings → Your API Apps with the redirect URI `urn:ietf:wg:oauth:2.0:oob`, then paste its Client ID and Secret into Admin → **Integrations**.
-
-## Home rows from Trakt and TMDB lists
-
-**Home → Add a row from a list** (at the bottom of Home, and in *Customise this page*) puts a list on your home page. Paste a link, or pick one:
-
-- a public **Trakt list**: `trakt.tv/users/<user>/lists/<list>`, or just `user/list` — the copies of IMDb's Top 250, Oscar winners, a director's films and so on that people share;
-- **your own Trakt lists**, once Trakt is connected in Settings;
-- Trakt's **trending, popular and most anticipated** films and series;
-- a **TMDB list** (`themoviedb.org/list/…`), **collection** (`themoviedb.org/collection/…`) or **keyword** (`themoviedb.org/keyword/…`, films or `/tv` for series).
+What's trending and popular worldwide is in Movies and Series (and a Home row) with smarter categories on: Admin → Categories.
 
 A row shows only the titles your providers have, matched by TMDB (or IMDb) id first, then by title and year, and says how many: *12 of 250 here*. **See the whole list** (the row's title, or its ⋯ menu) shows every entry in the list's order, with *Here* / *Not here* filters; anything that isn't here can go on your wishlist with one click. The ⋯ menu also has *Move to the top*, *Rename*, *Hide this row* and *Remove this row*, and the rows appear in *Customise this page* with the others.
 
 Each list is fetched once for the whole household, kept on the server and checked again about once a day (or with *Check again*). No stream is ever opened for this.
 
-**Setup (admin):** public Trakt lists and charts need only the Trakt app's **Client ID** in Admin → Integrations (the secret is only needed for connecting profiles). TMDB lists need a TMDB key (Admin → Recommendations); without one the dialog says they aren't available.
+**Setup (admin):** these need a TMDB key (Admin → Recommendations); without one the dialog says they aren't available. (Trakt lists aren't supported any more: rows made from them before are no longer shown.)
 
 ## Wishlist and alerts
 
@@ -200,4 +190,4 @@ automation:
 
 ### Environment variables (testing only)
 
-`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE`, `OPENSUBTITLES_BASE` and `TRAKT_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`), and `TMDB_BASE` points TMDB at one (`test/mock/tmdb.js`).
+`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE` and `OPENSUBTITLES_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`), and `TMDB_BASE` points TMDB at one (`test/mock/tmdb.js`).

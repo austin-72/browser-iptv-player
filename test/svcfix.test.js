@@ -1,5 +1,5 @@
-// Fixes in screen time, Trakt, webhooks, following teams and the routes that read a request body: bedtime after
-// midnight judged by the evening it started on, one Trakt token refresh at a time, webhook addresses and retries,
+// Fixes in screen time, webhooks, following teams and the routes that read a request body: bedtime after
+// midnight judged by the evening it started on, webhook addresses and retries,
 // bodies that aren't objects, and streams refused once a profile's time is up.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -10,7 +10,6 @@ const net = require('net');
 const http = require('http');
 const { spawn } = require('child_process');
 const { ScreenTime } = require('../lib/screentime');
-const { Trakt } = require('../lib/trakt');
 const { Webhooks } = require('../lib/webhooks');
 const { SportsIndex } = require('../lib/follow');
 
@@ -44,41 +43,6 @@ test('screen time: a bedtime after midnight belongs to the evening it started on
   // Saturday evening: until 00:30.
   now = at('2026-11-07T23:00:00Z');
   assert.strictEqual(st.state('kid').left, 90);
-});
-
-test('Trakt: two requests at once refresh an old token only once (the profile stays connected)', async () => {
-  let refreshes = 0;
-  const used = new Set();
-  const srv = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (d) => { body += d; });
-    req.on('end', () => {
-      if (req.url === '/oauth/token') {
-        refreshes++;
-        const b = JSON.parse(body);
-        // A refresh token works once.
-        if (used.has(b.refresh_token)) { res.writeHead(400); return res.end('{}'); }
-        used.add(b.refresh_token);
-        setTimeout(() => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ access_token: 'new', refresh_token: 'r2', expires_in: 7776000, created_at: Math.floor(Date.now() / 1000) })); }, 50);
-        return;
-      }
-      res.writeHead(req.headers.authorization === 'Bearer new' ? 200 : 401, { 'Content-Type': 'application/json' });
-      res.end('[]');
-    });
-  });
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
-  try {
-    const tr = new Trakt({ dataDir: tmp(), getConf: () => ({ clientId: 'cid', clientSecret: 'sec' }), fetch, base: `http://127.0.0.1:${srv.address().port}`, lib: {} });
-    tr.store.data.profiles.p1 = { access: 'old', refresh: 'r1', expires: Date.now() + 3600e3, opts: {} };
-    const [a, b] = await Promise.all([tr._req('/sync/watchlist/movies', { pid: 'p1' }), tr._req('/sync/watchlist/shows', { pid: 'p1' })]);
-    assert.strictEqual(refreshes, 1);
-    assert.strictEqual(a.status, 200);
-    assert.strictEqual(b.status, 200);
-    assert.strictEqual(tr.prof('p1').access, 'new');
-    assert.strictEqual(tr.status('p1').connected, true);
-    // Options sent as something other than an object: nothing changes (no crash).
-    assert.deepStrictEqual(tr.setOpts('p1', null), {});
-  } finally { srv.close(); }
 });
 
 test('webhooks: addresses checked, events once each, retries capped', async () => {

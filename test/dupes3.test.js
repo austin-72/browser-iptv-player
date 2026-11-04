@@ -77,3 +77,34 @@ test('the same film in another language is shown once, in the profile’s langua
   const fr = c._payloadItems(c.filterFor({ langs: ['fr'], restrictions: {} })).filter((x) => x.t === 'movie');
   assert.deepStrictEqual(fr.map((x) => x.n), ['L\'Étrange Noël de monsieur Jack']);
 });
+
+test('TMDB’s original language for a film whose language was only guessed from its category', () => {
+  let n = 0;
+  const mv = (name, group) => ({ name, type: 'movie', url: `http://p/movie/u/p/${++n}.mp4`, group });
+  const items = [mv('Hopeu (2026)', '|EN| FOREIGN MOVIES'), mv('EN - Parasite (2019)', 'VOD'), mv('Spirited Away (2001)', '|EN| ANIMATION'), mv('Untagged Film (2020)', 'Movies')];
+  const c = new Catalog({ lists: { all: () => [{ id: 'A', name: 'A', enabled: true, type: 'xtream' }], parsed: new Map([['A', { items, epgUrls: [] }]]) }, epg: { has: () => false, resolve: () => null }, getSettings: () => ({ tidyGroups: true, groupRules: [], hiddenGroups: [], hiddenKeys: [] }) });
+  c.build();
+  const by = (n) => c.items.find((x) => x.n === n);
+  assert.ok(by('Hopeu')._lgw, 'labelled by its category only');
+  assert.ok(!by('Parasite')._lgw, 'its own name says EN');
+  const names = { en: 'English', ko: 'Korean', ja: 'Japanese', fr: 'French' };
+  assert.deepStrictEqual(Tmdb.langFor(by('Hopeu'), { ol: 'ko', gn: ['Drama'] }, names), ['ko']);
+  assert.strictEqual(Tmdb.langFor(by('Parasite'), { ol: 'ko', gn: ['Drama'] }, names), null, 'labelled in its own name: left');
+  assert.strictEqual(Tmdb.langFor(by('Spirited Away'), { ol: 'ja', gn: ['Animation', 'Family'] }, names), null, 'cartoons are usually dubbed');
+  assert.strictEqual(Tmdb.langFor(by('Hopeu'), { ol: 'ko', sl: ['ko', 'en'], gn: [] }, names), null, 'English is spoken in it too');
+  assert.strictEqual(Tmdb.langFor(by('Hopeu'), { ol: 'xx', gn: [] }, names), null);
+  assert.strictEqual(Tmdb.langFor({ ...by('Hopeu'), lg: ['mul'] }, { ol: 'ko', gn: [] }, names), null, 'multi-language copy');
+});
+
+test('original languages of titles looked up before, from TMDB’s answers on disk (no requests)', () => withTmdb(async (t, asked) => {
+  t.meta.data.m.F = { tmdb: 985939, type: 'movie', v: 2, at: Date.now() };
+  await t.get('/movie/985939', { append_to_response: 'credits,release_dates' }); // (an old answer in the cache)
+  await new Promise((r) => setTimeout(r, 200)); // (saved in the background)
+  const before = asked.length;
+  const fs2 = require('fs');
+  // (the stand-in doesn't send a language: add one to the saved answer)
+  for (const f of fs2.readdirSync(t.dir)) { const p = path.join(t.dir, f); const j = JSON.parse(fs2.readFileSync(p, 'utf8')); if (j.id === 985939) fs2.writeFileSync(p, JSON.stringify({ ...j, original_language: 'en', spoken_languages: [{ iso_639_1: 'en' }] })); }
+  assert.strictEqual(await t.backfillLanguages(), 1);
+  assert.deepStrictEqual([t.meta.data.m.F.ol, t.meta.data.m.F.sl], ['en', ['en']]);
+  assert.strictEqual(asked.length, before, 'nothing asked of TMDB');
+}));

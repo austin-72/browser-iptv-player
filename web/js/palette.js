@@ -71,7 +71,7 @@
     var n = 0;
     (function again() { if (!find() && ++n < 20) setTimeout(again, 60); })();
   }
-  var ADMIN_TABS = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles', 'screen time bedtime kids age limit pin'], ['content', 'Languages & content'], ['categories', 'Categories'], ['playback', 'Playback'], ['network', 'Network & proxies'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security', 'password devices'], ['mychannels', 'My channels'], ['outputs', 'Other apps'], ['integrations', 'Integrations', 'subtitles trakt'], ['api', 'API & automations', 'webhooks keys'], ['apps', 'Backups, updates & apps']];
+  var ADMIN_TABS = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles', 'screen time bedtime kids age limit pin'], ['content', 'Languages & content'], ['categories', 'Categories'], ['playback', 'Playback'], ['network', 'Network & proxies'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security', 'password devices'], ['mychannels', 'My channels'], ['outputs', 'Other apps'], ['integrations', 'Integrations', 'subtitles'], ['api', 'API & automations', 'webhooks keys'], ['apps', 'Backups, updates & apps']];
   function staticEntries() {
     var out = [];
     var page = function (id, label, href, icon, kw) { out.push({ id: 'page:' + id, label: label, hint: 'Page', icon: icon || 'next', kw: kw || '', run: function () { V.router.go(href); } }); };

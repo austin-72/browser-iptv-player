@@ -49,7 +49,7 @@ V.route('settings', function (view) {
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
     V.mixedSection() + V.directHelperSection() +
     (V.followSettingsHtml ? V.followSettingsHtml() : '') + // Teams and competitions (follow.js)
-    (V.settingsExtra ? V.settingsExtra() : '') + // Trakt, OpenSubtitles, connection test (integrations.js)
+    (V.settingsExtra ? V.settingsExtra() : '') + // subtitles found online, connection test (integrations.js)
 
     (!pr.admin ? '<section class="card-sec danger-zone"><h2>Remove this profile</h2><p class="dim">Deletes your history, lists and settings.</p><button class="btn danger" data-a="delete">Remove my profile</button></section>' : '') +
     '<p class="dim small center">' + V.esc((S.settings.brand || {}).name) + ' · version ' + V.esc(S.settings.version) + '</p>' +

@@ -1,4 +1,4 @@
-/* Integrations: subtitles found online (SubDL, Addic7ed, OpenSubtitles), Trakt, playback health reports (for Admin → Overview),
+/* Integrations: subtitles found online (SubDL, Addic7ed, OpenSubtitles), playback health reports (for Admin → Overview),
    the connection speed test, and the admin's Integrations and "API & automations" pages. */
 'use strict';
 (function () {
@@ -123,40 +123,6 @@
     }, 15000);
   });
 
-  // ------------------------------------------------------------ Trakt scrobbling
-  var trakt = { connected: false, at: 0 };
-  V.traktStatus = function (force) {
-    if (!S.settings.trakt) return Promise.resolve({ enabled: false });
-    if (!force && Date.now() - trakt.at < 5 * 60e3 && trakt.st) return Promise.resolve(trakt.st);
-    return V.api('/api/trakt/status').then(function (s) { trakt.st = s; trakt.at = Date.now(); trakt.connected = s.connected && (!s.opts || s.opts.scrobble !== false); return s; });
-  };
-  var scrob = { it: null, last: '' };
-  var progressOf = function () { var p = V.player; var d = p.duration || (scrob.it && scrob.it.d) || 0; return d ? Math.min(100, Math.round((p.position / d) * 1000) / 10) : 0; };
-  var send = function (action) {
-    if (!scrob.it || !trakt.connected) return;
-    var sig = action + scrob.it.k;
-    if (sig === scrob.last && action !== 'stop') return;
-    scrob.last = sig;
-    V.api('/api/trakt/scrobble', { body: { action: action, k: scrob.it.k, progress: progressOf() }, keepalive: action === 'stop' }).catch(function () {});
-  };
-  var bound = null;
-  V.on('playing', function (it) {
-    if (scrob.it && scrob.it !== it) send('stop');
-    scrob.it = it && (it.t === 'movie' || it.t === 'episode') ? it : null;
-    scrob.last = '';
-    if (!scrob.it || !S.settings.trakt) return;
-    V.traktStatus().then(function () {
-      var v = V.player.video;
-      if (bound === v) return;
-      bound = v;
-      v.addEventListener('playing', function () { if (scrob.it) send('start'); });
-      v.addEventListener('pause', function () { if (scrob.it && !v.ended) send('pause'); });
-      v.addEventListener('ended', function () { send('stop'); });
-      if (!v.paused) send('start');
-    }).catch(function () {});
-  });
-  V.on('stopped', function () { send('stop'); scrob.it = null; });
-  window.addEventListener('pagehide', function () { if (scrob.it && V.watch.it) send('stop'); });
 
   // ------------------------------------------------------------ playback health → Admin → Overview
   var health = { stalls: 0, stallMs: 0, since: 0, v: null };
@@ -307,11 +273,10 @@
     V.dialog({ title: 'Test the connection', body: body, wide: true, actions: [{ label: 'Close' }, { label: 'Start', primary: true, fn: run }] });
   };
 
-  // ------------------------------------------------------------ Settings: Trakt, subtitles, connection test
+  // ------------------------------------------------------------ Settings: subtitles, connection test
   V.settingsExtra = function () {
     var pf = S.data.prefs;
-    return (S.settings.trakt ? '<section class="card-sec" data-trakt><h2>Trakt</h2><div class="trakt-box"><div class="spinner"></div></div></section>' : '') +
-      ((S.settings.subtitles || S.settings.opensubtitles) ? '<section class="card-sec"><h2>Subtitles found online</h2>' +
+    return ((S.settings.subtitles || S.settings.opensubtitles) ? '<section class="card-sec"><h2>Subtitles found online</h2>' +
         '<label class="switch"><input type="checkbox" data-pref="autoFetchSubs"' + (pf.autoFetchSubs ? ' checked' : '') + '><span class="sw"></span><span><b>Fetch subtitles automatically</b><small>When a film or episode has none in your language and you’d want them</small></span></label>' +
         '<p class="dim small">You can also pick some yourself while watching: the subtitles button → Find subtitles.</p></section>' : '') +
       '<section class="card-sec"><h2>Connection</h2><p class="dim">How fast this device reaches the server and your provider, and what that’s good for.</p><button class="btn" data-a="speedtest">' + V.icon('pulse') + ' Test my connection</button></section>';
@@ -319,68 +284,7 @@
   V.settingsExtraBind = function (view) {
     var st = V.$('[data-a=speedtest]', view);
     if (st) st.addEventListener('click', function () { V.speedTest(); });
-    var box = V.$('.trakt-box', view);
-    if (box) drawTrakt(box);
   };
-  var traktPoll = null;
-  var drawTrakt = function (box) {
-    clearTimeout(traktPoll);
-    V.traktStatus(true).then(function (s) {
-      if (!s.enabled) { box.innerHTML = '<p class="dim">Trakt isn’t set up on this server.</p>'; return; }
-      if (s.connected) {
-        var o = s.opts || {};
-        var sw = function (k, label, hint) { return '<label class="switch"><input type="checkbox" data-topt="' + k + '"' + (o[k] !== false ? ' checked' : '') + '><span class="sw"></span><span><b>' + label + '</b>' + (hint ? '<small>' + hint + '</small>' : '') + '</span></label>'; };
-        box.innerHTML = '<p>' + V.icon('check', 'tiny ok') + ' Connected' + (s.user ? ' as <b>' + V.esc(s.user) + '</b>' : '') + (s.lastSync ? ' <span class="dim">· synced ' + V.fmtAgo(s.lastSync) + '</span>' : '') + '</p>' +
-          (s.lastError ? '<p class="note warn">' + V.esc(s.lastError) + '</p>' : '') +
-          sw('scrobble', 'Log what I watch', 'Films and episodes appear in your Trakt history as you watch them') +
-          sw('watchlist', 'Keep My List and my Trakt watchlist the same') +
-          sw('ratings', 'Thumbs up / down ↔ Trakt ratings') +
-          '<div class="btn-row"><button class="btn" data-t="sync">' + V.icon('refresh') + ' Sync now</button><button class="btn" data-t="import">Copy Trakt history here</button><button class="btn" data-t="export">Copy my history to Trakt</button><button class="btn danger" data-t="disconnect">Disconnect</button></div>';
-      } else if (s.pending) {
-        showCode(box, s.pending);
-      } else {
-        box.innerHTML = '<p class="dim">Log what you watch on Trakt, and keep your watchlist and ratings in step with My List and your thumbs.</p><button class="btn primary" data-t="connect">Connect Trakt</button>';
-      }
-    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
-    box.onchange = function (e) {
-      var k = e.target.dataset.topt; if (!k) return;
-      var o = {}; o[k] = e.target.checked;
-      V.put('/api/trakt/opts', o).then(function () { V.toast('Saved'); trakt.at = 0; V.traktStatus(true); }).catch(V.fail);
-    };
-    box.onclick = function (e) {
-      var b = e.target.closest('[data-t]'); if (!b) return;
-      var a = b.dataset.t;
-      if (a === 'connect') { b.disabled = true; V.api('/api/trakt/connect', { method: 'POST' }).then(function (p) { showCode(box, p); }).catch(function (err) { b.disabled = false; V.fail(err); }); }
-      else if (a === 'disconnect') V.confirm('Disconnect Trakt from this profile?', { ok: 'Disconnect', danger: true }).then(function (ok) { if (ok) V.api('/api/trakt/disconnect', { method: 'POST' }).then(function () { V.toast('Trakt disconnected'); drawTrakt(box); }).catch(V.fail); });
-      else {
-        b.disabled = true;
-        var label = b.textContent;
-        b.innerHTML = '<span class="spinner sm"></span> Working…';
-        V.api('/api/trakt/' + a, { method: 'POST' }).then(function (r) {
-          b.disabled = false; b.textContent = label;
-          V.toast(a === 'sync' ? 'Synced: ' + [r.added ? r.added + ' added to My List' : '', r.removed ? r.removed + ' removed' : '', r.pushed ? r.pushed + ' sent to Trakt' : '', r.rated ? r.rated + ' ratings' : ''].filter(Boolean).join(', ') || 'Synced — nothing new'
-            : a === 'import' ? 'Marked as watched: ' + V.plural(r.movies, 'film') + ', ' + V.plural(r.episodes, 'episode')
-            : 'Sent to Trakt: ' + V.plural(r.movies, 'film') + ', ' + V.plural(r.episodes, 'episode'));
-          if (a !== 'export') V.refreshMe && V.refreshMe();
-        }).catch(function (err) { b.disabled = false; b.textContent = label; V.fail(err); });
-      }
-    };
-  };
-  var showCode = function (box, p) {
-    box.innerHTML = '<p>On your phone or computer, go to <b>' + V.esc(p.url.replace(/^https?:\/\//, '')) + '</b> and enter this code:</p><p class="trakt-code">' + V.esc(p.code) + '</p>' +
-      '<p class="dim small">Waiting for you to approve it… (the code works for ' + Math.max(1, Math.round((p.expires - Date.now()) / 60000)) + ' minutes)</p><button class="btn" data-t="cancel-code">Cancel</button>';
-    V.$('[data-t=cancel-code]', box).onclick = function (e) { e.stopPropagation(); clearTimeout(traktPoll); drawTrakt(box); };
-    var tick = function () {
-      if (!document.body.contains(box)) return;
-      V.api('/api/trakt/poll', { method: 'POST' }).then(function (r) {
-        if (r.state === 'connected') { V.toast('Trakt connected'); trakt.at = 0; drawTrakt(box); return; }
-        if (r.state === 'expired' || r.state === 'denied' || r.state === 'error') { box.innerHTML = '<p class="err">' + (r.state === 'denied' ? 'You said no on Trakt.' : r.state === 'expired' ? 'That code ran out.' : V.esc(r.error || 'Something went wrong.')) + '</p><button class="btn primary" data-t="connect">Try again</button>'; return; }
-        traktPoll = setTimeout(tick, Math.max(3000, p.interval || 5000));
-      }).catch(function () { traktPoll = setTimeout(tick, 8000); });
-    };
-    traktPoll = setTimeout(tick, Math.max(3000, p.interval || 5000));
-  };
-
   // ------------------------------------------------------------ Admin → Overview: watching now, live
   var fmtK = function (kbps) { return kbps >= 1000 ? (Math.round(kbps / 100) / 10) + ' Mbit/s' : kbps ? kbps + ' kbit/s' : '–'; };
   var ROUTE = { local: 'Your own file (from this server)', direct: 'Direct from the provider', browser: 'Converted in the browser', relay: 'Through this server', convert: 'Converted on this server', helper: 'Direct (helper)' };
@@ -480,7 +384,7 @@
     // (Reloading after a save: keep the page as it is until the new one is ready, rather than a spinner.)
     if (!refocus) body.innerHTML = '<div class="spinner"></div>';
     V.api('/api/admin/integrations').then(function (I) {
-      var o = I.opensubtitles, t = I.trakt, sd = I.subdl || {}, src = I.sources || {};
+      var o = I.opensubtitles, sd = I.subdl || {}, src = I.sources || {};
       var left = o.quota && o.quota.remaining !== undefined ? '<p class="dim small">' + V.plural(o.quota.remaining, 'download') + ' left today (checked ' + V.fmtAgo(o.quota.at) + '). Fetching automatically leaves the last ' + (o.reserve || 2) + ' for choosing by hand.</p>' : '';
       body.innerHTML = '<section class="card-sec"><h2>Subtitles found online</h2><p class="dim">Lets anyone find subtitles for a film or episode that has none in their language (the subtitles button → Find subtitles), or fetch them automatically. Sources are searched together; the free ones are used first.</p>' +
         '<h3>SubDL <span class="dim small">· main source</span></h3><p class="dim small">Free: sign up at subdl.com, then your account → API key. 2,000 searches a day; downloads aren’t counted.</p>' +
@@ -490,10 +394,7 @@
         '<section class="card-sec"><h2>Backup: OpenSubtitles.com</h2><p class="dim">The biggest library, used when the free sources have nothing. A free API key (opensubtitles.com → your profile → API consumers) allows 5 downloads a day, shared by everyone here; subtitles already saved here don’t count again. Signing in with an account only raises that with a VIP subscription.</p>' +
         '<div class="int-fields">' + secretField('os.apiKey', 'API key', o.apiKey) + secretField('os.username', 'Account username (optional)', o.username) + '<label class="field"><span>Account password</span><input class="input" type="password" data-f="os.password" value="' + V.esc(o.password) + '" autocomplete="new-password"></label></div>' +
         left +
-        '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>' +
-        '<section class="card-sec"><h2>Trakt</h2><p class="dim">Each profile can then connect its Trakt account (Settings → Trakt) to log what it watches and keep its watchlist and ratings in step. Create an app at trakt.tv → Settings → Your API Apps (redirect URI: <code>urn:ietf:wg:oauth:2.0:oob</code>) and paste its Client ID and Client Secret here. Home rows from public Trakt lists need only the Client ID.</p>' +
-        '<div class="int-fields">' + secretField('tr.clientId', 'Client ID', t.clientId) + '<label class="field"><span>Client Secret</span><input class="input" type="password" data-f="tr.clientSecret" value="' + V.esc(t.clientSecret) + '" autocomplete="new-password"></label></div>' +
-        '<p class="dim small">' + (t.profiles ? V.plural(t.profiles, 'profile') + ' connected.' : 'No profiles connected yet.') + '</p><button class="btn primary" data-save="tr">Save</button></section>';
+        '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>';
       focusBack(body, refocus);
       body.onclick = function (e) {
         var s = e.target.closest('[data-save]');
@@ -501,8 +402,7 @@
           var val = function (k) { var el = V.$('[data-f="' + k + '"]', body); return el ? el.value : undefined; };
           var on = function (k) { var el = V.$('[data-src="' + k + '"]', body); return !!(el && el.checked); };
           var patch = s.dataset.save === 'os' ? { opensubtitles: { apiKey: val('os.apiKey'), username: val('os.username'), password: val('os.password') } }
-            : s.dataset.save === 'sd' ? { subdl: { apiKey: val('sd.apiKey') }, sources: { gestdown: on('gestdown') } }
-            : { trakt: { clientId: val('tr.clientId'), clientSecret: val('tr.clientSecret') } };
+            : { subdl: { apiKey: val('sd.apiKey') }, sources: { gestdown: on('gestdown') } };
           s.disabled = true;
           V.put('/api/admin/integrations', patch).then(function () { V.toast('Saved — reload other open pages to see the change'); V.adminTabs.integrations(body, A, '[data-save="' + s.dataset.save + '"]'); }).catch(function (err) { s.disabled = false; V.fail(err); });
         }

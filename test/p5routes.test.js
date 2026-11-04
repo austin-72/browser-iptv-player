@@ -17,7 +17,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
   const m = await mock.start();
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p5srv-'));
-  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, TRAKT_BASE: m.traktBase, SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, GESTDOWN_BASE: m.gestdownBase }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test', OPENSUBTITLES_BASE: m.osBase, SUBDL_BASE: m.subdlBase, SUBDL_DL_BASE: m.subdlDlBase, GESTDOWN_BASE: m.gestdownBase }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   app.stdout.on('data', (d) => { out += d; });
   app.stderr.on('data', (d) => { out += d; });
@@ -104,7 +104,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
     assert.strictEqual(tooBig.status, 413);
 
     // Integrations: secrets are kept but never sent back.
-    await req('PUT', '/api/admin/integrations', { body: { opensubtitles: { apiKey: 'oskey' }, trakt: { clientId: 'cid', clientSecret: 'sec' } }, headers: X });
+    await req('PUT', '/api/admin/integrations', { body: { opensubtitles: { apiKey: 'oskey' } }, headers: X });
     const i2 = await req('GET', '/api/admin/integrations');
     assert.ok(!JSON.stringify(i2.json).includes('oskey') && !JSON.stringify(i2.json).includes('"sec"'));
     await req('PUT', '/api/admin/integrations', { body: { subdl: { apiKey: 'sdkey' }, sources: { gestdown: false } }, headers: X });
@@ -116,8 +116,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
     assert.deepStrictEqual([st.json.subdl.ok, st.json.gestdown.on, st.json.podnapisi], [true, false, undefined]);
     const me = await req('GET', '/api/boot');
     assert.ok(me.status === 200);
-    const t = await req('POST', '/api/trakt/connect', { headers: X });
-    assert.strictEqual(t.json.code, 'ABCD1234');
+    assert.strictEqual((await req('POST', '/api/trakt/connect', { headers: X })).status, 404, 'Trakt is gone');
     for (let i = 0; i < 30 && !fs.existsSync(path.join(dir, 'integrations.json')); i++) await wait(100);
     const secretsOnDisk = fs.readFileSync(path.join(dir, 'integrations.json'), 'utf8');
     assert.ok(secretsOnDisk.includes('oskey'));

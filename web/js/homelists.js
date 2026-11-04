@@ -1,4 +1,4 @@
-/* Home rows from Trakt and TMDB lists ("x of y here", See the whole list), the Wishlist, alerts in Messages →
+/* Home rows from TMDB lists ("x of y here", See the whole list), the Wishlist, alerts in Messages →
    New for you, and the bell on series pages. Server side: lib/routes-p10.js. */
 'use strict';
 (function () {
@@ -85,14 +85,10 @@
   // ------------------------------------------------------------ adding a row
   V.addListRow = function () {
     var av = HL.avail || {};
-    var charts = av.charts || [];
     var body = '<p class="dim">A row on your home page with the titles from a list that are here. It’s checked again every day.</p>' +
-      '<label class="field"><span>Paste a list link</span><div class="inline"><input class="input" data-hl-text placeholder="trakt.tv/users/…/lists/… or themoviedb.org/list/…" autocomplete="off"><button class="btn primary" data-hl-go>Add</button></div>' +
-      '<small class="dim">A Trakt list (or just “user/list”), a TMDB list, collection or keyword. Lists people share on Trakt work well: IMDb’s Top 250, Oscar winners, a director’s films…</small></label>' +
+      '<label class="field"><span>Paste a list link</span><div class="inline"><input class="input" data-hl-text placeholder="themoviedb.org/list/… , /collection/… or /keyword/…" autocomplete="off"><button class="btn primary" data-hl-go>Add</button></div>' +
+      '<small class="dim">A TMDB list (people share lists of Oscar winners, a director’s films…), a collection (every film of a series) or a keyword (“christmas”, “time travel”…).</small></label>' +
       '<p class="hl-msg err" role="alert" hidden></p>' +
-      (av.trakt ? '<h3>From Trakt</h3><div class="chips hl-charts">' + charts.map(function (c) { return '<button class="chip" data-hl-chart="' + V.esc(c.ref) + '">' + V.esc(c.name.replace(/ on Trakt$/, '')) + '</button>'; }).join('') + '</div>' +
-        (av.traktConnected ? '<h3>Your Trakt lists</h3><div class="hl-mine"><div class="spinner sm"></div></div>' : '<p class="dim small">Connect Trakt in Settings to add your own Trakt lists too.</p>')
-        : '<p class="note" data-need="trakt">' + V.icon('info') + ' <span>Trakt lists need a Trakt app on this server. ' + (S.profile.admin ? 'Add one in <a href="#/admin/integrations">Admin → Integrations</a> (for public lists the Client ID is enough).' : 'Ask the admin to add one in Admin → Integrations.') + '</span></p>') +
       (av.tmdb ? '' : '<p class="note" data-need="tmdb">' + V.icon('info') + ' <span>TMDB lists aren’t available: they need a TMDB key. ' + (S.profile.admin ? 'Add a free one in <a href="#/admin/recs">Admin → Recommendations</a>.' : 'The admin can add a free one in Admin → Recommendations.') + '</span></p>');
     V.dialog({
       title: 'Add a row from a list', wide: true, body: body,
@@ -120,8 +116,8 @@
             if (document.body.dataset.page === 'home') V.router.refresh(); else V.router.go('#/home');
           }).catch(function (e) {
             note();
-            // Trakt or TMDB isn't set up and the dialog already says so: point at that note rather than repeat it.
-            var need = /Trakt app/.test(e.message) ? 'trakt' : /TMDB key/.test(e.message) ? 'tmdb' : '';
+            // TMDB isn't set up and the dialog already says so: point at that note rather than repeat it.
+            var need = /TMDB key/.test(e.message) ? 'tmdb' : '';
             var shown = need && V.$('[data-need=' + need + ']', d);
             V.$$('[data-need]', d).forEach(function (x) { x.classList.remove('warn'); x.removeAttribute('role'); });
             if (shown) { msg.hidden = true; shown.classList.add('warn'); shown.setAttribute('role', 'alert'); V.announce(shown.textContent); return; }
@@ -131,16 +127,8 @@
         V.$('[data-hl-go]', d).onclick = function (e) { var t = input.value.trim(); if (!t) { input.focus(); return; } go({ text: t }, e.currentTarget); };
         input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); V.$('[data-hl-go]', d).click(); } });
         d.addEventListener('click', function (e) {
-          var c = e.target.closest('[data-hl-chart]');
-          if (c) go({ kind: 'trakt-chart', ref: c.getAttribute('data-hl-chart') }, c);
-          var m = e.target.closest('[data-hl-mine]');
-          if (m) go({ kind: 'trakt-mine', ref: m.getAttribute('data-hl-mine') }, m);
           if (e.target.closest('a[href^="#/"]')) finish(null);
         });
-        var mine = V.$('.hl-mine', d);
-        if (mine) V.api('/api/homelists/trakt-mine').then(function (r) {
-          mine.innerHTML = r.lists.length ? '<div class="chips">' + r.lists.map(function (l) { return '<button class="chip" data-hl-mine="' + V.esc(l.ref) + '">' + V.esc(l.name) + ' <small>' + V.esc(l.n) + '</small></button>'; }).join('') + '</div>' : '<p class="dim small">You have no lists on Trakt yet.</p>';
-        }).catch(function (e) { mine.innerHTML = '<p class="dim small">' + V.esc(e.message) + '</p>'; });
       },
     });
   };
@@ -164,7 +152,7 @@
       var items = L.items.map(function (x, i) { x.rank = i + 1; x.it = x.k ? V.entry(x.k) : null; if (x.it && hidden.has(x.k)) x.it = null; return x; });
       var here = items.filter(function (x) { return x.it; }), missing = items.filter(function (x) { return !x.it; });
       var list = show === 'here' ? here : show === 'missing' ? missing : items;
-      var src = { 'trakt-list': 'Trakt list', 'trakt-mine': 'Your Trakt list', 'trakt-chart': 'Trakt', 'tmdb-list': 'TMDB list', 'tmdb-collection': 'TMDB collection', 'tmdb-keyword': 'TMDB keyword' }[L.kind] || 'List';
+      var src = { 'tmdb-list': 'TMDB list', 'tmdb-collection': 'TMDB collection', 'tmdb-keyword': 'TMDB keyword' }[L.kind] || 'List';
       box.innerHTML = V.pageHead(L.name, '<button class="btn" data-hl="refresh">' + V.icon('refresh') + ' Check again</button><button class="icon-btn" data-hl-menu="' + V.esc(L.id) + '" aria-label="Row options">' + V.icon('dots') + '</button>') +
         '<p class="hl-sum"><b>' + here.length + ' of ' + L.total + ' here</b> <span class="dim">· ' + V.esc(src) + (L.listName && L.listName !== L.name ? ': ' + V.esc(L.listName) : '') + (L.at ? ' · checked ' + V.fmtAgo(L.at) : '') + '</span></p>' +
         (L.err ? '<p class="note warn">' + V.icon('info') + ' The last check failed: ' + V.esc(L.err) + '</p>' : '') +
@@ -213,7 +201,7 @@
   // ------------------------------------------------------------ the wishlist
   V.route('wishlist', function (view) {
     var tmdbOn = !!S.settings.tmdb;
-    var listsOn = tmdbOn || !!(S.settings.homeLists && S.settings.homeLists.trakt); // (list rows need Trakt or TMDB)
+    var listsOn = tmdbOn; // (list rows need TMDB)
     view.innerHTML = V.pageHead('Wishlist') + '<p class="dim">Films and series that aren’t here yet. When one arrives you get an alert' + (S.data.prefs.wishlistAlerts === false ? ' (they’re off in <a href="#/settings">Settings</a>)' : '') + '.</p>' +
       (tmdbOn ? '<form class="wl-search" role="search"><input class="input" type="search" data-wq placeholder="Search for any film or series" aria-label="Search for any film or series" autocomplete="off"><button class="btn primary">' + V.icon('search') + ' Search</button></form><div class="wl-results" aria-live="polite"></div>'
         : '<p class="note">' + V.icon('info') + ' <span>Searching for any film or series needs a free TMDB key. ' + (S.profile.admin ? 'Add one in <a href="#/admin/recs">Admin → Recommendations</a>.' : 'The admin can add one in Admin → Recommendations.') + (listsOn ? ' Until then, you can add titles that aren’t here from a list row’s “See the whole list” on Home.' : '') + '</span></p>') +

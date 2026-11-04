@@ -218,8 +218,23 @@ const tmdb = new Tmdb({
 const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 
+/**
+ * A film's or series' language when the provider only hinted at it (its category said "EN", or nothing said anything:
+ * lib/catalog.js marks those _lgw): TMDB's original language, so each profile's languages are kept to ("Hopeu" in
+ * "|EN| FOREIGN MOVIES" is Korean). Not for cartoons and children's titles — those are usually dubbed — nor a copy
+ * that's multi-language. Admin → Languages & content can turn it off. (_lg0: the language before, so this can run
+ * again.)
+ */
+function applyLang(it, m) {
+  if (it.t !== 'movie' && it.t !== 'show') return;
+  if (it._lg0) { it.lg = it._lg0; it._lg0 = undefined; }
+  if (settings().tmdbLangs === false) return;
+  const lg = Tmdb.langFor(it, m, L.names || {});
+  if (lg) { it._lg0 = it.lg || []; it.lg = lg; }
+}
 function applyMeta(it, m) {
   if (!m) return;
+  applyLang(it, m);
   // Someone in the household picked this match by hand: its details win over the provider's.
   const force = !!m.manual;
   const ownYear = it.y || 0; // (the provider's: TMDB's goes on below when there's none)
@@ -271,6 +286,8 @@ function afterRebuild() {
 /** After a new catalogue (built, or the saved one at start-up): the jobs that go through it, a little later. */
 function afterCatalog() {
   setTimeout(() => checkNewEpisodes().catch((e) => log('New episodes:', e.message)), 20e3);
+  // (The original language of titles looked up before it was kept: from TMDB's answers on disk, once.)
+  setTimeout(() => backfillLangs(), 25e3);
   // Ready before anyone searches for an actor (made in the background, in slices).
   setTimeout(() => peopleIndex().catch(() => {}), 30e3);
   // New titles: look them up on TMDB in the background (a minute later, so start-up stays quick).
@@ -565,7 +582,7 @@ function item(ctx, k) {
   if (overrides.hasLocks && overrides.isLocked(it, (x) => catalog.get(x)) && !overrides.allowed(ctx)) throw new HttpError(423, p.kids ? 'This is locked.' : 'This is locked. Enter the parental PIN to watch it.');
   return it;
 }
-// (Integrations add their own flags: subtitles, Trakt — see lib/routes-p5.js.)
+// (Integrations add their own flags: subtitles — see lib/routes-p5.js.)
 let p5Public = () => ({});
 let p8Public = () => ({}); // (event channels: lib/routes-p8.js)
 function publicSettings() {
@@ -2048,7 +2065,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs']) if (k in b) s[k] = !!b[k];
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
   if (['open', 'off'].includes(b.tmdbEpisodes)) s.tmdbEpisodes = b.tmdbEpisodes;
   if (typeof b.tmdbLang === 'string' && /^([a-z]{2}(-[A-Z]{2})?)?$/.test(b.tmdbLang)) s.tmdbLang = b.tmdbLang;
@@ -2104,6 +2121,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   let smartChanged = false;
   if (b.smart && typeof b.smart === 'object') { const was = JSON.stringify(Smart.config(s)); s.smart = Smart.clean(b.smart, s.smart); smartChanged = JSON.stringify(Smart.config(s)) !== was; }
   settingsStore.save();
+  if ('tmdbLangs' in b) relang('settings');
   if (smartChanged) { smartRetag('settings'); smartTrending(); if (!enrichJob) setTimeout(() => { try { startEnrich(true); } catch {} }, 5000); }
   if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b) scheduleRebuild(100);
   hub.toAll('settings', publicSettings());
@@ -2347,6 +2365,25 @@ function startEnrich(auto = false, opts = {}) {
   return job.status;
 }
 let lastEnrich = null;
+/** Every title's language again (TMDB's original language: applyLang), for devices to get when any changed. */
+function relang(why) {
+  const meta = tmdb.meta.data.m;
+  let n = 0;
+  for (const it of catalog.items) {
+    if (it.t !== 'movie' && it.t !== 'show') continue;
+    const before = String(it.lg || '');
+    applyLang(it, meta[it.k]);
+    if (String(it.lg || '') !== before) n++;
+  }
+  if (n) { catalog.metaChanged(); hub.toAll('catalog', { version: catalog.version }); log(`Languages from TMDB: ${n.toLocaleString('en-US')} films and series changed (${why})`); }
+  return n;
+}
+let langsFilled = false;
+async function backfillLangs() {
+  if (langsFilled) return;
+  langsFilled = true;
+  try { const n = await tmdb.backfillLanguages(); if (n) { log(`TMDB: original languages of ${n.toLocaleString('en-US')} titles read from saved answers`); relang('saved TMDB answers'); } } catch (e) { log('TMDB languages:', e.message); }
+}
 /** Are there films or series that a build would now merge (two titles, one sure TMDB entry, same language)? */
 function sameTmdbPending() {
   const seen = new Set();
@@ -2714,7 +2751,7 @@ otherAppConns = () => [...p4.outputs.active].filter(([, a]) => a.kind === 'hdhr'
   .map(([id, a]) => ({ id, pid: a.pid, deviceName: 'HDHomeRun tuner', playing: { k: a.k, n: a.n, at: a.since, alt: -1 }, rec: true }));
 
 // [routes:p5]
-// Subtitles (OpenSubtitles), Trakt, the live viewing dashboard, the speed test, API keys and webhooks.
+// Subtitles found online, the live viewing dashboard, the speed test, API keys and webhooks.
 const p5 = require('./lib/routes-p5')({
   route, requireProfile, requireAdmin, readJSON, D, lists, accounts, userdata, hub, tmdb, item, clientIp, listUsage, srcList, connLimit, accountAlerts, COMMANDS,
   catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }),
@@ -2727,8 +2764,8 @@ reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
 // [routes:p11] Screen time and bedtime for profiles (enforced on the server), the profile's default remote buttons.
 require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
 require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
-// [routes:p10] Home rows from Trakt / TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
-const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, trakt: p5.trakt, catalog: () => catalog });
+// [routes:p10] Home rows from TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
+const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, catalog: () => catalog });
 followsOf = p10.followsOf;
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p10.publicFlags() }); }
 // [routes:p7] The play queue (per profile, synced between its devices).

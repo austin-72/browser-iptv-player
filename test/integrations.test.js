@@ -1,4 +1,4 @@
-// Subtitles (SubDL, Gestdown, OpenSubtitles), Trakt, API keys and webhooks — against local stand-ins (test/mock/integrations.js).
+// Subtitles (SubDL, Gestdown, OpenSubtitles), API keys and webhooks — against local stand-ins (test/mock/integrations.js).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -9,7 +9,6 @@ const mock = require('./mock/integrations');
 const { OpenSubtitles, Subtitles, srtToVtt, RESERVE } = require('../lib/subtitles');
 const { langCode, pickFromDownload } = require('../lib/subsources');
 const { zip } = require('../lib/zip');
-const { Trakt } = require('../lib/trakt');
 const { ApiKeys } = require('../lib/apikeys');
 const { Webhooks, sign } = require('../lib/webhooks');
 const { shiftVtt } = require('../lib/routes-p5');
@@ -144,81 +143,6 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     for (const k in saved) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     m.close();
   }
-});
-
-test('Trakt: connect with a code, refresh, scrobble films and episodes, sync both ways', async () => {
-  const m = await mock.start({ expiresIn: 3600 }); // runs out within a day: refreshed before use
-  const dir = tmp();
-  const items = new Map();
-  const add = (it) => items.set(it.k, it);
-  add({ k: 'm1', t: 'movie', n: 'The Matrix', y: 1999, tmdb: '603', d: 8000 });
-  add({ k: 'm2', t: 'movie', n: 'Untagged Film', y: 2001, d: 6000 });
-  add({ k: 'm3', t: 'movie', n: 'Remote Film', y: 2020, tmdb: '777', d: 6000 });
-  add({ k: 's1', t: 'show', n: 'Harbor Lights', y: 2022, tmdb: '42' });
-  add({ k: 'e1', t: 'episode', n: 'Harbor Lights S01E03', sk: 's1', s: 1, e: 3, d: 2800 });
-  const cat = { get: (k) => items.get(k) || null, items: [...items.values()], version: 1, findTitle: (t) => [...items.values()].filter((x) => x.n === t).map((x) => x.k) };
-  const users = new Map();
-  const ud = {
-    of: (pid) => { if (!users.has(pid)) users.set(pid, { data: { list: [], ratings: {}, progress: {} } }); return users.get(pid); },
-    toggle(pid, f, k, on) { const d = this.of(pid).data; d[f] = d[f].filter((x) => x !== k); if (on) d[f].unshift(k); },
-    rate(pid, k, v) { this.of(pid).data.ratings[k] = v; },
-    progress(pid, r) { this.of(pid).data.progress[r.k] = { p: 0, d: r.d, w: true, at: Date.now() }; },
-  };
-  const byTmdb = (id, type) => { for (const it of items.values()) if (it.t === type && it.tmdb === id) return it.k; return null; };
-  const tr = new Trakt({ dataDir: dir, getConf: () => ({ clientId: 'cid', clientSecret: 'sec' }), fetch, base: m.traktBase, lib: { catalog: () => cat, userdata: ud, tmdbOf: (it) => it.tmdb || '', byTmdb, episodes: async () => [items.get('e1')] } });
-  try {
-    const st = await tr.start('p1');
-    assert.strictEqual(st.code, 'ABCD1234');
-    assert.strictEqual((await tr.poll('p1')).state, 'waiting');
-    m.state.trakt.approved = true;
-    tr.pending.get('p1').next = 0;
-    const ok = await tr.poll('p1');
-    assert.strictEqual(ok.state, 'connected');
-    assert.strictEqual(tr.status('p1').user, 'alex');
-    // Tokens are kept on disk, not in the browser.
-    tr.store.flush();
-    assert.match(fs.readFileSync(path.join(dir, 'trakt.json'), 'utf8'), /"access":"tok\d"/);
-
-    await tr.scrobble('p1', 'start', items.get('m1'), 12.5);
-    assert.ok(m.state.trakt.refreshes >= 1, 'the token was refreshed before it ran out');
-    await tr.scrobble('p1', 'stop', items.get('e1'), 95);
-    await tr.scrobble('p1', 'pause', items.get('m2'), 40);
-    const sc = m.state.trakt.scrobbles;
-    assert.deepStrictEqual(sc[0].movie.ids, { tmdb: 603 });
-    assert.strictEqual(sc[0].progress, 12.5);
-    assert.deepStrictEqual([sc[1].action, sc[1].show.ids.tmdb, sc[1].episode.season, sc[1].episode.number], ['stop', 42, 1, 3]);
-    assert.deepStrictEqual(sc[2].movie.ids, { trakt: 55 }, 'no TMDB id: found by a Trakt search by title and year');
-
-    // Watchlist: Trakt's film comes into My List, ours goes to Trakt.
-    ud.toggle('p1', 'list', 'm1', true);
-    ud.rate('p1', 'm1', 1);
-    m.state.trakt.ratings = [{ rating: 3, movie: { title: 'Remote Film', year: 2020, ids: { tmdb: 777 } } }];
-    let r = await tr.sync('p1');
-    assert.ok(ud.of('p1').data.list.includes('m3'), 'pulled into My List');
-    assert.ok(m.state.trakt.added.movies.some((x) => x.ids.tmdb === 603), 'pushed to the watchlist');
-    assert.strictEqual(ud.of('p1').data.ratings.m3, -1, 'a 3/10 on Trakt is a thumbs down here');
-    assert.ok(m.state.trakt.rated.movies.some((x) => x.ids.tmdb === 603 && x.rating === 8), 'thumbs up → 8/10');
-    assert.ok(r.added >= 1 && r.pushed >= 1);
-    // Removed here since the last sync → removed on Trakt.
-    ud.toggle('p1', 'list', 'm1', false);
-    r = await tr.sync('p1');
-    assert.ok(m.state.trakt.removed.some((b) => (b.movies || []).some((x) => x.ids.tmdb === 603)));
-    // Removed on Trakt → removed here.
-    m.state.trakt.watchlist.movies = [];
-    r = await tr.sync('p1');
-    assert.ok(!ud.of('p1').data.list.includes('m3'));
-
-    const imp = await tr.importHistory('p1');
-    assert.strictEqual(imp.movies, 1);
-    assert.ok(ud.of('p1').data.progress.m3.w);
-    ud.progress('p1', { k: 'e1', d: 2800 });
-    const ex = await tr.exportHistory('p1');
-    assert.strictEqual(ex.episodes, 1);
-    assert.ok(ex.movies >= 1);
-
-    tr.disconnect('p1');
-    assert.strictEqual(tr.status('p1').connected, false);
-  } finally { m.close(); }
 });
 
 test('API keys: shown once, stored hashed, scoped, slowed down when guessed', () => {

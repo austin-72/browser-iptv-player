@@ -1,5 +1,5 @@
-// Stand-ins for the subtitle sources (SubDL, Gestdown, OpenSubtitles) and Trakt (tests only).
-// start({ quota }) → { base, osBase, traktBase, subdlBase, subdlDlBase, gestdownBase, state, close }.
+// Stand-ins for the subtitle sources (SubDL, Gestdown, OpenSubtitles) and a webhook receiver (tests only).
+// start({ quota }) → { base, osBase, subdlBase, subdlDlBase, gestdownBase, state, close }.
 const http = require('http');
 const { zip } = require('../../lib/zip');
 
@@ -9,7 +9,6 @@ function start(opts = {}) {
   const state = {
     subs: { subdl: [], gestdown: [], subdlOff: !!opts.subdlOff, gestdownDown: !!opts.gestdownDown },
     osDownloads: 0, osSearches: 0, osQuota: opts.quota === undefined ? 5 : opts.quota, osLogins: 0,
-    trakt: { lists: opts.traktLists || {}, mine: opts.traktMine || {}, charts: opts.traktCharts || {}, approved: false, polls: 0, scrobbles: [], watchlist: { movies: [{ movie: { title: 'Remote Film', year: 2020, ids: { trakt: 9, tmdb: 777 } } }], shows: [] }, ratings: [], history: [], removed: [], refreshes: 0, token: 'tok1' },
     hooks: [], hookFailFirst: opts.hookFailFirst || 0,
   };
   const json = (res, code, o) => { const b = JSON.stringify(o); res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(b); };
@@ -85,54 +84,6 @@ function start(opts = {}) {
       // Windows-1252 é and a SubStation tag, CRLF line ends.
       return res.end(Buffer.concat([Buffer.from('1\r\n00:00:01,000 --> 00:00:02,500\r\n{\\an8}Caf'), Buffer.from([0xe9]), Buffer.from('\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n<i>Two</i>\r\n')]));
     }
-    // ---------------- Trakt
-    if (p.startsWith('/trakt/')) {
-      const q = p.slice(6);
-      const T = state.trakt;
-      if (req.headers['trakt-api-key'] !== 'cid' || req.headers['trakt-api-version'] !== '2') return json(res, 403, {});
-      if (q === '/oauth/device/code') return json(res, 200, { device_code: 'dev1', user_code: 'ABCD1234', verification_url: 'https://trakt.tv/activate', expires_in: 600, interval: 1 });
-      if (q === '/oauth/device/token') { const b = await body(req); T.polls++; if (b.client_secret !== 'sec') return json(res, 401, {}); if (!T.approved) return json(res, 400, {}); return json(res, 200, { access_token: T.token, refresh_token: 'ref1', expires_in: opts.expiresIn || 7776000, created_at: Math.floor(Date.now() / 1000) }); }
-      if (q === '/oauth/token') { T.refreshes++; T.token = 'tok' + (T.refreshes + 1); return json(res, 200, { access_token: T.token, refresh_token: 'ref2', expires_in: 7776000, created_at: Math.floor(Date.now() / 1000) }); }
-      if (q === '/oauth/revoke') return json(res, 200, {});
-      if (q.startsWith('/search/')) return json(res, 200, u.searchParams.get('query') === 'Untagged Film' ? [{ type: 'movie', movie: { title: 'Untagged Film', year: 2001, ids: { trakt: 55 } } }] : []);
-      // Public lists and charts (Home rows): only the client id is needed.
-      const L = T.lists;
-      if ((mm = /^\/users\/([^/]+)\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q)) && mm[1] !== 'me') {
-        T.listReads = (T.listReads || 0) + 1;
-        const l = L[`${decodeURIComponent(mm[1])}/${decodeURIComponent(mm[2])}`];
-        if (!l || l.private) return json(res, 404, {});
-        return json(res, 200, mm[3] ? l.items : { name: l.name, item_count: l.items.length, ids: { slug: mm[2] } });
-      }
-      if ((mm = /^\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q))) {
-        const l = L[decodeURIComponent(mm[1])];
-        if (!l) return json(res, 404, {});
-        return json(res, 200, mm[2] ? l.items : { name: l.name, item_count: l.items.length });
-      }
-      if ((mm = /^\/(movies|shows)\/(trending|popular|anticipated)$/.exec(q))) {
-        const type = mm[1] === 'movies' ? 'movie' : 'show';
-        const pool = (T.charts[mm[1]] || []);
-        if (mm[2] === 'popular') return json(res, 200, pool.map((x) => x[type]));
-        return json(res, 200, pool.map((x, i) => ({ [mm[2] === 'trending' ? 'watchers' : 'list_count']: 100 - i, [type]: x[type] })));
-      }
-      const auth = req.headers.authorization;
-      if (auth !== `Bearer ${T.token}`) return json(res, 401, {});
-      if (q === '/users/settings') return json(res, 200, { user: { username: 'alex' } });
-      if (q === '/users/me/lists') return json(res, 200, Object.entries(T.mine).map(([slug, l], i) => ({ name: l.name, item_count: l.items.length, ids: { trakt: 900 + i, slug } })));
-      if ((mm = /^\/users\/me\/lists\/([^/]+)(\/items(?:\/[\w,]+)?)?$/.exec(q))) { const l = T.mine[decodeURIComponent(mm[1])]; if (!l) return json(res, 404, {}); return json(res, 200, mm[2] ? l.items : { name: l.name, item_count: l.items.length }); }
-      if (q.startsWith('/scrobble/')) { const b = await body(req); T.scrobbles.push({ action: q.slice(10), ...b }); return json(res, 201, { id: 1 }); }
-      if (q === '/sync/watchlist/movies') return json(res, 200, T.watchlist.movies);
-      if (q === '/sync/watchlist/shows') return json(res, 200, T.watchlist.shows);
-      if (q === '/sync/watchlist' && req.method === 'POST') { const b = await body(req); for (const m of b.movies || []) T.watchlist.movies.push({ movie: { ids: m.ids } }); T.added = b; return json(res, 201, {}); }
-      if (q === '/sync/watchlist/remove') { const b = await body(req); T.removed.push(b); for (const m of b.movies || []) T.watchlist.movies = T.watchlist.movies.filter((x) => JSON.stringify(x.movie.ids) !== JSON.stringify(m.ids) && !(m.ids.tmdb && x.movie.ids.tmdb === m.ids.tmdb)); return json(res, 200, {}); }
-      if (q === '/sync/ratings/movies') return json(res, 200, T.ratings);
-      if (q === '/sync/ratings/shows') return json(res, 200, []);
-      if (q === '/sync/ratings' && req.method === 'POST') { T.rated = await body(req); return json(res, 201, {}); }
-      if (q === '/sync/watched/movies') return json(res, 200, [{ movie: { title: 'Remote Film', year: 2020, ids: { tmdb: 777 } } }]);
-      if (q === '/sync/watched/shows') return json(res, 200, []);
-      if (q === '/sync/history') { const b = await body(req); T.history.push(b); return json(res, 201, { added: { movies: (b.movies || []).length, episodes: (b.shows || []).reduce((a, s) => a + s.seasons.reduce((x, z) => x + z.episodes.length, 0), 0) } }); }
-      return json(res, 404, {});
-    }
-    if (p === '/approve') { state.trakt.approved = true; return json(res, 200, { ok: true }); } // (UI tests: “the viewer typed the code”)
     // ---------------- a webhook receiver
     if (p === '/hook') {
       const raw = await new Promise((ok) => { let d = ''; req.on('data', (c) => { d += c; }); req.on('end', () => ok(d)); });
@@ -144,7 +95,7 @@ function start(opts = {}) {
   });
   return new Promise((ok) => srv.listen(opts.port || 0, '127.0.0.1', () => {
     const base = `http://127.0.0.1:${srv.address().port}`;
-    ok({ base, osBase: base + '/os', traktBase: base + '/trakt', subdlBase: base + '/subdl', subdlDlBase: base + '/subdl-dl', gestdownBase: base + '/gd', state, close: () => { srv.close(); srv.closeAllConnections(); } });
+    ok({ base, osBase: base + '/os', subdlBase: base + '/subdl', subdlDlBase: base + '/subdl-dl', gestdownBase: base + '/gd', state, close: () => { srv.close(); srv.closeAllConnections(); } });
   }));
 }
 
