@@ -1,0 +1,57 @@
+# The stream relay with every connection it makes going out through a VPN (gluetun, which works with most VPN services:
+# Mullvad, ProtonVPN, NordVPN, Surfshark, PIA, Windscribe, AirVPN, IVPN, a WireGuard config of your own…). Providers then
+# see the VPN's address instead of this machine's. Viewers still reach the relay at RELAY_DOMAIN as before (Caddy, https).
+# Fill in the VPN part of .env (see .env.example), then:   docker compose -f docker-compose.vpn.yml up -d
+# If the VPN drops, gluetun blocks everything until it's back: the relay never connects without it.
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file: .env
+    environment:
+      # Caddy (and this server, for PROXY_PORT) reach the relay inside the VPN's container on these ports.
+      - FIREWALL_INPUT_PORTS=8090,8888
+      # (gluetun's own HTTP proxy and shadowsocks stay off: the relay is the only thing using the tunnel.)
+      - HTTPPROXY=off
+      - SHADOWSOCKS=off
+    ports:
+      # Only used when PROXY_PORT=8888 is set in .env (the relay as this server's own proxy, also through the VPN).
+      - "8888:8888"
+  relay:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: node /relay/relay.js
+    env_file: .env
+    environment:
+      - RELAY_CACHE_DIR=/cache
+    # Every connection the relay makes goes through the VPN (it shares the VPN container's network).
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      # This folder, writable: "Update the relay" in the app replaces relay.js here (then the relay restarts).
+      - ./:/relay
+      # Films and episodes fetched whole while they're watched.
+      - cache:/cache
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - RELAY_UPSTREAM=gluetun:8090
+    depends_on:
+      - gluetun
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  caddy-data: {}
+  cache: {}

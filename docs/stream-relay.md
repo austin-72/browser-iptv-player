@@ -83,6 +83,44 @@ HTTP, HTTPS and SOCKS5 proxies work, with a username and password. The proxy tra
 
 All the video then goes through the proxy too (films fetched whole as well), so check the proxy's data allowance. Residential proxies are often paid per GB.
 
+## The relay through a VPN (optional)
+
+The relay can also send everything it fetches through a VPN, so providers see the VPN's address instead of the relay
+machine's. Use this when you'd rather not show the VPS's own address, when a provider blocks data-centre addresses, or
+when you want the relay to appear in another country. Viewers still reach the relay at its usual https address, so
+nothing changes on this server or on any device.
+
+It uses [gluetun](https://github.com/qdm12/gluetun), a small container that connects to most VPN services (Mullvad,
+ProtonVPN, NordVPN, Surfshark, Private Internet Access, Windscribe, AirVPN, IVPN, and any service that gives you a
+WireGuard file). The relay runs inside gluetun's network, so **every** connection it makes goes through the VPN: streams,
+films fetched whole, and its proxy for this server's own traffic (`PROXY_PORT`) too. If the VPN drops, gluetun blocks
+everything until it's back, so the relay never connects to a provider without it.
+
+1. On the relay machine, fill in the VPN part of `.env` (see `.env.example`). With WireGuard, that's your VPN service's
+   name, the private key and address from its WireGuard configuration, and which country or city to use. The exact names
+   for each service are in [gluetun's wiki](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers).
+2. Start the relay with the VPN version of the compose file (it replaces the plain one):
+   ```sh
+   docker compose down
+   docker compose -f docker-compose.vpn.yml up -d
+   ```
+   Use `-f docker-compose.vpn.yml` with every later `docker compose` command on that machine too
+   (`logs`, `pull`, `up -d`). `docker compose -f docker-compose.vpn.yml logs gluetun` shows the VPN connecting.
+3. Here: Admin → Network & proxies → Stream relay → **Test**. It shows **the address providers see**, which should now be
+   the VPN's, not the relay machine's.
+
+Things to know:
+- **Speed:** all the video goes through the VPN, so pick a fast service and a server close to the relay. WireGuard is
+  quicker than OpenVPN. Check the VPN's terms allow this much traffic.
+- **Some IPTV providers block VPN addresses**, or count a changing address as account sharing. If a provider stops
+  working through the VPN, a VPN address that stays the same (many services sell a "dedicated IP") usually solves it.
+  Otherwise turn the VPN off for the relay, or use a proxy for that list instead.
+- **Updating:** *Update the relay* in the app still works (it only replaces `relay.js`). New compose files are copied
+  by hand, as before.
+- **Already have a VPN that offers a SOCKS5 or HTTP proxy?** You don't need any of this: add it in Admin → Network &
+  proxies → Proxies and choose it in **How the relay connects to providers** (above). The relay then goes through it
+  the same way, without changing anything on the relay machine.
+
 ## Your server's own traffic through the same machine (optional)
 
 Every stream of a list that uses the relay goes through it — also what this server reads itself: conversions,

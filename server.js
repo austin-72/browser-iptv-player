@@ -2233,14 +2233,15 @@ route('POST', '/api/admin/relay/test', async (req, res, p, q, ctx) => {
   // Is the relay running the relay.js that comes with this server? (Older ones can't fetch films whole.)
   const mine = bundledRelay();
   if (out.ok && mine) { out.latest = mine.version; out.outdated = String(out.version) !== mine.version; }
-  // Its proxies: what address the internet sees from the relay itself, and through each proxy it would use.
+  // The address providers see when the relay connects itself (its own, or its VPN's: docs/stream-relay.md).
+  const own = out.ok ? await testRelayProxy(r.url, r.secret, '', fetch).catch(() => ({ ok: false })) : null;
+  if (own && own.ok && own.ip) out.ownIp = own.ip;
+  // Its proxies: and through each proxy it would use.
   if (out.ok && relayProxyMode()) {
     const used = new Map();
     if (relayProxyMode() === 'list') {
       for (const l of lists.all()) { if (!relayOf.uses(l.id)) continue; const px = listProxy(l.id); if (px) used.set(px.url, px.name || 'Proxy'); }
     } else { const px = proxyById(relayProxyMode()); if (px) used.set(px.url, px.name || 'Proxy'); }
-    const own = await testRelayProxy(r.url, r.secret, '', fetch);
-    out.ownIp = own.ok ? own.ip : '';
     out.proxies = [];
     for (const [url, name] of [...used].slice(0, 5)) {
       const t = await testRelayProxy(r.url, r.secret, url, fetch);
