@@ -12,7 +12,6 @@ V.route('guide', function (view, r) {
   // (Midnight to midnight of that day by the calendar: a day the clocks change is 23 or 25 hours long.)
   var start = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + dayOff).getTime();
   var end = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + dayOff + 1).getTime();
-  var groups = V.groupsOf('live').sort(function (a, b) { return a.name.localeCompare(b.name); });
   // Only channels in your languages (Settings → Languages): ones whose language couldn't be worked out stay out
   // of the guide (they're still on the Live TV page). Favourites always show.
   var want = (S.profile && S.profile.langs && S.profile.langs.length ? S.profile.langs : (S.settings.defaultLangs || []));
@@ -23,7 +22,7 @@ V.route('guide', function (view, r) {
   for (var d = -maxPast; d <= 7; d++) dayOpts.push('<option value="' + d + '"' + (d === dayOff ? ' selected' : '') + '>' + V.fmtDay(new Date(day0.getFullYear(), day0.getMonth(), day0.getDate() + d, 12).getTime()) + '</option>');
   view.innerHTML = V.pageHead('TV guide', '<div class="page-tools">' +
     '<select class="input" data-day aria-label="Day">' + dayOpts.join('') + '</select>' +
-    '<select class="input" data-grp aria-label="Group">' + V.channelGroups('live', { recent: false, empty: true }).map(function (x) { return '<option value="' + V.esc(x.v) + '"' + (x.v === g ? ' selected' : '') + '>' + V.esc(x.l) + '</option>'; }).join('') + '</select>' +
+    '<select class="input" data-grp aria-label="Group">' + V.groupOptions(V.channelGroups('live', { recent: false, empty: true }).map(function (x) { return x.head ? x : { v: x.v, l: x.l, kind: x.kind }; }), g) + '</select>' +
     '<label class="check"><input type="checkbox" data-only' + (onlyEpg ? ' checked' : '') + '><span>Only with listings</span></label>' +
     '<button class="btn" data-now>' + V.icon('clock') + ' Now</button>' +
     '<form class="inline" data-sf><input class="input" type="search" placeholder="Search listings" aria-label="Search listings" data-sq><button class="btn" aria-label="Search">' + V.icon('search') + '</button></form>' +

@@ -267,6 +267,9 @@ function indexRange(items, from, to) {
     }
     var gm = groups[t];
     if (gm) { var g = gm.get(it.g); if (!g) gm.set(it.g, (g = [])); g.push(it); }
+    // Smarter categories (smartcats.js): a title can be in several.
+    var sc = it.sc, sm = sc && S.sgroups && S.sgroups[t];
+    if (sm) for (var c = 0; c < sc.length; c++) { var sg = sm.get(sc[c]); if (!sg) sm.set(sc[c], (sg = [])); sg.push(it); }
     if ((t === 'movie' || t === 'show') && it.gn) for (var j = 0; j < it.gn.length; j++) { var arr = S.genres.get(it.gn[j]); if (!arr) S.genres.set(it.gn[j], (arr = [])); arr.push(it); }
   }
   S.indexedN = to;
@@ -284,6 +287,7 @@ V.index = function (items) {
   S.live = []; S.radio = []; S.movies = []; S.shows = []; S.episodes = [];
   S.epsByShow = new Map();
   S.groups = { live: new Map(), radio: new Map(), movie: new Map(), show: new Map() };
+  S.sgroups = { live: new Map(), radio: new Map(), movie: new Map(), show: new Map() };
   S.genres = new Map();
   S.indexedN = 0;
   S.catalogStamp = (S.catalogStamp || 0) + 1; // (for lists worked out from the catalogue and kept: browse.js)
@@ -319,6 +323,7 @@ V.indexMore = function (items) {
 };
 
 /** Groups for a type, biggest first, as [{name, items}]. */
+// (The providers' own categories. The ones to show people — smarter ones when the admin has them on: V.groupList.)
 V.groupsOf = function (type) {
   var m = S.groups && S.groups[type];
   if (!m) return [];

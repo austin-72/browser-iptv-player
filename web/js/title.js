@@ -28,7 +28,7 @@ V.route('title', function (view, r) {
   view.innerHTML = '<article class="title-page">' +
     '<div class="tp-hero" style="--tint:' + V.tint(it.n) + '"><div class="tp-bg">' + (it.bd || it.i ? '<img src="' + V.esc(it.bd || it.i) + '" alt="" referrerpolicy="no-referrer"' + (it.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
     '<div class="tp-main">' + (it.i ? '<div class="tp-poster">' + V.art(it.i, it.n, 'art') + '</div>' : '') + '<div class="tp-info">' +
-    '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
+    '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(V.catLabel ? V.catLabel(it) : it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
     (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
     (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select></div><div class="eps"><div class="spinner"></div></div></section>' : '') +

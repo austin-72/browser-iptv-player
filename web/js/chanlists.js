@@ -33,7 +33,14 @@
     var out = [{ v: '', l: type === 'radio' ? 'All stations' : 'All channels', n: all.length }, { v: '__fav', l: 'Favourites', n: V.favChannels(type).length }];
     if (o.recent !== false) out.push({ v: '__recent', l: 'Recently watched', n: V.recentChannels().filter(function (c) { return c.t === type; }).length });
     V.myLists().forEach(function (l) { var n = V.myListItems(l.id, type).length; if (n || o.empty) out.push({ v: '__my:' + l.id, l: l.name, n: n, my: true }); });
-    if (o.cats !== false) V.groupsOf(type).sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (x) { out.push({ v: x.name, l: x.name, n: x.items.length }); });
+    // (Smarter categories: under a heading for each kind — networks, genres, sports… — in their order.)
+    if (o.cats !== false) {
+      var kind = null, smart = V.smart && V.smart.on();
+      V.groupList(type).forEach(function (x) {
+        if (smart && x.kind !== kind) { kind = x.kind; out.push({ head: V.smart.kindName(kind), kind: kind }); }
+        out.push({ v: x.name, l: x.label, n: x.items.length, kind: smart ? x.kind : '' });
+      });
+    }
     return out;
   };
   /** The channels in one of those groups. */
@@ -43,15 +50,17 @@
     if (g === '__fav') return V.favChannels(type);
     if (g === '__recent') return V.recentChannels().filter(function (c) { return c.t === type; });
     if (g.indexOf('__my:') === 0) return V.myListItems(g.slice(5), type);
-    return all.filter(function (c) { return c.g === g; });
+    return all.filter(function (c) { return V.inGroup(c, g); });
   };
   /** Which group Live TV / the guide opens on: your choice (Settings in "My channel lists"), else the last one used. */
   V.startGroup = function (where, remembered) {
     var p = V.pref(where === 'guide' ? 'guideStart' : 'liveStart');
     if (p && p !== '__last') {
-      var ok = p === '__fav' || p === '__recent' || (p.indexOf('__my:') === 0 ? V.myLists().some(function (l) { return '__my:' + l.id === p; }) : S.groups && S.groups.live && S.groups.live.has(p));
+      var ok = p === '__fav' || p === '__recent' || (p.indexOf('__my:') === 0 ? V.myLists().some(function (l) { return '__my:' + l.id === p; }) : V.groupItems('live', p).length > 0);
       if (ok) return p;
     }
+    // (A provider's category from before smarter categories were turned on: not one of the choices now.)
+    if (remembered && V.smart && V.smart.on() && !(V.smart.cfg().keep) && remembered.indexOf('__') !== 0 && !V.smart.isId(remembered)) return '';
     return remembered || '';
   };
 
@@ -97,7 +106,7 @@
     if (sel !== '__fav' && !lists.some(function (l) { return '__my:' + l.id === sel; })) sel = '__fav';
     var startOpts = function (pref) {
       var cur = V.pref(pref) || '__last';
-      var opts = [['__last', 'Where I was last time'], ['', 'All channels'], ['__fav', 'Favourites'], ['__recent', 'Recently watched']].concat(lists.map(function (l) { return ['__my:' + l.id, l.name]; })).concat(V.groupsOf('live').map(function (g) { return [g.name, g.name]; }).sort(function (a, b) { return a[1].localeCompare(b[1]); }));
+      var opts = [['__last', 'Where I was last time'], ['', 'All channels'], ['__fav', 'Favourites'], ['__recent', 'Recently watched']].concat(lists.map(function (l) { return ['__my:' + l.id, l.name]; })).concat(V.groupList('live').map(function (g) { return [g.name, g.label]; }));
       return opts.map(function (o) { return '<option value="' + V.esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + V.esc(o[1]) + '</option>'; }).join('');
     };
     var keysOf = function () { if (sel === '__fav') return V.favChannels('any').map(function (c) { return c.k; }); var l = lists.filter(function (x) { return '__my:' + x.id === sel; })[0]; return l ? l.keys.slice() : []; };

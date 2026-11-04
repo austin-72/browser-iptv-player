@@ -224,7 +224,7 @@ V.openSide = function (kind) {
     var ctype = cur && cur.t === 'radio' ? 'radio' : 'live';
     // Which channels: the list it was started from, or any of your groups (favourites, your lists, categories).
     var sideGroups = V.channelGroups ? V.channelGroups(ctype) : [];
-    side.innerHTML = head('Channels') + (sideGroups.length ? '<select class="input side-grp" aria-label="Channel group"><option value="__now">' + (V.watch.list && V.watch.list !== S.live && V.watch.list !== S.radio ? 'The list you were watching' : 'All channels') + '</option>' + sideGroups.slice(1).map(function (x) { return '<option value="' + V.esc(x.v) + '">' + V.esc(x.l) + '</option>'; }).join('') + '</select>' : '') + '<input class="input side-filter" placeholder="Filter channels" aria-label="Filter channels"><div class="side-list"></div>';
+    side.innerHTML = head('Channels') + (sideGroups.length ? '<select class="input side-grp" aria-label="Channel group"><option value="__now">' + (V.watch.list && V.watch.list !== S.live && V.watch.list !== S.radio ? 'The list you were watching' : 'All channels') + '</option>' + V.groupOptions(sideGroups.slice(1).map(function (x) { return x.head ? x : { v: x.v, l: x.l, kind: x.kind }; }), null) + '</select>' : '') + '<input class="input side-filter" placeholder="Filter channels" aria-label="Filter channels"><div class="side-list"></div>';
     var sg = V.$('.side-grp', side);
     if (sg) sg.onchange = function () { list = sg.value === '__now' ? (V.watch.list || S.live) : V.channelsFor(sg.value, ctype); render(V.$('.side-filter', side).value); var f = V.$('.side-list button', side); if (f) f.scrollIntoView({ block: 'nearest' }); };
     var render = function (q) {

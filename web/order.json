@@ -48,6 +48,7 @@
     "adminerrors.js",
     "integrations.js",
     "homelists.js",
+    "smartcats.js",
     "viewing.js",
     "channeleditor.js",
     "health.js",
@@ -91,6 +92,7 @@
     "p22.css",
     "p23.css",
     "p24.css",
-    "p25.css"
+    "p25.css",
+    "p26.css"
   ]
 }

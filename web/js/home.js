@@ -100,7 +100,7 @@ V.route('home', function (view) {
   var add = function (o) { var r = V.row(o); if (r) rows.appendChild(r); };
   var builders = {
     continue: function () { add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: V.continueWatching().map(function (c) { return { it: c.it, next: c.next, play: true }; }), cardOpts: { shape: 'wide', showName: true }, play: true }); },
-    list: function () { add({ id: 'list', title: 'My List', items: keysToItems(S.data.list), more: '#/mine' }); },
+    list: function () { add({ id: 'list', title: 'My List', items: V.myListOrdered ? V.myListOrdered().filter(notHidden) : keysToItems(S.data.list), more: '#/mine' }); },
     neweps: function () {
       var ne = S.data.newEps || {};
       var items = Object.keys(ne).sort(function (a, b) { return ne[b].at - ne[a].at; }).map(V.entry).filter(notHidden);
@@ -147,8 +147,8 @@ V.route('home', function (view) {
     pinned: function () {
       (S.data.home.pinned || []).forEach(function (p) {
         var parts = p.split('|'), type = parts[0], g = parts.slice(1).join('|');
-        var m = S.groups[type] && S.groups[type].get(g);
-        if (m && m.length) add({ id: 'pinned:' + p, title: g, items: m.slice(0, 40), more: '#/' + ({ live: 'live', radio: 'radio', movie: 'movies', show: 'series' }[type]) + '?g=' + encodeURIComponent(g), play: type === 'live' || type === 'radio' });
+        var m = V.groupItems(type, g);
+        if (m && m.length) add({ id: 'pinned:' + p, title: V.smart ? V.smart.label(g, type) : g, items: m.slice(0, 40), more: '#/' + ({ live: 'live', radio: 'radio', movie: 'movies', show: 'series' }[type]) + '?g=' + encodeURIComponent(g), play: type === 'live' || type === 'radio' });
       });
     },
     sharedlists: function () { V.sharedLists().forEach(function (l) { add({ id: 'shared:' + l.id, title: l.name + ' · shared list', items: l.items.map(function (x) { return V.entry(x.k); }).filter(Boolean), more: '#/mine' }); }); },
@@ -208,10 +208,10 @@ V.customizeHome = function () {
       return '<li><label class="check"><input type="checkbox" data-show="' + id + '"' + (hidden.has(id) ? '' : ' checked') + '><span>' + V.esc(r.name) + '</span></label><span class="sp"></span>' +
         '<button class="icon-btn sm" data-up="' + i + '" aria-label="Move up"' + (i ? '' : ' disabled') + '>' + V.icon('up') + '</button><button class="icon-btn sm" data-down="' + i + '" aria-label="Move down"' + (i < order.length - 1 ? '' : ' disabled') + '>' + V.icon('down') + '</button></li>';
     }).join('');
-    V.$('.pins', d).innerHTML = pinned.length ? pinned.map(function (p, i) { return '<span class="chip on">' + V.esc(p.split('|').slice(1).join('|')) + ' <button class="x" data-unpin="' + i + '" aria-label="Unpin">' + V.icon('x') + '</button></span>'; }).join('') : '<span class="dim">No pinned categories yet.</span>';
+    V.$('.pins', d).innerHTML = pinned.length ? pinned.map(function (p, i) { return '<span class="chip on">' + V.esc(V.smart ? V.smart.label(p.split('|').slice(1).join('|'), p.split('|')[0]) : p.split('|').slice(1).join('|')) + ' <button class="x" data-unpin="' + i + '" aria-label="Unpin">' + V.icon('x') + '</button></span>'; }).join('') : '<span class="dim">No pinned categories yet.</span>';
   };
   var groupOpts = [];
-  ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupsOf(t).sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.name) + ' (' + g.items.length + ')</option>'); }); });
+  ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupList(t).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.label) + ' (' + g.items.length + ')</option>'); }); });
   V.dialog({
     title: 'Customise your home page', wide: true,
     body: '<p class="dim">Choose which rows you see and their order.</p><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +

@@ -26,6 +26,8 @@ V.sortItems = function (items, sort) {
   if (sort === 'new') a.sort(function (x, y) { return (y.ad || 0) - (x.ad || 0); });
   else if (sort === 'year') a.sort(function (x, y) { return (y.y || 0) - (x.y || 0); });
   else if (sort === 'rating') a.sort(function (x, y) { return (y.r || 0) - (x.r || 0); });
+  // (How popular worldwide — TMDB's measure — then rating, then newest.)
+  else if (sort === 'pop') a.sort(function (x, y) { return (y.pp || 0) - (x.pp || 0) || (y.r || 0) - (x.r || 0) || (y.ad || 0) - (x.ad || 0); });
   else if (sort === 'num') a.sort(function (x, y) { return (x.no || 0) - (y.no || 0); });
   else if (sort === 'genre') a.sort(function (x, y) { var gx = (x.gn && x.gn[0]) || '\uffff', gy = (y.gn && y.gn[0]) || '\uffff'; return nameCmp(gx, gy) || nameCmp(x.n, y.n); });
   return a;
@@ -46,10 +48,12 @@ function vodPage(view, r, type, title) {
   var g = r.q.get('g') || '';
   var genre = r.q.get('genre') || '';
   var sort = r.q.get('sort') || (V.ls.get('sort.' + type) || 'default');
-  var groups = V.groupsOf(type).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  var smart = V.smart && V.smart.on();
+  var groups = V.groupList(type);
+  var chart = g.indexOf('tr:') === 0; // (TMDB's charts: in their own order)
   var genres = V.browseMemo('genres|' + type + '|' + g, function () {
     var out = [];
-    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || list[i].g === g)) n++; if (n >= 1) out.push({ name: name, n: n }); });
+    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || V.inGroup(list[i], g))) n++; if (n >= 1) out.push({ name: name, n: n }); });
     return out.sort(function (a, b) { return b.n - a.n; });
   });
   var hidden = new Set(S.data.hidden);
@@ -63,20 +67,24 @@ function vodPage(view, r, type, title) {
   };
   var lenOk = function (x) { if (!maxLen || type !== 'movie') return true; if (!x.d) return false; return maxLen > 0 ? x.d <= maxLen * 60 : x.d >= -maxLen * 60; };
   // (Sorted once, then filtered: the same order as filtering first, as the sorts keep ties in catalogue order.)
-  var sortBy = sort === 'default' ? (g || genre ? 'az' : 'new') : sort;
-  var base = g ? (S.groups[type] && S.groups[type].get(g)) || [] : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
-  var sorted = V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy, function () { return V.sortItems(base, sortBy); });
-  var items = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || x.g === g) && (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
+  // (Suggested: a chart's own order; with smarter categories, what's popular worldwide first; otherwise A–Z.)
+  var sortBy = sort === 'default' ? (chart ? 'rank' : g || genre ? (smart ? 'pop' : 'az') : 'new') : sort;
+  var base = g ? V.groupItems(type, g) : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
+  var sorted = V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy + (chart ? '|' + V.smart.trendAt() : ''), function () { return sortBy === 'rank' ? base : V.sortItems(base, sortBy); });
+  var items = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || V.inGroup(x, g)) && (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
+  if (chart && V.smart) V.smart.loadTrend();
   var setQ = function (k, v) { var q = new URLSearchParams(r.q); if (v) q.set(k, v); else q.delete(k); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
   view.innerHTML = V.pageHead(title, '<div class="page-tools">' +
-    '<label class="sel"><span class="sr-only">Category</span><select class="input" data-f="g"><option value="">All categories</option>' + groups.map(function (x) { return '<option value="' + V.esc(x.name) + '"' + (x.name === g ? ' selected' : '') + '>' + V.esc(x.name) + ' (' + x.items.length + ')</option>'; }).join('') + '</select></label>' +
+    '<label class="sel"><span class="sr-only">Category</span><select class="input" data-f="g"><option value="">All categories</option>' + V.groupOptions(groups, g) + '</select></label>' +
     (genres.length ? '<label class="sel"><span class="sr-only">Genre</span><select class="input" data-f="genre"><option value="">All genres</option>' + genres.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).map(function (x) { return '<option value="' + V.esc(x.name) + '"' + (x.name === genre ? ' selected' : '') + '>' + V.esc(x.name) + ' (' + x.n + ')</option>'; }).join('') + '</select></label>' : '') +
     '<label class="sel"><span class="sr-only">Years</span><select class="input" data-f="dec">' + [['', 'Any year'], ['new', 'Last 2 years'], ['2020', '2020s'], ['2010', '2010s'], ['2000', '2000s'], ['1990', '1990s'], ['1980', '1980s'], ['1970', '1970s'], ['old', 'Before 1970']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === dec ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="sel"><span class="sr-only">Rating</span><select class="input" data-f="rmin">' + [['', 'Any rating'], ['6', '★ 6+'], ['7', '★ 7+'], ['8', '★ 8+']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(minR || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     (type === 'movie' ? '<label class="sel"><span class="sr-only">Length</span><select class="input" data-f="len">' + [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(maxLen || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' : '') +
-    '<label class="sel"><span class="sr-only">Sort</span><select class="input" data-f="sort">' + [['default', 'Suggested'], ['new', 'Newest'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+    '<label class="sel"><span class="sr-only">Sort</span><select class="input" data-f="sort">' + [['default', chart ? 'Chart order' : 'Suggested'], ['pop', 'Popular worldwide'], ['new', 'Newest'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     (g ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to home</button>' : '') + '</div>') +
-    // (No row of genre buttons as well: the Genre list above does the same, and the page starts sooner.)
+    // (No row of genre buttons as well: the Genre list above does the same, and the page starts sooner. With smarter
+    // categories: the charts, the holiday in season and the big services, one tap away.)
+    (smart ? V.smart.chips(type, g, r.name) : '') +
     '<p class="count dim">' + V.plural(items.length, type === 'movie' ? 'movie' : 'series', type === 'movie' ? 'movies' : 'series') + (g || genre || dec || minR || maxLen ? ' · <button class="linkish" data-clear-f>Clear filters</button>' : '') + '</p><div class="grid-host"></div>';
   V.$$('[data-f]', view).forEach(function (s) { s.onchange = function () { if (s.dataset.f === 'sort') V.ls.set('sort.' + type, s.value); setQ(s.dataset.f, s.value === 'default' ? '' : s.value); }; });
   V.$$('[data-genre]', view).forEach(function (b) { b.onclick = function () { setQ('genre', b.dataset.genre); }; });
@@ -84,6 +92,7 @@ function vodPage(view, r, type, title) {
   if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['g', 'genre', 'dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
   var pin = V.$('[data-pin-g]', view);
   if (pin) pin.onclick = function () { var id = type + '|' + g; if (S.data.home.pinned.indexOf(id) < 0) { S.data.home.pinned.push(id); V.saveHome(); } V.toast('Pinned to your home page'); };
+  if (g && V.smart && V.smart.isId(g)) { var h1 = V.$('h1', view); if (h1) h1.textContent = title + ': ' + V.smart.label(g, type); }
   if (!all.length) { V.$('.grid-host', view).innerHTML = V.empty('No ' + title.toLowerCase() + ' yet', 'None of the lists have any, or your language settings hide them.', '<div class="btn-row empty-acts"><a class="btn" href="#/settings">Language settings</a></div>'); return; }
   V.grid(V.$('.grid-host', view), items, { empty: 'Nothing matches.' });
 }
@@ -94,7 +103,6 @@ V.route('series', function (view, r) { vodPage(view, r, 'show', 'Series'); });
 function channelsPage(view, r, type) {
   var all = type === 'radio' ? S.radio : S.live;
   var g = r.q.get('g') || (type === 'live' ? V.startGroup('live', V.ls.get('livegroup.' + type)) : V.ls.get('livegroup.' + type)) || '';
-  var groups = V.groupsOf(type).sort(function (a, b) { return a.name.localeCompare(b.name); });
   var favs = V.favChannels(type);
   var recent = V.recentChannels().filter(function (c) { return c.t === type; });
   var list = g === '__fav' ? favs : g === '__recent' ? recent : g ? V.channelsFor(g, type) : all;
@@ -111,7 +119,7 @@ function channelsPage(view, r, type) {
     (type === 'radio' && S.live.length ? '<a class="btn" href="#/live">' + V.icon('tv') + ' Live TV</a><a class="btn" href="#/guide">' + V.icon('clock') + ' TV guide</a>' : '') + '</span></div>') +
     '<div class="live-layout"><nav class="groups" aria-label="Channel groups">' +
     V.channelGroups(type)
-      .map(function (x) { return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +
+      .map(function (x) { if (x.head) return '<div class="grp-h">' + V.esc(x.head) + '</div>'; return '<button class="grp' + (x.v === g ? ' on' : '') + '" data-g="' + V.esc(x.v) + '"' + (x.v === g ? ' aria-current="true"' : '') + '><span class="truncate">' + V.esc(x.l) + '</span><small>' + x.n + '</small></button>'; }).join('') +
     '</nav><div class="ch-col">' + (emptyN ? '<label class="check small ev-toggle"><input type="checkbox" data-empty-ev' + (showEmpty ? ' checked' : '') + '><span>Show ' + V.plural(emptyN, 'event channel') + ' with nothing on</span></label>' : '') + '<div class="ch-list" data-list></div></div></div>';
   var box = V.$('.ch-list', view);
   var et = V.$('[data-empty-ev]', view);
@@ -192,7 +200,7 @@ V.route('channel', function (view, r) {
   var fav = V.inList('favs', c.k);
   var nn = V.epg.nowNext(c);
   var canCU = V.catchup.available(c);
-  view.innerHTML = '<div class="ch-page"><header class="ch-head">' + V.art(c.i, c.n, 'art ch-big') + '<div><div class="dim">' + V.esc(c.g) + (c.no ? ' · Channel ' + c.no : '') + (canCU ? ' · ' + V.icon('archive', 'tiny') + ' Catch-up ' + ((c.cu && c.cu.days) || 7) + ' days' : '') + '</div><h1>' + V.esc(c.n) + '</h1>' + (V.isDown && V.isDown(c.k) ? '<p class="dn-note"><span class="dn-badge">' + V.icon('pulse', 'tiny') + ' May be down</span> It hasn’t played the last few times anyone tried.</p>' : '') +
+  view.innerHTML = '<div class="ch-page"><header class="ch-head">' + V.art(c.i, c.n, 'art ch-big') + '<div><div class="dim">' + V.esc(V.catLabel ? V.catLabel(c) : c.g) + (c.no ? ' · Channel ' + c.no : '') + (canCU ? ' · ' + V.icon('archive', 'tiny') + ' Catch-up ' + ((c.cu && c.cu.days) || 7) + ' days' : '') + '</div><h1>' + V.esc(c.n) + '</h1>' + (V.isDown && V.isDown(c.k) ? '<p class="dn-note"><span class="dn-badge">' + V.icon('pulse', 'tiny') + ' May be down</span> It hasn’t played the last few times anyone tried.</p>' : '') +
     (nn.now ? '<p><b>Now:</b> ' + V.esc(nn.now.t) + ' <span class="dim">' + V.fmtClock(nn.now.s) + '–' + V.fmtClock(nn.now.e) + '</span></p>' : '') +
     '<div class="acts"><button class="btn primary lg" data-a="play">' + V.icon('play') + ' Watch</button>' + (canCU && nn.now ? '<button class="btn lg" data-a="start">' + V.icon('restart') + ' Start over</button>' : '') +
     '<button class="icon-btn lg" data-a="fav" aria-pressed="' + fav + '" aria-label="Favourite">' + V.icon(fav ? 'heartf' : 'heart') + '</button><button class="icon-btn lg" data-a="mylist" aria-label="Add to one of your lists">' + V.icon('list') + '</button><button class="icon-btn lg" data-a="share" aria-label="Send to someone">' + V.icon('send') + '</button>' + (S.settings.allowParties ? '<button class="icon-btn lg" data-a="party" aria-label="Watch together">' + V.icon('party') + '</button>' : '') + '</div></div></header>' +

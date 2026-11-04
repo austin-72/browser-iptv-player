@@ -43,6 +43,7 @@ const { Lists } = require('./lib/lists');
 const { Catalog, genresOf, norm: catalogNorm } = require('./lib/catalog');
 const catsnap = require('./lib/catsnap');
 const Titles = require('./lib/titles');
+const Smart = require('./lib/smartcats');
 const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
@@ -133,6 +134,12 @@ const lists = new Lists({
 catalog = new Catalog({ lists, epg, getSettings: settings });
 catalog.overrides = overrides;
 catalog.decorate = (it) => applyMeta(it, tmdb.meta.data.m[it.k]); // (applyMeta and tmdb: further down, used once built)
+// Smarter categories (lib/smartcats.js): each item's, worked out when the catalogue is built (and again when the
+// admin changes them, or details come in). A channel's guide says what it shows: the next 12 hours' categories.
+catalog.tagger = () => Smart.tagger(settings(), {
+  meta: (k) => tmdb.meta.data.m[k] || null,
+  epgCats: (it) => { try { const out = []; for (const p of epg.range(it.epg, Date.now(), Date.now() + 12 * 3600e3)) for (const c of p.c || []) out.push(c); return out; } catch { return []; } },
+});
 // The TMDB entry each title was matched to (by its key in the last build): titles that are one entry are merged.
 // (Only a sure match: picked by hand, or TMDB's title is clearly this title — a match found by searching a name is
 // sometimes another film, and merging on it would hide one of them.)
@@ -195,7 +202,11 @@ const relayOf = makeRelay({ getSettings: settings, listOf: (id) => lists.all().f
 /** Does video from this list have to go through the server (its proxy is set to carry video)? */
 const videoViaProxy = (listId) => { const p = listProxy(listId); return !!(p && p.video); };
 const tmdbT0 = Date.now();
-const tmdb = new Tmdb({ dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase, getLang: () => settings().tmdbLang || '' });
+const tmdb = new Tmdb({
+  dataDir: D, getKey: () => settings().tmdbKey, base: cfg.tmdbBase, getLang: () => settings().tmdbLang || '',
+  // (Smarter categories: streaming services in the household's country, keywords, studios — Admin → Categories.)
+  getRegion: () => Smart.config(settings()).region, wantExtras: () => { const c = Smart.config(settings()); return c.on && c.extras; },
+});
 const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 
@@ -203,6 +214,8 @@ function applyMeta(it, m) {
   if (!m) return;
   // Someone in the household picked this match by hand: its details win over the provider's.
   const force = !!m.manual;
+  const ownYear = it.y || 0; // (the provider's: TMDB's goes on below when there's none)
+  if (m.pop) it.pop = m.pop;
   // TMDB's genres are the consistent ones (the provider's vary from category to category).
   if (m.gn && m.gn.length) it.gn = genresOf(m.gn);
   for (const k of ['plot', 'cast', 'dir', 'bd', 'c', 'tmdb']) if ((force || !it[k]) && m[k] && (!Array.isArray(m[k]) || m[k].length)) it[k] = m[k];
@@ -213,12 +226,10 @@ function applyMeta(it, m) {
   // TMDB's title, the same for every copy ("Spider Man Into The Spiderverse" → "Spider-Man: Into the Spider-Verse") —
   // when the match is sure: picked by hand, or a name that's clearly the same title
   // (a match found by searching the name could be another film of a similar name: then the provider's name stays).
-  if (m.title && it.n !== m.title && settings().tmdbTitles !== false && (force || sameTitle(it, m))) it.n = m.title;
+  if (m.title && it.n !== m.title && settings().tmdbTitles !== false && (force || Titles.sameTitle(it.n, ownYear, m.title, m.y))) it.n = m.title;
   if (!it.logo && m.poster) it.logo = m.poster;
   if (m.poster) it.poster = m.poster;
 }
-/** Is TMDB's entry clearly this title? (lib/titles.js) */
-const sameTitle = (it, m) => Titles.sameTitle(it.n, it.y, m.title, m.y);
 let rebuilding = null, rebuildAgain = false, catalogReady = null;
 /** Rebuild the catalogue: at start-up in one go, afterwards in slices so nobody's stream stalls while it runs. */
 function rebuildCatalog(now) {
@@ -559,6 +570,7 @@ function publicSettings() {
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
     features: ['browserRoute', 'copyCodecs'],
     smartFailover: s.smartFailover !== false, // (see /api/play/race)
+    smart: Smart.publicView(s), // smarter categories (lib/smartcats.js)
     epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
     // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
     relayLists: relayOf.conf() ? lists.all().filter((l) => relayOf.uses(l.id)).map((l) => l.id) : [],
@@ -2080,7 +2092,11 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if ('tidyGroups' in b) s.tidyGroups = !!b.tidyGroups;
   if (Array.isArray(b.groupRules)) s.groupRules = b.groupRules.slice(0, 300).map((r) => ({ match: String(r.match || '').trim().slice(0, 120), to: String(r.to || '').trim().slice(0, 60), hide: !!r.hide, types: Array.isArray(r.types) ? r.types.filter((t) => ['live', 'movie', 'show', 'radio'].includes(t)) : [] })).filter((r) => r.match);
   num('backupDays', 0, 60);
+  // Smarter categories (Admin → Categories): put on every item again straight away (no rebuild needed).
+  let smartChanged = false;
+  if (b.smart && typeof b.smart === 'object') { const was = JSON.stringify(Smart.config(s)); s.smart = Smart.clean(b.smart, s.smart); smartChanged = JSON.stringify(Smart.config(s)) !== was; }
   settingsStore.save();
+  if (smartChanged) { smartRetag('settings'); smartTrending(); if (!enrichJob) setTimeout(() => { try { startEnrich(true); } catch {} }, 5000); }
   if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b) scheduleRebuild(100);
   hub.toAll('settings', publicSettings());
   return adminSettingsView();
@@ -2264,10 +2280,21 @@ function startEnrich(auto = false, opts = {}) {
   const noMatch = (it) => map[it.k] && map[it.k].none && !(opts.retry && !map[it.k].manual);
   const filters = accounts.profiles.map((pr) => catalog.filterFor(pr));
   const visible = (it) => filters.some((f) => f.test(it));
+  // Titles with no year of their own that a name search matched to a film from years after the list had them
+  // ("Resident Evil" added in 2020 → the 2026 film): looked up again (tmdb.doubtful). The catalogue is built again
+  // first, so the wrong poster, plot and year come off.
+  if (auto || mode === 'visible' || mode === 'missing') {
+    let wrong = 0;
+    for (const it of catalog.items) if ((it.t === 'movie' || it.t === 'show') && tmdb.doubtful(it)) { delete map[it.k]; delete meta[it.k]; wrong++; }
+    if (wrong) { tmdb.map.save(); tmdb.meta.save(); log(`TMDB: ${wrong} titles without a year were matched to a newer title of the same name — looking them up again`); scheduleRebuild(3000); return null; }
+  }
+  // (Smarter categories want each title's streaming services and keywords: details from before those were kept are fetched again.)
+  const extras = tmdb.wantExtras();
   let todo = catalog.items.filter((it) => {
     if (!types.has(it.t)) return false;
     if (mode === 'groups') return groups.has(`${it.t}|${it.g}`) && !(map[it.k] && map[it.k].none && map[it.k].manual);
     if (mode === 'all') return !(map[it.k] && map[it.k].manual) && !noMatch(it);
+    if (meta[it.k] && extras && !meta[it.k].x && (mode === 'missing' || visible(it))) return true;
     if (meta[it.k] || noMatch(it)) return false;
     return mode === 'missing' || visible(it);
   });
@@ -2275,7 +2302,7 @@ function startEnrich(auto = false, opts = {}) {
   // What the household watches comes first, then what it can see; titles in languages nobody uses last.
   const mine = new Set();
   for (const pr of accounts.profiles) { const d = userdata.of(pr.id).data; for (const h of d.history) mine.add(h.sk || h.k); for (const k of d.list) mine.add(k); }
-  const rank = (it) => (mine.has(it.k) ? 0 : visible(it) ? 1 : 2);
+  const rank = (it) => (mine.has(it.k) ? 0 : visible(it) ? 1 : 2) * 2 + (meta[it.k] ? 1 : 0); // (titles with no details at all before extras)
   todo = todo.map((it, i) => ({ it, r: rank(it), i })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.it);
   const refresh = mode === 'all' || mode === 'groups';
   if (refresh) for (const it of todo) { if (map[it.k] && !map[it.k].manual) { if (map[it.k].none) delete map[it.k]; } if (meta[it.k]) meta[it.k].at = 0; }
@@ -2283,18 +2310,22 @@ function startEnrich(auto = false, opts = {}) {
   log(`TMDB: ${auto ? 'filling in' : `fetching (${mode})`} details for ${todo.length} titles`);
   let lastPush = Date.now();
   const push = () => { catalog.metaChanged(); hub.toAll('catalog', { version: catalog.version }); lastPush = Date.now(); };
+  const tagger = catalog.tagger ? catalog.tagger() : null;
   const label = mode === 'groups' ? [...groups].map((g) => g.split('|').slice(1).join('|')).slice(0, 3).join(', ') + (groups.size > 3 ? ` +${groups.size - 3}` : '') : '';
   enrichJob = { status: { running: true, total: todo.length, done: 0, found: 0, missed: 0, current: '', started: Date.now(), auto, mode, label } };
   enrichCounts = null;
   const job = enrichJob;
   tmdb.enrich(todo, {
     onStart: (it) => { job.status.current = it.n; },
-    onItem: (it, m) => { applyMeta(it, m); job.status.found++; if (Date.now() - lastPush > 5 * 60e3) push(); },
+    onItem: (it, m) => { applyMeta(it, m); if (tagger && tagger.on) { const sc = tagger.tag(it); if (sc && sc.length) it.sc = sc; else delete it.sc; } job.status.found++; if (Date.now() - lastPush > 5 * 60e3) push(); },
     onDone: (it, m) => { job.status.done++; if (!m) job.status.missed++; },
     stop: () => enrichJob !== job,
     fresh: refresh,
   }).catch((e) => { job.status.error = e.message; }).finally(() => {
     push();
+    // Titles that are now known to be one TMDB entry ("Austin Powers 2: The Spy Who Shagged Me" and "Austin Powers:
+    // The Spy Who Shagged Me"): they become one title, with every copy as a source, when the catalogue is built again.
+    if (job.status.found && sameTmdbPending()) { log('TMDB: titles found to be the same film or series — building the catalogue again to put them together'); scheduleRebuild(30e3); }
     job.status.running = false; job.status.finished = Date.now(); job.status.current = '';
     lastEnrich = job.status;
     if (enrichJob === job) enrichJob = null;
@@ -2302,6 +2333,68 @@ function startEnrich(auto = false, opts = {}) {
   return job.status;
 }
 let lastEnrich = null;
+/** Are there films or series that a build would now merge (two titles, one sure TMDB entry, same language)? */
+function sameTmdbPending() {
+  const seen = new Set();
+  for (const it of catalog.items) {
+    if (it.t !== 'movie' && it.t !== 'show') continue;
+    const m = catalog.tmdbOf(it.k, it);
+    if (!m || !m.id) continue;
+    const k = `${it.t}|${m.id}|${(it.lg || [])[0] || ''}`;
+    if (seen.has(k)) return true;
+    seen.add(k);
+  }
+  return false;
+}
+
+// ---- smarter categories (lib/smartcats.js; Admin → Categories)
+let smartTagging = null;
+/** Every item's categories again (admin changed them, the server started, the guide moved on): devices told if any changed. */
+function smartRetag(why) {
+  if (smartTagging || !catalog.items.length) return smartTagging;
+  smartTagging = catalog.retag().then((n) => {
+    if (n) { catalog.metaChanged(); hub.toAll('catalog', { version: catalog.version }); log(`Smarter categories: ${n.toLocaleString('en-US')} items changed (${why})`); }
+    return n;
+  }).catch((e) => log('Smarter categories:', e.message)).finally(() => { smartTagging = null; });
+  return smartTagging;
+}
+const trending = new Smart.Trending({ tmdb, catalog: () => catalog, region: () => Smart.config(settings()).region });
+function smartTrending(force) {
+  const c = Smart.config(settings());
+  if (!c.on || !c.kinds.top || !tmdb.enabled()) return Promise.resolve(null);
+  return trending.refresh(force).then((r) => { if (r) hub.toAll('trending', { at: r.at }); return r; }).catch((e) => log('Trending:', e.message));
+}
+// (A few minutes after start, then every 6 hours: TMDB's charts; and the categories again, as the guides move on.)
+setTimeout(() => smartTrending(), 120e3).unref();
+setInterval(() => { smartTrending(); if (Smart.config(settings()).on) smartRetag('every 6 hours'); }, 6 * 3600e3).unref();
+route('GET', '/api/smart/trending', async () => {
+  const c = Smart.config(settings());
+  if (!c.on || !c.kinds.top) return { at: 0, lists: {} };
+  if (!trending.raw) await Promise.race([smartTrending(), new Promise((r) => setTimeout(r, 4000))]);
+  return trending.view();
+});
+// What Admin → Categories shows: every category with how many channels, films and series it has now.
+route('GET', '/api/admin/smart', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const c = Smart.config(settings());
+  const counts = {};
+  for (const it of catalog.items) for (const id of it.sc || []) { const e = counts[id] || (counts[id] = {}); e[it.t] = (e[it.t] || 0) + 1; }
+  const tv = trending.raw ? trending.view() : null;
+  if (tv) for (const [id, l] of Object.entries(tv.lists)) counts[id] = { movie: (l.movie || []).length, show: (l.show || []).length };
+  const meta = tmdb.meta.data.m;
+  let fetched = 0, withExtras = 0;
+  for (const it of catalog.items) if ((it.t === 'movie' || it.t === 'show') && meta[it.k]) { fetched++; if (meta[it.k].x) withExtras++; }
+  return {
+    config: c, kinds: Smart.KINDS, builtins: Smart.BUILTINS, counts, season: Smart.inSeason(),
+    tmdb: tmdb.enabled(), extras: { fetched, withExtras }, trendingAt: trending.raw ? trending.raw.at : 0,
+  };
+});
+route('POST', '/api/admin/smart/refresh', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  await smartRetag('asked');
+  smartTrending(true);
+  return { ok: true };
+});
 route('POST', '/api/admin/tmdb/enrich', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   if (!tmdb.enabled()) throw new HttpError(400, 'Add a TMDB key first.');
@@ -2912,6 +3005,8 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
       log(`Ready ${process.uptime().toFixed(1)} s after starting, with the saved catalogue: ${catalog.items.length.toLocaleString('en-US')} items${stale ? ' — something it’s made from changed (lists, settings or an update), so it’s built again in the background meanwhile' : ''} (${timing()}, ${(snap.bytes / 1048576).toFixed(0)} MB)`);
       afterCatalog();
       epg.load(); // (the guides after it: they don't hold up the catalogue)
+      // (Smarter categories as they are now — settings or the code may have changed — once the guides are in.)
+      epg.ready.then(() => smartRetag('start')).catch(() => {});
       return;
     }
     epg.load(); // (alongside the lists)

@@ -71,8 +71,21 @@ V.route('search', function (view, r) {
         });
       }).catch(function () {});
     }, 350);
+    // A category's name ("christmas", "halloween", "netflix"): its films, series and channels first, most popular first.
+    var cats = V.smart && V.smart.on() ? V.smart.matching(q) : [];
+    var catRows = [];
+    cats.forEach(function (d) {
+      [['movie', 'films', 'movies'], ['show', 'series', 'series'], ['live', 'channels', 'live']].forEach(function (t) {
+        var items = V.groupItems(t[0], d.id).filter(function (x) { return !V.inList('hidden', x.k); });
+        if (!items.length) return;
+        if (t[0] !== 'live') items = items.slice().sort(function (a, b) { return (b.pp || 0) - (a.pp || 0) || (b.r || 0) - (a.r || 0); });
+        catRows.push({ id: 'cat:' + d.id + ':' + t[0], title: V.smart.label(d.id, t[0]) + ' ' + t[1], items: items.slice(0, 40), more: '#/' + t[2] + '?g=' + encodeURIComponent(d.id), play: t[0] === 'live' });
+      });
+    });
+    if (catRows.length && !rows) { out.innerHTML = '<div class="sr-people"></div><div class="sr-rows"></div>'; rows = V.$('.sr-rows', out); }
     if (rows) {
       var add = function (o) { var x = V.row(o); if (x) rows.appendChild(x); };
+      catRows.forEach(add);
       if (filtered && filtered.length) add({ id: 'filt', title: f.label, items: filtered.slice(0, 60) });
       add({ id: 'top', title: 'Top results', items: top });
       add({ id: 'ch', title: 'Channels', items: by.live, play: true });

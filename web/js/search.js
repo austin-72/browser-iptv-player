@@ -19,7 +19,7 @@ V.search = (function () {
       groups: new Map(), // category in plain letters -> [ids]
       byNo: new Map(), // channel number -> [ids]
       starts: new Map(), // the name's first 1, 2 and 3 letters -> [ids] (one or two letters typed: what starts with them)
-      gnorm: new Map(), mark: [], qid: 0,
+      gnorm: new Map(), snames: new Map(), mark: [], qid: 0,
     };
   }
 
@@ -44,6 +44,12 @@ V.search = (function () {
       var g = x.gnorm.get(it.g);
       if (g === undefined) x.gnorm.set(it.g, (g = V.norm(it.g)));
       if (g) { var gl = x.groups.get(g); if (!gl) x.groups.set(g, (gl = [])); gl.push(id); }
+    }
+    // Smarter categories by name too: "christmas", "halloween", "netflix" find what's in them.
+    if (it.sc && V.smart && V.smart.on()) for (var si = 0; si < it.sc.length; si++) {
+      var sn = x.snames.get(it.sc[si]);
+      if (sn === undefined) x.snames.set(it.sc[si], (sn = V.smart.searchNames(it.sc[si])));
+      for (var sj = 0; sj < sn.length; sj++) { if (!sn[sj] || sn[sj] === g) continue; var sl2 = x.groups.get(sn[sj]); if (!sl2) x.groups.set(sn[sj], (sl2 = [])); if (sl2[sl2.length - 1] !== id) sl2.push(id); }
     }
   }
 

@@ -6,8 +6,12 @@ V.route('mine', function (view, r) {
   view.innerHTML = V.pageHead('My stuff') + '<div class="tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t.v === tab ? ' on' : '') + '" aria-selected="' + (t.v === tab) + '" href="#/mine/' + t.v + '">' + t.l + '</a>'; }).join('') + '</div><div class="tab-body"></div>';
   var body = V.$('.tab-body', view);
   if (tab === 'list') {
-    var items = S.data.list.map(V.entry).filter(Boolean);
-    V.grid(body, items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p><div class="btn-row empty-acts"><a class="btn" href="#/movies">Browse movies</a><a class="btn" href="#/series">Browse series</a></div>' });
+    // Recently played first, then recently added (or liked) — or as chosen here (kept on this device).
+    var lo = V.ls.get('myListOrder', '') || ((S.settings.smart || {}).listOrder || 'played');
+    var items = V.myListOrdered ? V.myListOrdered(lo) : S.data.list.map(V.entry).filter(Boolean);
+    body.innerHTML = '<div class="page-tools"><label class="sel"><span class="sr-only">Order</span><select class="input" data-lo>' + [['played', 'Recently played'], ['added', 'Recently added'], ['az', 'A–Z']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === lo ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div><div class="grid-host"></div>';
+    V.$('[data-lo]', body).onchange = function (e) { V.ls.set('myListOrder', e.target.value); V.router.refresh(); };
+    V.grid(V.$('.grid-host', body), items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p><div class="btn-row empty-acts"><a class="btn" href="#/movies">Browse movies</a><a class="btn" href="#/series">Browse series</a></div>' });
   } else if (tab === 'queue' && V.queue) {
     V.queue.render(body);
   } else if (tab === 'favs') {

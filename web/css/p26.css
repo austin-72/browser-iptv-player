@@ -1,0 +1,20 @@
+/* Smarter categories (smartcats.js): headings in the Live TV list, quick choices above Movies / Series, Admin → Categories. */
+.grp-h { margin: .9rem .7rem .25rem; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.grp-h:first-of-type { margin-top: .5rem; }
+.smart-chips { padding: .2rem 0 .9rem; }
+.smart-chips .chip .i { width: .95rem; height: .95rem; }
+.smart-adm .smart-opts { margin-top: .6rem; }
+.smart-adm .field-row { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; margin: .8rem 0; }
+.smart-adm .field-row .field { min-width: 0; }
+.smart-kind-row { border-top: 1px solid var(--line); padding: .55rem 0; }
+.smart-kind-row > .check { margin-bottom: .2rem; }
+.smart-kind > summary { cursor: pointer; padding: .2rem 0; }
+.smart-kind .rules { margin-top: .5rem; }
+.smart-defs td:first-child, .smart-defs th:first-child { width: 3.2rem; text-align: center; }
+.smart-defs td:nth-child(3) .input { max-width: 16rem; }
+.smart-defs td:last-child { white-space: nowrap; }
+@media (max-width: 760px) {
+  /* (Phones: the group list is a row of chips, the headings would only break it up.) */
+  .groups .grp-h { display: none; }
+  .smart-defs td:last-child, .smart-defs th:last-child { display: none; }
+}

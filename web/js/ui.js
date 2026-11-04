@@ -149,7 +149,7 @@ V.card = function (it, o) {
   if (it.lk && V.parental && !V.parental.open(it)) badges += '<span class="badge" title="Locked: needs the parental PIN">' + V.icon('lock') + '</span>';
   var sub = o.sub;
   if (sub === undefined) {
-    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event right now' : it.g; }
+    if (t === 'live' || t === 'radio') { var nn = V.epg.nowNext(it); sub = nn.now ? nn.now.t : it.ev ? (it.es === 'ended' ? 'Ended · ' : '') + it.ev : it.es === 'none' ? 'No event right now' : V.catLabel ? V.catLabel(it) : it.g; }
     else if (t === 'episode') sub = V.epLabel(it) + (it.et ? ' · ' + it.et : '');
     else sub = [it.y, t === 'show' ? (it.ne ? V.plural(it.ne, 'episode') : 'Series') : it.d ? V.fmtLen(it.d) : ''].filter(Boolean).join(' · ');
   }
