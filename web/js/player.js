@@ -1070,7 +1070,13 @@ PP._watchPicture = function () {
   clearInterval(this._picTimer);
   if (!it || it.t === 'radio' || (this.attempt && this.attempt.audioOnly)) return;
   var STEP = 2, c = null, g = null, readable = true;
-  var black = 0, still = 0, none = 0, lastT = v.currentTime, lastFrames = null;
+  var black = 0, still = 0, none = 0, lastT = v.currentTime, lastFrames = null, lastPic = null;
+  // The frame counter is only trusted where it has been seen counting in this playback, and not on a device where
+  // it turned out not to (some older TVs report the same number while the picture plays fine). A picture the page
+  // can look at that still changes isn't stopped either, whatever the counter says.
+  var counted = 0, litSeen = false;
+  var noStill = +V.ls.get('noStillCheck', 0);
+  var stillOk = !(noStill && Date.now() - noStill < 60 * 86400e3);
   var limit = this.vod ? 45 : 20;
   try { c = document.createElement('canvas'); c.width = 32; c.height = 18; g = c.getContext('2d', { willReadFrequently: true }); } catch (e) { g = null; }
   this._picTimer = setInterval(function () {
@@ -1081,19 +1087,32 @@ PP._watchPicture = function () {
     // (Nor in a hidden tab: browsers stop drawing the picture there to save power.)
     if (v.paused || v.seeking || v.readyState < 3 || moved < 1 || self._aoActive || document.hidden || v.webkitCurrentPlaybackTargetIsWireless) { black = still = none = 0; lastFrames = null; return; }
     if (!v.videoWidth) none += STEP; else none = 0;
+    var changed = false;
     if (v.videoWidth && g && readable) {
       try {
         g.drawImage(v, 0, 0, 32, 18);
         var d = g.getImageData(0, 0, 32, 18).data, sum = 0, lit = 0;
         for (var i = 0; i < d.length; i += 4) { var y = (d[i] * 3 + d[i + 1] * 6 + d[i + 2]) / 10; sum += y; if (y > 40) lit++; }
         // Black: dark on average and hardly anything lit (a small channel logo in a corner still counts as black).
-        if (sum / 576 < 12 && lit < 15) black += STEP; else black = 0;
+        // (Only where the page has seen the picture lit, or the counter counting: on some TVs the picture is drawn
+        // where the page can't see it, and every look comes back black.)
+        if (sum / 576 < 12 && lit < 15) { if (litSeen || counted >= 3) black += STEP; } else { black = 0; litSeen = true; }
+        // (A rough picture of the picture: four rows of brightness. Moving pictures change it.)
+        var pic = [0, 0, 0, 0];
+        for (var j = 0; j < d.length; j += 4) pic[Math.floor(j / 4 / 32 / 4.5)] += d[j] + d[j + 1] + d[j + 2];
+        changed = !!lastPic && pic.some(function (x, n) { return Math.abs(x - lastPic[n]) > 600; });
+        lastPic = pic;
+        if (changed) still = 0;
       } catch (e) { readable = false; } // (a picture from another site the browser won't let the page look at)
     }
     // The picture stopped: no new frames while the time goes on (works whatever the picture's origin).
     var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
     var frames = q ? q.totalVideoFrames : v.webkitDecodedFrameCount;
-    if (v.videoWidth && typeof frames === 'number') { if (lastFrames !== null && frames === lastFrames) still += STEP; else still = 0; lastFrames = frames; }
+    if (v.videoWidth && typeof frames === 'number') {
+      if (lastFrames !== null && frames > lastFrames) counted++;
+      if (lastFrames !== null && frames === lastFrames && stillOk && counted >= 3 && !changed) still += STEP; else still = 0;
+      lastFrames = frames;
+    }
     var why = none >= 12 ? 'no picture' : black >= limit ? 'a black picture' : still >= limit ? 'a picture that has stopped' : '';
     if (why) { clearInterval(self._picTimer); self._badPicture(why); }
   }, STEP * 1000);
@@ -1103,6 +1122,14 @@ PP._watchPicture = function () {
 PP._badPicture = function (why) {
   var it = this.it, tok = this.token, self = this;
   if (!it) return;
+  // "Stopped" again for the same title after already switching for it (another copy, or the server's conversion,
+  // whose picture certainly moves): it's this device's frame counter that's wrong, not the picture. Not checked again
+  // on this device (for two months), and nothing is switched.
+  if (why === 'a picture that has stopped') {
+    var hits = V._stillHits || (V._stillHits = {});
+    hits[it.k] = (hits[it.k] || 0) + 1;
+    if (hits[it.k] > 1) { V.ls.set('noStillCheck', Date.now()); if (V.crumb) V.crumb('player', 'frame counter unreliable here: "stopped picture" check off'); this._watchPicture(); return; }
+  }
   var err = new Error('The stream played with ' + why + '.');
   var a = this.attempt || {};
   var canConvert = S.settings.ffmpeg && !(a.via === 'session' && a.mode === 'transcode') && !this._picConverted;
