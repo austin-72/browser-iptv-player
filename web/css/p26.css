@@ -18,3 +18,9 @@
   .groups .grp-h { display: none; }
   .smart-defs td:last-child, .smart-defs th:last-child { display: none; }
 }
+
+/* Guest (web/js/guest.js): a plain person for its picture; messages are the household's. */
+.avatar.guest-av { display: inline-flex; align-items: center; justify-content: center; background: var(--card2); color: var(--dim); border: 2px solid var(--faint); }
+.avatar.guest-av .i { width: 58%; height: 58%; }
+body.guest .msg-btn { display: none !important; }
+.guest-note { margin: 0 0 1rem; }

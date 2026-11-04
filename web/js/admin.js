@@ -361,6 +361,10 @@ V.adminTabs.guides = function (body, A) {
 V.adminTabs.profiles = function (body, A) {
   var certs = [['', 'No limit'], ['0', 'Little kids (G, TV-Y)'], ['1', 'Kids (PG, TV-PG)'], ['2', 'Teens (PG-13, TV-14)'], ['3', 'Mature (R, TV-MA)']];
   body.innerHTML = '<p class="dim small">Priority viewers come first when too many people are watching: if a provider has no free connection, a priority viewer’s player takes one from someone on a standard profile, and standard viewers can’t take one from them.</p><div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><label class="check"><input type="checkbox" data-aop' + (A.settings.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles</span></label></div>' +
+    // A Guest on "Who's watching?" (web/js/guest.js): nothing it watches is kept or shown to anyone else.
+    '<section class="card-sec adm-guest"><h3>Guest</h3><label class="check"><input type="checkbox" data-guest="guestProfile"' + (A.settings.guestProfile ? ' checked' : '') + '><span>Offer a Guest on “Who’s watching?” <small class="dim">— for visitors: no PIN, nothing they watch, like or add to My List is saved (it’s forgotten when they leave), and none of it goes into anyone’s recommendations or “also watched”. Guests can’t record, message, start watch parties or change anything here.</small></span></label>' +
+    '<div class="grid2"><label class="check"><input type="checkbox" data-guest="guestKids"' + (A.settings.guestKids ? ' checked' : '') + '><span>Kids’ titles and channels only</span></label>' +
+    '<label class="field"><span>Age limit for guests</span><select class="input" data-guest="guestMaxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(A.settings.guestMaxCert || '') === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label></div></section>' +
     '<ul class="adm-profiles">' + A.profiles.map(function (p) {
       var r = p.restrictions || {};
       return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri" data-prichip>Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +
@@ -374,6 +378,7 @@ V.adminTabs.profiles = function (body, A) {
     }).join('') + '</ul>';
   body.onchange = function (e) {
     if (e.target.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: e.target.checked });
+    else if (e.target.hasAttribute('data-guest')) { var gp = {}; gp[e.target.dataset.guest] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; V.adminSave(gp).then(function (s) { if (s) Object.assign(A.settings, gp); }).catch(function () {}); }
     else if (e.target.hasAttribute('data-pri')) {
       // Saved straight away (it isn't one of the limits).
       var li = e.target.closest('[data-id]'), on = e.target.checked, p = A.profiles.filter(function (x) { return x.id === li.dataset.id; })[0];

@@ -48,14 +48,14 @@ const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
 const { Hub, Social } = require('./lib/social');
-const { Tmdb } = require('./lib/tmdb');
+const { Tmdb, ownYear: tmdbOwnYear } = require('./lib/tmdb');
 const { Recs } = require('./lib/recs');
 const { Markers } = require('./lib/markers');
 const { ConnTest } = require('./lib/conntest');
 const { listUsage: usageOf } = require('./lib/usage');
 const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
-const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log } = require('./lib/util');
+const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log, isGuestId } = require('./lib/util');
 const { ErrorReports } = require('./lib/errors');
 const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId, acctId } = require('./lib/streamrelay');
 const frontLink = require('./lib/front'); // (telling the front when this server is about to stop)
@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS = {
   transcodePreset: 'veryfast', transcodeCrf: 22, transcodeMaxHeight: 1080, maxTranscodes: 3, maxSessions: 10, remuxReadrate: 0, hwaccel: '',
   tmdbKey: '', introDetection: true,
   adminOnlyProfiles: false, allowDownloads: true, allowParties: true,
+  guestProfile: false, guestKids: false, guestMaxCert: '', // (a Guest on "Who's watching?": lib/accounts.js startGuest)
   exportKey: crypto.randomBytes(12).toString('hex'),
   allowedHosts: [],
   // Outgoing proxies (Admin → Network): [{ id, name, url, video }]; `proxy` is the default for everything.
@@ -152,8 +153,8 @@ catalog.tmdbOf = (k, it) => {
     if (m.manual) return m;
     const d = tmdb.meta.data.m[k];
     if (!d || String(d.tmdb) !== String(m.id) || !it) return null;
-    if (d.title && Titles.sameTitle(it.n, it.y, d.title, d.y)) return m;
-    const own = it._ym ? 0 : it.y;
+    const own = tmdbOwnYear(it);
+    if (d.title && Titles.sameTitle(it.n, own, d.title, d.y)) return m;
     return m.list && own && d.y && Math.abs(own - d.y) <= 1 ? m : null;
   } catch { return null; }
 };
@@ -217,6 +218,10 @@ const tmdb = new Tmdb({
 });
 const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
+// Guests (Admin → Profiles): nothing they watch, like or list is kept, and nothing of theirs reaches anyone else.
+accounts.guestCfg = () => { const s = settings(); return { on: !!s.guestProfile, kids: !!s.guestKids, maxCert: s.guestMaxCert }; };
+accounts.onGuestEnd = (id) => { userdata.remove(id); recs.forget(id); };
+setInterval(() => accounts.dropIdleGuests(), 3600e3).unref();
 
 /**
  * A film's or series' language when the provider only hinted at it (its category said "EN", or nothing said anything:
@@ -237,12 +242,13 @@ function applyMeta(it, m) {
   applyLang(it, m);
   // Someone in the household picked this match by hand: its details win over the provider's.
   const force = !!m.manual;
-  const ownYear = it.y || 0; // (the provider's: TMDB's goes on below when there's none)
+  const ownYear = tmdbOwnYear(it); // (the provider's: TMDB's goes on below when there's none)
   if (m.pop) it.pop = m.pop;
   // TMDB's genres are the consistent ones (the provider's vary from category to category).
   if (m.gn && m.gn.length) it.gn = genresOf(m.gn);
   for (const k of ['plot', 'cast', 'dir', 'bd', 'c', 'tmdb']) if ((force || !it[k]) && m[k] && (!Array.isArray(m[k]) || m[k].length)) it[k] = m[k];
-  if ((force || !it.y) && m.y) { if (!it.y) it._ym = 1; it.y = m.y; } // (_ym: the year is TMDB's, not the provider's — lib/tmdb.js ownYear)
+  // (_ym: the year is TMDB's, not the provider's — lib/tmdb.js ownYear. 1970: an empty date on the provider's side.)
+  if ((force || !ownYear) && m.y && m.y !== it.y) { if (!ownYear) it._ym = 1; it.y = m.y; }
   if ((force || !it.r) && m.r) it.r = m.r;
   if ((force || !it.d) && m.d) it.d = m.d;
   if (m.col) it.col = m.col.id; else if (force) delete it.col;
@@ -275,7 +281,7 @@ function afterRebuild() {
   if (catalog.renamed && catalog.renamed.size) {
     let moved = 0;
     for (const pr of accounts.profiles) { const n = userdata.migrateKeys(pr.id, catalog.renamed); if (n) { moved += n; recs.touch(pr.id, 5000); } }
-    moved += tmdb.migrateKeys(catalog.renamed);
+    moved += tmdb.migrateKeys(catalog.renamed, catalog.mergedKeys);
     if (moved) log(`Moved ${moved} saved things to renamed titles`);
   }
   // (TMDB's details went on each title while it was built: catalog.decorate.)
@@ -285,6 +291,8 @@ function afterRebuild() {
 }
 /** After a new catalogue (built, or the saved one at start-up): the jobs that go through it, a little later. */
 function afterCatalog() {
+  // (Titles one TMDB entry that this build left apart — years apart, say: no reason to build it again for them.)
+  try { sameTmdbLeft = new Set(catalog.pendingSameTmdb()); } catch { sameTmdbLeft = new Set(); }
   setTimeout(() => checkNewEpisodes().catch((e) => log('New episodes:', e.message)), 20e3);
   // (The original language of titles looked up before it was kept: from TMDB's answers on disk, once.)
   setTimeout(() => backfillLangs(), 25e3);
@@ -563,6 +571,7 @@ async function readObj(req) {
   const b = await readJSON(req);
   return b && typeof b === 'object' && !Array.isArray(b) ? b : {};
 }
+const GUEST_DENY = /^\/api\/(?:admin\/|dvr\b|homelists\b|wishlist\b|follow\b|series-follow\b|messages|party\b|lists\b|me$|me\/avatar|profiles$|markers\/|item\/[^/]+\/match|screentime\/|pair\/approve|reminders|new-episodes|onboard)/;
 function requireProfile(ctx) {
   if (!ctx.profile) throw new HttpError(403, 'Choose a profile first.');
   return ctx.profile;
@@ -628,6 +637,7 @@ route('POST', '/api/logout', (req, res) => {
 route('GET', '/api/boot', (req, res, p, q, ctx) => ({
   ...publicSettings(),
   profiles: accounts.profiles.map((x) => accounts.summary(x)),
+  guest: accounts.guestSummary(), // (the Guest button, when the admin allows guests)
   // Open straight into this device's profile when nothing has to be asked (no PIN, or it's remembered here).
   current: (accounts.resumable(ctx.sess) || {}).id || null,
   last: ctx.sess.profileId || null,
@@ -651,6 +661,8 @@ route('POST', '/api/profiles/:id/select', async (req, res, p, q, ctx) => {
 }, 'site');
 route('POST', '/api/profiles/leave', async (req, res, p, q, ctx) => {
   const b = await readJSON(req).catch(() => ({}));
+  // (A guest leaving: what it watched is forgotten.)
+  if (ctx.sess.profileId && isGuestId(ctx.sess.profileId)) accounts.endGuest(ctx.sess.profileId);
   if (b && b.lock) accounts.lock(ctx.sess); else { ctx.sess.profileId = null; accounts.store.save(); }
   return { ok: true };
 }, 'site');
@@ -1546,18 +1558,19 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   } catch {}
   if (it && p9Hooks.played) { try { p9Hooks.played(it, Number.isInteger(b.alt) ? b.alt : -1, b); } catch (e) { log(`Channel health: ${e.message}`); } }
   if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; }
-  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.id, type }) };
+  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type }) };
 });
 route('POST', '/api/stats/watch', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
-  stats.watch(String(b.id || ''), b.sec, prof.id);
+  stats.watch(String(b.id || ''), b.sec, prof.guest ? 'guest' : prof.id); // (guests: together, as "Guest")
   return { ok: true };
 });
 route('GET', '/api/admin/stats', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const names = {};
   for (const pr of accounts.d.profiles) names[pr.id] = pr.name;
+  names.guest = 'Guests';
   return stats.summary(clampInt(q.get('days'), 1, 120, 30), names);
 });
 route('DELETE', '/api/admin/stats', (req, res, p, q, ctx) => { requireAdmin(ctx); stats.reset(); concurrency.reset(); return { ok: true }; });
@@ -2065,7 +2078,9 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs', 'guestProfile', 'guestKids']) if (k in b) s[k] = !!b[k];
+  if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
+  if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
   if (['open', 'off'].includes(b.tmdbEpisodes)) s.tmdbEpisodes = b.tmdbEpisodes;
   if (typeof b.tmdbLang === 'string' && /^([a-z]{2}(-[A-Z]{2})?)?$/.test(b.tmdbLang)) s.tmdbLang = b.tmdbLang;
@@ -2313,12 +2328,17 @@ function startEnrich(auto = false, opts = {}) {
     let wrong = 0;
     for (const it of catalog.items) {
       if ((it.t !== 'movie' && it.t !== 'show') || !tmdb.doubtful(it)) continue;
-      // (A wrong number from the provider: not used again — the name is looked up instead.)
-      if (map[it.k].list) map[it.k] = { badList: map[it.k].id }; else delete map[it.k];
+      // (A wrong number from the provider: not used again — the name is looked up instead. rc: once — what that
+      // finds stays: see tmdb.doubtful.)
+      map[it.k] = map[it.k].list ? { badList: map[it.k].id, rc: 1 } : { rc: 1 };
       delete meta[it.k];
       wrong++;
     }
-    if (wrong) { tmdb.map.save(); tmdb.meta.save(); log(`TMDB: ${wrong} titles were matched to a film or series years apart from them — looking them up again`); scheduleRebuild(3000); return null; }
+    if (wrong) {
+      tmdb.map.save(); tmdb.meta.save();
+      log(`TMDB: ${wrong} titles were matched to a film or series years apart from them — looking them up again`);
+      if (tmdbRebuild(3000)) return null;
+    }
   }
   // (Smarter categories want each title's streaming services and keywords: details from before those were kept are fetched again.)
   const extras = tmdb.wantExtras();
@@ -2357,7 +2377,7 @@ function startEnrich(auto = false, opts = {}) {
     push();
     // Titles that are now known to be one TMDB entry ("Austin Powers 2: The Spy Who Shagged Me" and "Austin Powers:
     // The Spy Who Shagged Me"): they become one title, with every copy as a source, when the catalogue is built again.
-    if (job.status.found && sameTmdbPending()) { log('TMDB: titles found to be the same film or series — building the catalogue again to put them together'); scheduleRebuild(30e3); }
+    if (job.status.found && sameTmdbPending() && tmdbRebuild(30e3)) log('TMDB: titles found to be the same film or series — building the catalogue again to put them together');
     job.status.running = false; job.status.finished = Date.now(); job.status.current = '';
     lastEnrich = job.status;
     if (enrichJob === job) enrichJob = null;
@@ -2384,18 +2404,29 @@ async function backfillLangs() {
   langsFilled = true;
   try { const n = await tmdb.backfillLanguages(); if (n) { log(`TMDB: original languages of ${n.toLocaleString('en-US')} titles read from saved answers`); relang('saved TMDB answers'); } } catch (e) { log('TMDB languages:', e.message); }
 }
-/** Are there films or series that a build would now merge (two titles, one sure TMDB entry, same language)? */
+/**
+ * Are there films or series that a build would now put together (two titles, one sure TMDB entry, same language) —
+ * besides those the last build left apart (sameTmdbLeft: years apart, say)? catalog.pendingSameTmdb: the same rules.
+ */
+let sameTmdbLeft = new Set();
 function sameTmdbPending() {
-  const seen = new Set();
-  for (const it of catalog.items) {
-    if (it.t !== 'movie' && it.t !== 'show') continue;
-    const m = catalog.tmdbOf(it.k, it);
-    if (!m || !m.id) continue;
-    const k = `${it.t}|${m.id}|${(it.lg || [])[0] || ''}`;
-    if (seen.has(k)) return true;
-    seen.add(k);
+  try { return catalog.pendingSameTmdb().some((k) => !sameTmdbLeft.has(k)); } catch { return false; }
+}
+/**
+ * The catalogue built again for TMDB's sake (titles found to be one, or matches dropped): a few times in a few hours
+ * at most — never over and over (each build moves everyone's devices to a new catalogue). False when it's skipped.
+ */
+const tmdbBuilds = [];
+function tmdbRebuild(ms) {
+  const now = Date.now();
+  while (tmdbBuilds.length && now - tmdbBuilds[0] > 6 * 3600e3) tmdbBuilds.shift();
+  if (tmdbBuilds.length >= 4) {
+    if (!tmdbRebuild.said || now - tmdbRebuild.said > 3600e3) { tmdbRebuild.said = now; log('TMDB: not building the catalogue again yet (built for TMDB 4 times in 6 hours) — the changes go on at the next build'); }
+    return false;
   }
-  return false;
+  tmdbBuilds.push(now);
+  scheduleRebuild(ms);
+  return true;
 }
 
 // ---- smarter categories (lib/smartcats.js; Admin → Categories)
@@ -2919,6 +2950,9 @@ async function handle(req, res) {
     if (ctx.sess && ctx.sess.profileId) ctx.profile = accounts.profile(ctx.sess.profileId);
     // The profile's PIN was changed since this device entered it: choose the profile again (with the new PIN).
     if (ctx.profile && !accounts.pinCurrent(ctx.sess, ctx.profile)) ctx.profile = null;
+    // A guest watches, and what it does stays on its device's visit (in memory): nothing that would be kept or reach
+    // anyone else — recordings, wishlists, messages, watch parties, followed series, its own profile, the admin's pages.
+    if (ctx.profile && ctx.profile.guest && req.method !== 'GET' && req.method !== 'HEAD' && GUEST_DENY.test(pathname)) throw new HttpError(403, 'Guests can’t do that — choose your own profile for it.');
     // Keep the browser's cookie as fresh as the session: renewed once a day when the app is opened, so a device in
     // regular use never has to sign in again.
     if (ctx.sess && (pathname === '/' || pathname === '/api/boot') && Date.now() - (ctx.sess.cookieAt || ctx.sess.created) > 86400e3) {
