@@ -28,8 +28,9 @@ Most IPTV players are an app you install and set up again on every device. Media
 - **Nothing to install on any device.** Any modern browser works, including smart-TV browsers (2015 TVs onward) and phones. You can install it as an app from the browser if you like, and sign a TV in by scanning a code with your phone.
 - **Set it up once for everyone.** The admin adds the playlists (M3U links or files, Xtream Codes accounts, MAC portals, Jellyfin/Emby/Plex libraries, folders of your own videos) and the TV guides. Each person just picks their profile.
 - **Films and series that look like a streaming service.** Posters, plots, cast, seasons and episodes, Continue watching, My List, recommendations and "Because you watched…". The full Xtream Codes film and series catalogue is browsable, not just live channels.
-- **Several providers merged into one tidy catalogue.** Duplicates are combined, and the extra copies become automatic backups. Provider junk like `|EN| ★ Title (2023) [MULTI-SUB] 4K` is cleaned up to "Title (2023)", and a series spread across two providers gets every season from both.
-- **Video goes straight from the provider to the viewer whenever possible.** Your server doesn't carry the stream, so a small box can serve a whole house. When a browser can't play a stream as it is, the server (or the browser itself) converts it automatically.
+- **Several providers merged into one tidy catalogue.** Duplicates are combined, even when providers name them differently, and the extra copies become automatic backups. Provider junk like `|EN| ★ Title (2023) [MULTI-SUB] 4K` is cleaned up to "Title (2023)", and a series spread across two providers gets every season from both.
+- **Organised like a streaming service, not like a provider's list.** Optionally, the providers' own categories ("VOD - NEW ADDED", "|EN| ✪ COMEDY") give way to Netflix, Disney+, ABC, ESPN…, Comedy, Horror, Sports…, Christmas, Halloween…, with what's trending and popular worldwide.
+- **Video goes straight from the provider to the viewer whenever possible.** Your server doesn't carry the stream, so a small box can serve a whole house. When a browser can't play a stream as it is, the browser itself (or the server) converts it automatically. An optional relay on a VPS keeps your home's address hidden from providers. When a copy fails, the others are tried all at once and the first that works plays.
 - **It knows your provider's connection limit.** It shows who's using each connection, picks a copy on a provider with a free one, lets you take a connection over, and gives **priority profiles** first claim when there aren't enough to go round.
 - **Made for households.** Profiles with optional PINs and age limits, Kids profiles, parental locks, messages between profiles, watch parties that share one provider connection, multiview, and a phone that works as a remote for the TV.
 - **Works with the apps you already have.** Each profile can get an Xtream Codes login for TiviMate or IPTV Smarters, and Plex, Jellyfin and Emby can add it as a TV tuner, all using the same cleaned-up, merged catalogue.
@@ -43,6 +44,7 @@ Most IPTV players are an app you install and set up again on every device. Media
 | Add playlists once for the whole household | ✅ | ❌ (set up per device) | ✅ |
 | Xtream films and series as a browsable library | ✅ | ✅ | Jellyfin: via plugins · Plex: no M3U/Xtream support built in |
 | Several providers merged, duplicates removed, backups | ✅ | Separate playlists | Live channels only |
+| Categories by network, streaming service, genre and holiday, plus worldwide trending | ✅ optional | The provider's own groups | Genres and collections |
 | Video straight from provider to viewer | ✅ when possible | ✅ | ❌ (usually through the server) |
 | Knows provider connection limits, takeover, priority | ✅ | ❌ | ❌ |
 | Profiles, PINs, kids limits | ✅ | Varies | ✅ |
@@ -65,7 +67,7 @@ Most IPTV players are an app you install and set up again on every device. Media
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/series.jpg" alt="A series page with episode list and seasons"><br><b>Series</b> have seasons and episodes, with progress and "Also watched by".</td>
-<td width="50%"><img src="docs/screenshots/movies.jpg" alt="The Movies page with category, year, rating and length filters"><br><b>Browse and filter</b> by category, genre, decade, rating and length.</td>
+<td width="50%"><img src="docs/screenshots/movies.jpg" alt="The Movies page with category, year, rating and length filters"><br><b>Browse and filter</b> by category, genre, decade, rating and length, or by network, streaming service, holiday and what's trending worldwide.</td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/guide.jpg" alt="A colour-coded TV guide grid with channels and programmes"><br><b>TV guide:</b> a colour-coded grid with now and next, catch-up, reminders and guide search.</td>
@@ -146,6 +148,8 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 
 - **Plays almost anything:** HLS, MPEG-TS, MP4, MKV, DASH, ClearKey DRM, and AC-3/E-AC-3 sound, from M3U, Xtream Codes or your own folders. It chooses the most direct way to play each stream (see [How playback works](#how-playback-works)). The *Stream info* panel shows which route is in use.
 - **A player that gets out of the way.** The buttons and the pointer fade after a couple of seconds without a move (or at once with the *Hide the controls* button, or U); the settings open as one big panel — Playback, Picture, Sound, More side by side, each setting with a picture and what it's set to — that needs no scrolling, closes with the gear again, its close button, Back or a click outside. Tap the time left to see the time it ends instead.
+- **Copies that fail are swapped fast.** When the copy playing fails or is slow to start, every other copy is tested at once (one per provider account, never on a full one) and the quickest that works plays, instead of trying them one by one. Admin → Playback turns it off.
+- **A frozen picture is noticed.** When the sound carries on but the picture stops or goes black, the player switches to another way of playing it. Slow, dark scenes don't count; it waits until it has seen the picture change before judging, and on TVs whose frame counter can't be trusted it stops checking.
 - **Resume anywhere.** Progress syncs live between devices, and the next episode autoplays with a countdown (an *Autoplay* switch on the screen and in the player's menu turns it off).
 - **When something ends:** an episode shows the next one with its picture and story, plus *Previous episode*, *Random episode* and *All episodes*. A film shows the next film of its series first, then films like it.
 - **Play queue:** *Play next* or *Add to queue* on any film, series or episode; they play one after another with the same countdown. Reorder it in My stuff → Queue or from the player; it's the same on all your devices.
@@ -163,20 +167,20 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Audio sync** in either direction: when the sound is early it's held back; when it's late the *picture* is held back. Remembered per channel.
 - **Sound only** for live channels (radio-style, far less data), **Open in another app** (VLC, MX Player, Infuse, Outplayer and others, or a .m3u file), **Shuffle** for series, your own **skip lengths** (5–60 s), a bigger **buffer** for unreliable providers, opening on your **last channel**, and reminders that can **switch channel** by themselves.
 - **Subtitles found online** when a film or episode has none in your language (on demand or automatically): SubDL and Addic7ed for free, with OpenSubtitles as the backup.
-- **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay and the Remote Playback API.
+- **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay (picture and sound: streams the TV can't play as they are are handed over in a form it can) and the Remote Playback API.
 
 ### Finding something to watch
 
-- A home page with Continue watching, Top picks, "Because you watched…", New episodes, trending in the household, On TV now, genre rows and mood buttons ("Something funny", "Edge of my seat"…). Every row can be hidden, pinned or reordered.
+- A home page with Continue watching, Top picks, "Because you watched…", New episodes, trending in the household, trending worldwide, holiday picks in season, On TV now, genre rows and mood buttons ("Something funny", "Edge of my seat"…). Every row can be hidden, pinned or reordered.
 - **Recommendations** blend what the profile watches and rates, what's related (from TMDB) and what the household likes. **Surprise me** picks one title, and **Pick for several of us** finds something everyone should like and nobody has seen.
-- **Search** is instant and typo-tolerant, with voice search where the browser supports it. It also understands people ("tom hanks"), genres and decades ("90s comedy").
+- **Search** is instant and typo-tolerant, with voice search where the browser supports it. It also understands people ("tom hanks"), genres and decades ("90s comedy"), and with smarter categories on, holidays and services ("christmas", "halloween", "netflix").
 - **On later:** films and sport (by competition) coming up in the next two days, with one-tap reminders, plus an "On later today" row on the home page.
 - **Follow teams and competitions** ("Arsenal", "Chiefs", "Premier League", "Formula 1"), picked from what's actually in the guide, with short forms and typos understood ("Man Utd", "Arsnal"). Their games appear in an **Events** row on Home and at the top of On later: live ones first with *Watch*, then what's next, on the best channel you can watch (HD first). Your teams' games get **reminders by themselves**, which can also switch channel. Use *Follow* on any match, or Settings → Teams and competitions.
 - **Event and pay-per-view channels** (`PPV 03: UFC 310 (Sat 7 Dec 22:00 ET)`, `EVENT 12 - 2026-11-02 19:45 Arsenal v Chelsea`) get guide listings from their names, so their events show in the guide, search, On later, Events and reminders. Channels with nothing on say "No event right now" and can be hidden from Live TV.
 - **Filters** by category, genre, decade, rating and length. A film page also shows its whole collection ("2 of 4 here") with *Watch in order*.
 - **Smarter categories** (optional, Admin → Categories): instead of each provider's own categories, Live TV, the guide, Movies and Series are grouped by what things are: networks and streaming services (Netflix, Disney+, Hulu, Max, ABC, ESPN…), genres (Comedy, Horror, Sports, News, Kids…), sports (Soccer, Football, Hockey, Fighting, Motorsport…), holidays (Christmas, Halloween, Thanksgiving… — the ones in season first, and always searchable: "christmas" finds the Christmas films, series and channels), themes (Superheroes, Zombies, True stories…), studios (Marvel, Pixar, Studio Ghibli…), countries and events. A title can be in several. They come from channel names, the providers' categories and labels, what the guide says is on, and TMDB: streaming services in your country, keywords, networks and studios. Movies and Series also get **Trending today and this week, Popular right now, Top rated and Out now** from TMDB's worldwide charts (not what the household watches), a *Popular worldwide* sort, and Home gets *Trending worldwide* and *Holiday picks* rows. Every kind and every category can be turned off or renamed, you can add your own, and the providers' categories can be kept alongside.
 - **My List** shows what you played most recently first, then what you added or liked most recently (or A–Z).
-- An optional free [TMDB](https://www.themoviedb.org/) key adds posters, plots, cast, certificates and similar titles, and each episode's own title, plot, picture and air date (when a series is opened, or for many series at once in Admin → Recommendations, which also sets the language and whether new titles are looked up by themselves). Without one it uses what your provider sends.
+- An optional free [TMDB](https://www.themoviedb.org/) key adds posters, plots, cast, certificates and similar titles, which streaming services each title is on, its keywords, networks and studios, how popular it is worldwide, and each episode's own title, plot, picture and air date (when a series is opened, or for many series at once in Admin → Recommendations, which also sets the language and whether new titles are looked up by themselves). Without one it uses what your provider sends.
 - **Rows from lists:** add any public Trakt list (IMDb Top 250 copies, Oscar winners…), your own Trakt lists, Trakt's trending, popular and anticipated, or a TMDB list, collection or keyword as a home row. It shows only what your providers have ("12 of 250 here"), and *See the whole list* shows what's missing.
 - **Wishlist:** search for any film or series (with a TMDB key), even ones that aren't here, and get an alert when it arrives.
 
@@ -255,6 +259,7 @@ Web IPTV players often fail because the browser blocks video from another site u
 | **Direct video, playlist via server** | Only the playlists are blocked; the video still comes straight from the provider | A few KB |
 | **Another copy, direct** | This copy can't play directly but another provider's copy of the same title can | None |
 | **Converted in the browser** | MKV/TS files, or sound browsers can't play (AC-3, E-AC-3, FLAC), converted inside the page with [Mediabunny](https://mediabunny.dev) | None |
+| **Through your stream relay** | When you run one (Admin → Network & proxies): every direct stream, so providers never see your home's or viewers' addresses | None (the relay carries it) |
 | **Relayed by the server** | Streams that are blocked completely, need special headers, or are http on an https page | Bandwidth only |
 | **Converted on the server** | What's left: DTS sound, UDP/RTMP, or a quality you picked. ffmpeg repackages or transcodes it | CPU |
 
@@ -271,7 +276,7 @@ Before playing, the server asks the provider exactly what the browser would be t
 6. **Converted in the browser.** MKV and MPEG-TS films and episodes, and files with AC-3, E-AC-3 or FLAC sound, are read straight from the provider and remuxed in the page. The picture is copied (or re-encoded when the browser can't take it) and the sound becomes AAC or Opus. This needs WebCodecs (Chrome, Edge, Safari 16.4+, Firefox 130+) and a provider that lets web pages read its files. Turn it off for a profile with the `noBrowserConvert` preference.
 7. **Through the server (relay).** The last resort for streams that are blocked completely, need special headers, or are http on an https page. It still uses one provider connection per viewer, as direct would.
 8. **Convert on the server.** For DTS sound, live channels with AC-3 sound, UDP/RTMP, a quality you picked, or a provider that doesn't let web pages read its files.
-9. **Backup sources.** When the same channel or title is in several lists, any copy can take over.
+9. **Backup sources.** When the same channel or title is in several lists, any copy can take over. When the one playing fails or hasn't started after a few seconds, the server tests the others at the same time (through the relay when there is one, one per provider account, never on an account that's full) and the player goes straight to the quickest that works.
 
 **Which copy plays first.** For films and episodes the browser says what it can play by itself (MKV, HEVC, Dolby sound, in-browser conversion), and the server ranks each copy using the codecs the provider reports.
 
@@ -332,7 +337,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 
 ## Data
 
-Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json`, `error-reports.json` (with a readable copy, `error-reports.txt`), `screentime.json` (screen time rules, today's minutes and requests for more time), `homelists.json` (home rows from lists), `wishlist.json` (wishlists, followed series and alerts), `viewing/<profile>.json` (daily viewing totals), `follow.json` (teams and competitions each profile follows, and the event-channel setting), `health.json` (channel health counters and settings), `concurrency.json` (streams at once per provider: every minute for 48 hours, hourly for 120 days), `guidefinder.json`, `dvr.json` (recordings, series rules and DVR settings; the recordings themselves go in `recordings/` unless Admin → DVR names another folder) and `cache/` (including `cache/homelists/` and `cache/publicdb/`, the public guide and logo lists, refreshed weekly). Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
+Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg/`, `users/<profile>.json` (with saved recommendations in `users/<profile>.recs.json`), `markers.json`, `social.json`, `channels.json` (channel edits and locks), `mychannels.json` (24/7 channels), `outputs.json` (Xtream logins and tuner), `integrations.json`, `trakt.json`, `apikeys.json`, `webhooks.json`, `error-reports.json` (with a readable copy, `error-reports.txt`), `screentime.json` (screen time rules, today's minutes and requests for more time), `homelists.json` (home rows from lists), `wishlist.json` (wishlists, followed series and alerts), `viewing/<profile>.json` (daily viewing totals), `follow.json` (teams and competitions each profile follows, and the event-channel setting), `health.json` (channel health counters and settings), `concurrency.json` (streams at once per provider: every minute for 48 hours, hourly for 120 days), `guidefinder.json`, `dvr.json` (recordings, series rules and DVR settings; the recordings themselves go in `recordings/` unless Admin → DVR names another folder), `catalog.snapshot` (the finished catalogue, for quick restarts; rebuilt by itself, safe to delete), `tmdb-map.json`, `meta/` and `meta-eps/` (which TMDB entry each title is, and its details and episodes) and `cache/` (including `cache/homelists/` and `cache/publicdb/`, the public guide and logo lists, refreshed weekly). Secrets in these are stored hashed where they only need checking (passwords, API keys). Files are written atomically, with a `.bak` copy. Back up the folder, or use Admin → Other apps & backup.
 
 ## Limits
 
@@ -340,6 +345,8 @@ Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg
 - DRM: ClearKey works, and so does Widevine/PlayReady where the browser supports it and the playlist provides a licence URL. Nothing is decrypted on the server.
 - Casting to Chromecast falls back to the server's address when the Chromecast can't play the provider's, so the server must be reachable from the Chromecast.
 - Intro detection needs at least two episodes of a season.
+- The PlayStation browser has no Web Audio, so Volume boost, clear dialogue, night mode and holding the sound back aren't offered there, and so far it hasn't played the server's converted streams; streams it can play as they are work.
+- Smarter categories work from what each provider and TMDB say: a title with no TMDB details yet is grouped by its genres and its provider's category until the details come in.
 - A recording holds one of the provider's connections for as long as it runs, like a viewer. When none is free at the start time it waits, and gives up if none comes free before the programme ends.
 
 ---
@@ -360,6 +367,12 @@ Current Chrome, Edge, Firefox and Safari on computers and phones, and smart-TV b
 
 **Can I use it with VLC, Kodi or TiviMate too?**
 Yes. Turn on the Xtream Codes login in Admin → Other apps and sign TiviMate or IPTV Smarters in with a profile's login, or add it to Plex, Jellyfin or Emby as an HDHomeRun tuner. There are also plain M3U and XMLTV links for VLC and Kodi. See [using this with other apps](docs/sources-and-other-apps.md).
+
+**Why do I see the same film twice?**
+Usually because providers name it differently and nothing says they're one film yet. Copies become one title when TMDB matches them to the same entry and the match is sure (the names clearly agree, or the year agrees with the provider's own TMDB number); a provider's number that points at a film from years earlier or later is ignored. New matches are put together the next time the catalogue is built, which happens by itself after the TMDB lookup. If two titles still show, "Wrong poster or details?" on the wrong one fixes it for everyone.
+
+**Can it group things by Netflix, Disney+, Hulu and so on?**
+Yes: turn on **Smarter categories** in Admin → Categories. Live TV, the guide, Movies and Series are then grouped by network and streaming service, genre, sport, holiday, theme and studio, with Trending, Popular and Top rated from TMDB. Each kind and each category can be turned off or renamed, and you can add your own.
 
 **Can it record?**
 Yes. Record a programme from the guide or a channel's schedule, *Record this* in the player, or *Every episode* for a series. The server saves the stream as it comes (no converting), so it needs ffmpeg and disk space, not CPU. Each running recording uses one of the provider's connections. Admin → DVR sets who may record (everyone, priority profiles only, or nobody), where recordings go and how long they're kept.
