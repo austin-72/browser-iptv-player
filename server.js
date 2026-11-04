@@ -361,7 +361,11 @@ async function checkNewEpisodes() {
 }
 
 /** What ffmpeg should open for an item: a local file or the stream address with its headers. */
-function inputOf(it, alt = -1, overrideUrl = '') {
+/**
+ * Where this server reads a copy of a title from. raw: the provider's own address, never the stream relay's (to tell
+ * which provider it is, or how a browser would reach it).
+ */
+function inputOf(it, alt = -1, overrideUrl = '', { raw = false } = {}) {
   if (it.loc) {
     const li = lists.libraryItem(it.loc.list, it.loc.id);
     return li ? { input: li.path, headers: {}, local: li } : null;
@@ -377,11 +381,30 @@ function inputOf(it, alt = -1, overrideUrl = '') {
     if (!file || !LOCAL_MEDIA.test(file) || !fs.existsSync(file)) return null;
     return { input: file, headers: {}, local: { path: file } };
   }
+  // A list that uses the stream relay: this server's own reading of its streams — conversions, downloads, recordings,
+  // other apps, a look inside — goes through the relay too, so the provider only ever sees the relay (and its proxy).
+  // The relay sends the headers the provider needs. (The same address each time for a while: what was found out
+  // about a stream is kept by its address.)
+  if (!raw && /^https?:\/\//i.test(u || '') && relayOf.uses(lists.ownerOf(u) || (alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src))) {
+    const h = { ...(settings().userAgent ? { 'User-Agent': settings().userAgent } : {}), ...(a.h || {}) };
+    return { input: relayWrapped(u, h), headers: {}, viaRelay: true, raw: u };
+  }
   // Behind a proxy: ffmpeg reads it through the server's own relay, which goes through the proxy.
   if (isUrl(u) && listProxy(lists.ownerOf(u) || (alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src))) {
     return { input: loopback(proxy.sign(u, { h: a.h || {} })), headers: {}, viaProxy: true };
   }
   return { input: u, headers: a.h || {} };
+}
+/** The stream relay's address for one provider address, for this server's own use (kept for a day; good for a week). */
+const relayMemo = new Map();
+function relayWrapped(u, h) {
+  const key = u + '\n' + JSON.stringify(h) + '\n' + ((settings().relay || {}).url || '');
+  const m = relayMemo.get(key);
+  if (m && Date.now() - m.at < 86400e3) return m.url;
+  const url = relayOf.wrap(u, h, { ttl: 7 * 86400 });
+  if (relayMemo.size > 20000) relayMemo.clear();
+  relayMemo.set(key, { url, at: Date.now() });
+  return url;
 }
 /** An address for the server's own relay that ffmpeg (on this machine) can open without signing in. */
 function loopback(pathq) { return `${tls ? 'https' : 'http'}://127.0.0.1:${cfg.port}${castSign(pathq, 48)}`; }
@@ -1072,7 +1095,7 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
   const it = item(ctx, String(b.k || ''));
   if (b.url && !relayable(it, b.url)) throw new HttpError(403, 'That address doesn’t belong to this channel');
-  const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, b.url || '');
+  const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, b.url || '', { raw: true });
   if (!src || src.local || !isUrl(src.input)) throw new HttpError(400, 'Not a web address');
   const origin = typeof b.origin === 'string' && /^https?:\/\/[^/]+$/.test(b.origin) ? b.origin : `${req.secure ? 'https' : 'http'}://${req.headers.host}`;
   if (b.forget) { reach.forget(src.input, origin); return { ok: true }; }
@@ -1290,7 +1313,7 @@ function mkvCodecs(buf) {
  * can play it straight from the relay instead of having it converted on this server. Remembered per address.
  */
 async function sniffCodecs(it, alt = -1) {
-  const src = inputOf(it, alt);
+  const src = inputOf(it, alt, '', { raw: true });
   if (!src || src.local || !isUrl(src.input) || !/\.(mkv|webm)(?:[?#]|$)/i.test(src.input)) return null;
   const key = 'sniff:' + src.input;
   if (codecMemo.has(key)) return codecMemo.get(key);
@@ -1435,7 +1458,7 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   try {
     it = item(ctx, String(b.k || ''));
     type = it.t;
-    const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1);
+    const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, '', { raw: true });
     if (src && !src.local && isUrl(src.input)) provider = new URL(src.input).host;
   } catch {}
   if (it && p9Hooks.played) { try { p9Hooks.played(it, Number.isInteger(b.alt) ? b.alt : -1, b); } catch (e) { log(`Channel health: ${e.message}`); } }
@@ -1516,13 +1539,18 @@ route('GET', '/api/dash', async (req, res, p, q, ctx) => {
   const it = item(ctx, String(q.get('k') || ''));
   const url = String(q.get('u') || '');
   if (!isUrl(url) || !relayable(it, url)) throw new HttpError(403, 'That address doesn’t belong to this channel');
-  const src = inputOf(it, clampInt(q.get('alt'), -1, 99, -1));
+  const alt = clampInt(q.get('alt'), -1, 99, -1);
+  const src = inputOf(it, alt, '', { raw: true });
   const headers = proxy.headers({ h: (src && src.headers) || {} });
-  if (req.headers.range) headers.Range = req.headers.range;
+  // (A list that uses the stream relay: from there, which sends the headers.)
+  const viaRelay = relayOf.uses(lists.ownerOf(url) || srcList(it, alt));
+  const upUrl = viaRelay ? relayWrapped(url, headers) : url;
+  const sendH = viaRelay ? {} : headers;
+  if (req.headers.range) sendH.Range = req.headers.range;
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   let up;
-  try { up = await fetchAny(url, { headers, signal: ac.signal, redirect: 'follow' }); } catch (e) { if (ac.signal.aborted) return; throw new HttpError(502, `Upstream error: ${(e.cause && e.cause.message) || e.message}`); }
+  try { up = await fetchAny(upUrl, { headers: sendH, signal: ac.signal, redirect: 'follow' }); } catch (e) { if (ac.signal.aborted) return; throw new HttpError(502, `Upstream error: ${(e.cause && e.cause.message) || e.message}`); }
   const out = { 'Cache-Control': 'no-cache' };
   const enc = !!up.headers.get('content-encoding');
   for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) { if (enc && k === 'content-length') continue; const v = up.headers.get(k); if (v) out[k] = v; }
@@ -2099,7 +2127,9 @@ route('PUT', '/api/admin/lists/:id', async (req, res, p, q, ctx) => { requireAdm
 route('PUT', '/api/admin/lists/:id/file', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.replaceFile(p.id, await readBody(req, 400 * 1024 * 1024)); });
 route('DELETE', '/api/admin/lists/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.remove(p.id); return { ok: true }; });
 // Connection test: how many streams of each kind the list plays at once (Admin → Lists).
-const connTest = new ConnTest({ lists, catalog, headers: (h) => proxy.headers({ h }), usage: (id) => listUsage().get(id) || [], log });
+/** A provider address (and the headers it needs) as this server should fetch it: through the stream relay when the list uses it. */
+const viaRelay = (url, headers, listId) => (/^https?:\/\//i.test(url || '') && relayOf.uses(lists.ownerOf(url) || listId) ? { url: relayWrapped(url, headers || {}), headers: {} } : null);
+const connTest = new ConnTest({ lists, catalog, headers: (h) => proxy.headers({ h }), usage: (id) => listUsage().get(id) || [], log, via: viaRelay });
 route('POST', '/api/admin/lists/:id/conntest', async (req, res, p, q, ctx) => { requireAdmin(ctx); const b = await readJSON(req).catch(() => ({})); return connTest.start(p.id, { kinds: Array.isArray(b.kinds) ? b.kinds : null }); });
 route('GET', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.get(p.id); return { job: connTest.status(p.id), saved: lists.get(p.id).connTest || null }; });
 route('DELETE', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); return connTest.stop(p.id); });
@@ -2553,7 +2583,7 @@ require('./lib/routes-p7')({ route, requireProfile, readJSON, HttpError, userdat
 // [routes:p9] Channel health (dead channels, uptime, background checks) and finding guides and logos in public databases.
 require('./lib/routes-p9')({
   route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, lists, hub, epg, overrides, nowCache, listUsage, log,
-  fetch: fetchAny, headers: (h) => proxy.headers({ h }), connTest, media, p4, hooks: p9Hooks,
+  fetch: fetchAny, headers: (h) => proxy.headers({ h }), via: viaRelay, connTest, media, p4, hooks: p9Hooks,
 });
 // [routes:p8] Following teams and competitions (Events, automatic reminders); event / PPV channels' listings from their names.
 const p8 = require('./lib/routes-p8')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, epg, lists, userdata, accounts, hub, overrides, chanShift, nowCache });
@@ -2565,7 +2595,8 @@ require('./lib/routes-p6')({ route, item, inputOf, connLimit, media, lists });
 function exportM3U(req, res, key) {
   const b = `${req.headers['x-forwarded-proto'] && cfg.trustProxy ? req.headers['x-forwarded-proto'] : secureReq(req) ? 'https' : 'http'}://${req.headers.host}/k/${key}`;
   const items = catalog.items.filter((it) => it.u && it.t !== 'show' && !it.adult && p4.exportable(it)).map((it) => ({
-    name: it.n, url: it.loc ? `${b}/file/${it.loc.list}/${it.loc.id}` : it.u, tvgId: it.epg ? it.k : '', tvgName: it.n, logo: it.logo && it.logo.startsWith('/api/channel-logo/') ? `${b}/logo/${it.logo.slice(18)}` : it.logo, group: it.g, chno: it.num || '', headers: it.h || {}, type: it.t === 'episode' ? 'series' : it.t,
+    // (A list that uses the stream relay: other apps go through it too.)
+    name: it.n, url: it.loc ? `${b}/file/${it.loc.list}/${it.loc.id}` : ((viaRelay(it.u, { ...(settings().userAgent ? { 'User-Agent': settings().userAgent } : {}), ...(it.h || {}) }, it.src) || {}).url || it.u), tvgId: it.epg ? it.k : '', tvgName: it.n, logo: it.logo && it.logo.startsWith('/api/channel-logo/') ? `${b}/logo/${it.logo.slice(18)}` : it.logo, group: it.g, chno: it.num || '', headers: it.h || {}, type: it.t === 'episode' ? 'series' : it.t,
   }));
   sendText(res, 200, P.generate(items, `${b}/epg.xml`), 'audio/x-mpegurl; charset=utf-8', { 'Content-Disposition': 'inline; filename="playlist.m3u"' });
 }

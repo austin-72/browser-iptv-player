@@ -434,7 +434,10 @@ PP._planNow = function (it, force) {
         if (!plan.length) throw new Error(info.blocked === 'headers' ? 'This channel needs special headers that browsers can’t send. Ask the admin to allow playback through the server.' : info.blocked === 'mixed' ? 'This page is https but the stream is plain http, which browsers block. Ask the admin to allow playback through the server.' : 'The provider doesn’t let browsers play this directly. Ask the admin to allow playback through the server.');
         return plan;
       }
-      plan.push({ via: 'relay', kind: info.kind === 'dash' ? 'dash' : '?', url: url });
+      // Through the stream relay: this server doesn't pass the stream along as well (when the relay can't get it,
+      // neither could the server — its own reading goes through the relay too). What the browser can't play as it is
+      // is converted: in this browser first (above), else on the server.
+      if (!info.relay || info.blocked) plan.push({ via: 'relay', kind: info.kind === 'dash' ? 'dash' : '?', url: url });
       return info.kind === 'dash' && it.dr ? plan : plan.concat(sessions);
     }
   });
@@ -1333,6 +1336,7 @@ PP._teardownMedia = function () {
   var v = this.video;
   try { v.pause(); } catch (e) {}
   V.$$('track', v).forEach(function (t) { t.remove(); });
+  try { if (v.srcObject) v.srcObject = null; } catch (e) {} // (a stream fed in another way: it would win over src)
   v.removeAttribute('src');
   try { v.load(); } catch (e) {}
   // (hls.js and mpegts.js turn AirPlay off on the element while they feed it on an iPhone or iPad; the next way of
@@ -1672,6 +1676,12 @@ PP.fileAudio = function (i) {
   }
   // Converting in this browser: start again on that track, at the same spot.
   if (this.mb) return this.load(this.it, { startAt: this.position, only: a, quiet: true, alt: this.alt });
+  // A film or episode this browser can convert itself (through the stream relay, which lets the page read it): that
+  // track here, the server's conversion only if that doesn't work.
+  var ri = this.reachInfo, src = (ri && ri.url) || (a && a.via === 'direct' && a.url);
+  if (this.vod && src && /^https?:/i.test(src) && V.mbSupported() && (!ri || ri.relay || ri.mse) && !this._quality()) {
+    return this.load(this.it, { startAt: this.position, plan: [{ via: 'browser', kind: 'mb', url: src }].concat(S.settings.ffmpeg ? [{ via: 'session', mode: 'remux' }] : []), quiet: true, alt: this.alt });
+  }
   this.load(this.it, { force: 'remux', startAt: this.position, quiet: true, alt: this.alt });
 };
 

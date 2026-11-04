@@ -85,9 +85,14 @@ All the video then goes through the proxy too (films fetched whole as well), so 
 
 ## Your server's own traffic through the same machine (optional)
 
-Some things still go from this server to the provider:
+Every stream of a list that uses the relay goes through it — also what this server reads itself: conversions,
+downloads, recordings, other apps (the Xtream login, the HDHomeRun tuner, the M3U link), channel checks and connection
+tests. Streams a browser can't play as they are (MKV films with AC-3 sound, for example) are converted in the browser
+when it can (Chrome, Edge, Firefox, Safari), reading from the relay; otherwise this server converts them, reading from
+the relay too.
+
+Some things still go from this server to the provider directly:
 - list refreshes, account checks and TV guides
-- streams a browser can't play as they are (MKV films with AC-3 sound, for example), which this server converts
 - TMDB, subtitles and the other services
 
 To hide your home address from those too, let the relay be this server's proxy:
@@ -101,9 +106,9 @@ To hide your home address from those too, let the relay be this server's proxy:
 | --- | --- | --- |
 | Streams a browser can play as they are (most live channels) | Device ↔ provider | Device ↔ relay ↔ provider |
 | Films and episodes the browser can play as they are | Device ↔ provider | Device ↔ relay (from its disk) ↔ provider, the whole file at once |
-| Streams that need converting (some MKV/AC-3 films, MPEG-2) | Device ↔ this server ↔ provider (through this server's proxy, if set) | the same |
+| Streams that need converting (some MKV/AC-3 films, MPEG-2) | Converted in the browser: device ↔ provider; else device ↔ this server ↔ provider | In the browser: device ↔ relay ↔ provider; else device ↔ this server ↔ relay ↔ provider |
 | "Open in another app" (VLC, Infuse…) | Device ↔ provider | Device ↔ relay ↔ provider |
-| Downloads | Device ↔ provider, or through this server | Through this server (and its proxy) |
+| Downloads, recordings, other apps, channel checks | This server ↔ provider (through its proxy, if set) | This server ↔ relay ↔ provider |
 | Lists, guides, account checks, TMDB, subtitles | This server ↔ provider (through its proxy, if set) | the same |
 | Posters and channel logos | Device ↔ provider / TMDB | the same |
 

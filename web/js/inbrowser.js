@@ -11,7 +11,8 @@
   /** Can this browser convert files itself? */
   V.mbSupported = function () {
     try {
-      return !!(window.MediaSource && window.AudioDecoder && window.VideoDecoder && window.WritableStream && window.fetch &&
+      // (An iPhone has only Apple's ManagedMediaSource: that works the same way here.)
+      return !!((window.MediaSource || window.ManagedMediaSource) && window.AudioDecoder && window.VideoDecoder && window.WritableStream && window.fetch &&
         'noModule' in document.createElement('script') && !V.pref('noBrowserConvert'));
     } catch (e) { return false; }
   };
@@ -33,7 +34,8 @@
   }
   V.mbLoad = load;
 
-  var mse = function (t) { try { return MediaSource.isTypeSupported(t); } catch (e) { return false; } };
+  var MSE = function () { return window.MediaSource || window.ManagedMediaSource; };
+  var mse = function (t) { try { return MSE().isTypeSupported(t); } catch (e) { return false; } };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
 
   /**
@@ -86,9 +88,16 @@
             else throw new Error('This file’s sound (' + at.codec + ') can’t be decoded in a browser.');
           }
           var v = video;
-          ms = new MediaSource();
-          objUrl = URL.createObjectURL(ms);
-          v.src = objUrl;
+          var MS = MSE();
+          ms = new MS();
+          if (window.ManagedMediaSource && MS === window.ManagedMediaSource) {
+            // (Apple's kind needs AirPlay off for the element while the page feeds it — see the player's airplay().)
+            try { v.disableRemotePlayback = true; } catch (e) {}
+            try { v.srcObject = ms; } catch (e) { objUrl = URL.createObjectURL(ms); v.src = objUrl; }
+          } else {
+            objUrl = URL.createObjectURL(ms);
+            v.src = objUrl;
+          }
           return new Promise(function (res) { ms.addEventListener('sourceopen', res, { once: true }); }).then(function () {
             var firstData = null;
             var gotFirst = new Promise(function (res) { firstData = res; });
