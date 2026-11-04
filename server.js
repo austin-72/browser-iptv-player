@@ -80,7 +80,7 @@ const DEFAULT_SETTINGS = {
   transcodePreset: 'veryfast', transcodeCrf: 22, transcodeMaxHeight: 1080, maxTranscodes: 3, maxSessions: 10, remuxReadrate: 0, hwaccel: '',
   tmdbKey: '', introDetection: true,
   adminOnlyProfiles: false, allowDownloads: true, allowParties: true,
-  guestProfile: false, guestKids: false, guestMaxCert: '', // (a Guest on "Who's watching?": lib/accounts.js startGuest)
+  guestProfile: false, guestKids: false, guestMaxCert: '', guestAdult: false, // (a Guest on "Who's watching?": lib/accounts.js startGuest)
   exportKey: crypto.randomBytes(12).toString('hex'),
   allowedHosts: [],
   // Outgoing proxies (Admin → Network): [{ id, name, url, video }]; `proxy` is the default for everything.
@@ -219,7 +219,7 @@ const tmdb = new Tmdb({
 const tmdbLoadS = (Date.now() - tmdbT0) / 1000; // (shown in the start-up line: the saved TMDB details are read here)
 const recs = new Recs({ dir: path.join(D, 'users'), catalog, userdata, accounts, tmdb });
 // Guests (Admin → Profiles): nothing they watch, like or list is kept, and nothing of theirs reaches anyone else.
-accounts.guestCfg = () => { const s = settings(); return { on: !!s.guestProfile, kids: !!s.guestKids, maxCert: s.guestMaxCert }; };
+accounts.guestCfg = () => { const s = settings(); return { on: !!s.guestProfile, kids: !!s.guestKids, maxCert: s.guestMaxCert, adult: !!s.guestAdult }; };
 accounts.onGuestEnd = (id) => { userdata.remove(id); recs.forget(id); };
 setInterval(() => accounts.dropIdleGuests(), 3600e3).unref();
 
@@ -1867,10 +1867,17 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   return { ok: true };
 });
 route('GET', '/api/devices', (req, res, p, q, ctx) => {
-  requireProfile(ctx);
+  const prof = requireProfile(ctx);
   // Someone else's private viewing shows as just "playing", without what it is.
   const shown = (c) => (c.playing && c.playing.hidden && c.pid !== ctx.profile.id ? { k: '', n: 'something', hidden: true, at: c.playing.at, pos: 0, alt: -1 } : c.playing);
-  return [...hub.conns].filter((c) => canControl(ctx, c)).map((c) => ({ conn: c.id, name: c.deviceName, deviceId: c.deviceId, playing: shown(c), at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || '') }));
+  // Screens it may control (ok), and — not for a guest — other profiles' screens it can ask to (ok: false): those
+  // without what's on them, until the person there says yes.
+  const now = Date.now();
+  return [...hub.conns].filter((c) => c.pid && (canControl(ctx, c) || (!prof.guest && c.sess !== ctx.sess.id))).map((c) => {
+    const ok = canControl(ctx, c);
+    const asked = !ok && [...remoteAsks.values()].some((a) => a.from === ctx.sess.id && a.to === c.id && !a.no && now - a.at < 60e3);
+    return { conn: c.id, name: c.deviceName, deviceId: ok ? c.deviceId : '', playing: ok ? shown(c) : null, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || ''), ok, asked };
+  });
 });
 const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'prev', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover', 'key', 'nav'];
 const REMOTE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'GoBack', 'ContextMenu'];
@@ -1990,20 +1997,72 @@ function handoffLanding(req, res, token) {
   res.end();
 }
 
-// ---- remote control: a phone (same profile, or the one that signed the TV in) drives a TV
+// ---- remote control: a phone drives a TV
 /**
- * May this phone (its profile) control that screen? Its own profile's screens; screens it signed in with a code; the
- * admin any screen in the household; and anyone but a Kids profile a Kids profile's screens (a parent working the
- * kids' TV — it used to need the phone switched to the Kids profile first).
+ * May this phone (its profile, its session) control that screen? Its own profile's screens, always. Anyone else's —
+ * the admin's phone, a parent's on the kids' TV, the phone that signed a TV in — only once the person at that screen
+ * said yes to it (remoteAllowed: asked with /api/devices/:conn/ask). Until then the phone doesn't see what's on it.
  */
 function mayControl(prof, sessId, c) {
   if (!c || !prof) return false;
-  if (c.pid === prof.id || prof.admin) return true;
-  const target = c.pid ? accounts.profile(c.pid) : null;
-  if (target && target.kids && !prof.kids) return true;
-  const s = accounts.sessionById(c.sess);
-  return !!(s && s.pairedBy && s.pairedBy === sessId);
+  if (c.pid === prof.id) return true;
+  return remoteAllowed(sessId, c);
 }
+// Phones a screen let in: "<screen's session>|<phone's session>" → { pid: the screen's profile then, until }.
+// (For as long as the screen stays on that profile, 12 hours at most; and the screen can stop it.)
+const remoteOk = new Map();
+const remoteAsks = new Map(); // id → { from: phone's session, fromConn, name, device, to: screen's conn, at, no }
+const REMOTE_OK_MS = 12 * 3600e3;
+function remoteAllowed(sessId, c) {
+  if (!sessId || !c || !c.pid) return false;
+  const k = c.sess + '|' + sessId, a = remoteOk.get(k);
+  if (!a) return false;
+  if (a.pid !== c.pid || a.until < Date.now()) { remoteOk.delete(k); return false; }
+  return true;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, a] of remoteOk) if (a.until < now) remoteOk.delete(k);
+  for (const [id, a] of remoteAsks) if (now - a.at > 10 * 60e3) remoteAsks.delete(id);
+}, 10 * 60e3).unref();
+/** A phone asks to use another profile's screen as its remote: the screen is asked (allow / don't allow). */
+route('POST', '/api/devices/:conn/ask', (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  if (prof.guest) throw new HttpError(403, 'Guests can’t use other screens as a remote.');
+  const c = hub.conn(p.conn);
+  if (!c || !c.pid || c.sess === ctx.sess.id) throw new HttpError(404, 'That device isn’t connected any more.');
+  if (canControl(ctx, c)) return { ok: true };
+  const now = Date.now();
+  const mine = [...remoteAsks.values()].filter((a) => a.from === ctx.sess.id && a.to === c.id);
+  if (mine.some((a) => a.no && now - a.no < 60e3)) throw new HttpError(429, 'They said no. Ask again in a minute.');
+  const waiting = mine.find((a) => !a.no && now - a.at < 60e3);
+  if (waiting) return { asked: true };
+  if ([...remoteAsks.values()].filter((a) => a.from === ctx.sess.id && now - a.at < 60e3).length >= 5) throw new HttpError(429, 'Wait a minute before asking again.');
+  const id = crypto.randomBytes(9).toString('base64url');
+  remoteAsks.set(id, { from: ctx.sess.id, fromConn: ctx.conn, name: prof.name, device: ctx.sess.name || '', to: c.id, at: now });
+  hub.send(c, 'remote-ask', { id, from: prof.name, device: ctx.sess.name || '' });
+  return { asked: true };
+});
+/** The screen's answer (only that screen can give it). */
+route('POST', '/api/remote-ask/:id', async (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const a = remoteAsks.get(p.id);
+  const c = a && hub.conn(a.to);
+  if (!a || !c || c.sess !== ctx.sess.id) throw new HttpError(404, 'That request has gone.');
+  const b = await readObj(req);
+  const ok = b.allow === true;
+  if (ok) { remoteOk.set(c.sess + '|' + a.from, { pid: c.pid, until: Date.now() + REMOTE_OK_MS }); remoteAsks.delete(p.id); } else a.no = Date.now();
+  const back = a.fromConn && hub.conn(a.fromConn);
+  if (back && back.sess === a.from) hub.send(back, 'remote-answer', { conn: c.id, name: c.deviceName || '', ok });
+  return { ok: true };
+});
+/** The screen stops every phone it let in. */
+route('POST', '/api/remote-ok/stop', (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  let n = 0;
+  for (const k of [...remoteOk.keys()]) if (k.startsWith(ctx.sess.id + '|')) { remoteOk.delete(k); n++; }
+  return { stopped: n };
+});
 function canControl(ctx, c) { return mayControl(ctx.profile, ctx.sess && ctx.sess.id, c); }
 route('POST', '/api/devices/state', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
@@ -2078,7 +2137,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs', 'guestProfile', 'guestKids']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.

@@ -14,7 +14,7 @@
   var refresh = function () {
     if (!S.profile || isTV() || document.hidden) return;
     V.api('/api/devices').then(function (devs) {
-      screens = (devs || []).filter(function (d) { return d.conn !== S.conn; });
+      screens = (devs || []).filter(function (d) { return d.conn !== S.conn && d.ok !== false; }); // (someone else's screen: only once they've allowed it)
       drawButton();
       nudge();
     }).catch(function () {});

@@ -24,3 +24,8 @@
 .avatar.guest-av .i { width: 58%; height: 58%; }
 body.guest .msg-btn { display: none !important; }
 .guest-note { margin: 0 0 1rem; }
+
+/* Remote: another profile's screen, asked before it's used (web/js/remote.js). */
+.remote-dev.rm-ask { width: 100%; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+.remote-dev.rm-ask:disabled { cursor: default; opacity: .75; }
+.remote-dev > span > .chip { align-self: flex-start; margin: .2rem 0; }

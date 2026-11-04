@@ -82,6 +82,15 @@ test('a guest: offered when allowed, watches without anything kept or shared', {
     d = (await guest('GET', '/api/me')).body.data;
     assert.deepStrictEqual([d.history.length, d.list.length], [0, 0]);
 
+    // Adult (18+) groups: off unless allowed, and never with kids' titles only.
+    const r = () => (guest('GET', '/api/me').then((x) => x.body.profile.restrictions));
+    assert.strictEqual((await r()).adult, false);
+    await admin('PUT', '/api/admin/settings', { guestAdult: true });
+    assert.strictEqual((await r()).adult, true);
+    await admin('PUT', '/api/admin/settings', { guestKids: true });
+    assert.strictEqual((await r()).adult, false, 'kids only wins');
+    await admin('PUT', '/api/admin/settings', { guestKids: false, guestAdult: false });
+
     // Turned off: guests are out.
     assert.strictEqual((await admin('PUT', '/api/admin/settings', { guestProfile: false })).status, 200);
     assert.strictEqual((await guest('GET', '/api/me')).status, 403);

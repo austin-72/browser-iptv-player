@@ -38,6 +38,8 @@ V.rt = (function () {
     on('lists', function () { V.emit('shared-lists'); });
     on('notify', function (d) { V.notify(d); });
     on('devstate', function (d) { V.emit('devstate', d); });
+    on('remote-ask', function (d) { V.emit('remote-ask', d); }); // (remote.js: someone asks to use this screen as a remote)
+    on('remote-answer', function (d) { V.emit('remote-answer', d); });
     on('app-updated', function () { V.appUpdated(); });
     on('screentime', function (d) { V.emit('screentime', d); });
     on('dvr', function (d) { V.emit('dvr', d); });

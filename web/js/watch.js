@@ -505,7 +505,7 @@ V.cast = function (btn) {
   if (v.webkitShowPlaybackTargetPicker) items.push({ label: 'AirPlay', icon: 'cast', fn: function () { p.airplay(); } });
   else if (v.remote && v.remote.prompt) items.push({ label: 'Cast this video', icon: 'cast', fn: function () { v.remote.prompt().catch(function (e) { V.toast(e.message || 'No devices found', { error: true }); }); } });
   V.api('/api/devices').then(function (devs) {
-    var others = devs.filter(function (d) { return d.conn !== S.conn; });
+    var others = devs.filter(function (d) { return d.conn !== S.conn && d.ok !== false; });
     if (others.length) { items.push({ sep: true }); items.push({ header: 'Play on another device' }); }
     others.forEach(function (d) { items.push({ label: d.name, icon: 'devices', hint: d.playing ? 'Playing ' + d.playing.n : 'Idle', fn: function () { V.api('/api/devices/' + d.conn + '/command', { body: { cmd: 'play', k: it.t === 'catchup' ? it.catchupOf : it.k, pos: p.vod ? p.position : 0 } }).then(function () { p.video.pause(); V.toast('Playing on ' + d.name); }).catch(V.fail); } }); });
     if (!items.length) items.push({ label: window.isSecureContext ? 'No cast devices found' : 'Casting needs a secure (https) address', fn: function () {} });

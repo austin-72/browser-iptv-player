@@ -56,17 +56,54 @@ function remoteList(view) {
       var box = V.$('.remote-devs', view);
       if (!box) return;
       box.innerHTML = others.length ? others.map(function (d) {
+        // Someone else's screen: asked first (what's on it isn't shown until they allow it).
+        if (d.ok === false) return '<button class="remote-dev rm-ask" data-ask="' + V.esc(d.conn) + '"' + (d.asked ? ' disabled' : '') + '>' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.asked ? 'Asked — waiting for an answer on that screen' : 'Ask to use it as a remote') + '</small></span>' + V.icon('lock') + '</button>';
         return '<a class="remote-dev" href="#/remote/' + encodeURIComponent(d.conn) + '">' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.playing ? 'Playing ' + V.esc(d.playing.n || '') : 'Nothing playing') + '</small></span>' + V.icon('next') + '</a>';
       }).join('') : V.empty('No other screens open', '', '<ol class="rm-steps"><li>Open the app on your TV or computer.</li><li>Pick <b>' + V.esc(S.profile.name) + '</b> there — it shows up here in a few seconds.</li></ol><p class="dim small">TV not signed in yet? Choose “Sign in with your phone” on it, then <b>Sign in a TV</b> below.</p>');
     }).catch(V.fail);
   };
   draw();
   var t = setInterval(draw, 5000);
-  V.pageCleanup = function () { clearInterval(t); };
+  var off = V.on('remote-answer', function (d) { if (d.ok) V.router.go('#/remote/' + encodeURIComponent(d.conn)); else draw(); });
+  V.pageCleanup = function () { clearInterval(t); off(); };
   V.$('[data-pair]', view).onclick = function () { V.pairDialog(); };
+  V.$('.remote-devs', view).addEventListener('click', function (e) {
+    var b = e.target.closest('[data-ask]');
+    if (b) { b.disabled = true; V.remoteAsk(b.dataset.ask).then(draw, function () { b.disabled = false; }); }
+  });
 }
 
+/** Ask the person at another profile's screen to let this phone be its remote. */
+V.remoteAsk = function (conn) {
+  return V.api('/api/devices/' + encodeURIComponent(conn) + '/ask', { method: 'POST' }).then(function (r) {
+    if (r && r.asked) V.toast('Asked — they need to allow it on that screen', { ms: 6000 });
+    return r;
+  }).catch(function (e) { V.fail(e); throw e; });
+};
+
+/** A remote for one screen: straight away for your own; someone else's once they've allowed it. */
 function remotePad(view, conn) {
+  view.innerHTML = '<div class="spinner"></div>';
+  V.api('/api/devices').then(function (devs) {
+    var d = devs.filter(function (x) { return x.conn === conn; })[0];
+    if (!d) return V.router.go('#/remote', true);
+    if (d.ok !== false) return remotePadOpen(view, conn);
+    var drawAsk = function (asked) {
+      view.innerHTML = V.pageHead('Remote') + '<div class="rm-asking">' + V.empty(d.name + (d.profile ? ' (' + d.profile + ')' : ''), asked ? 'Waiting for them to allow it on that screen…' : 'This is someone else’s screen. They need to allow your phone to be its remote.', asked ? '' : '<button class="btn primary" data-ask>' + V.icon('remote') + ' Ask to connect</button>') + '</div>';
+      var b = V.$('[data-ask]', view);
+      if (b) b.onclick = function () { b.disabled = true; V.remoteAsk(conn).then(function () { drawAsk(true); }, function () { b.disabled = false; }); };
+    };
+    drawAsk(d.asked);
+    var off = V.on('remote-answer', function (a) {
+      if (a.conn !== conn) return;
+      off(); V.pageCleanup = null;
+      if (a.ok) remotePadOpen(view, conn); else drawAsk(false);
+    });
+    V.pageCleanup = function () { off(); };
+  }).catch(V.fail);
+}
+
+function remotePadOpen(view, conn) {
   var st = null, name = '', seek = null;
   var cmd = function (c, extra) { return V.api('/api/devices/' + encodeURIComponent(conn) + '/command', { body: Object.assign({ cmd: c }, extra || {}) }).catch(function (e) { V.fail(e); if (e.status === 404) V.router.go('#/remote', true); }); };
   view.innerHTML = '<div class="remote">' +
@@ -207,3 +244,29 @@ V.playOnTarget = function (it, opts) {
   return true;
 };
 V.on('rt:connected', function () { V.drawRemoteBar(); });
+
+// ---------------------------------------------------------------- asked to be someone's remote
+// Another profile's phone wants to use this screen as its remote: the person here decides. (Until they allow it,
+// that phone doesn't see what's playing here, and can't control it.)
+V.on('remote-ask', function (d) {
+  if (!d || !d.id) return;
+  var who = (d.from || 'Someone') + (d.device ? ' (' + d.device + ')' : '');
+  V.dialog({
+    title: 'Use this screen as a remote?',
+    body: '<p><b>' + V.esc(who) + '</b> wants to use their phone as the remote for this screen. If you allow it, they’ll see what’s playing here and can control it.</p>',
+    actions: [{ label: 'Don’t allow', value: false }, { label: 'Allow', primary: true, value: true }],
+  }).then(function (allow) {
+    allow = allow === true;
+    return V.api('/api/remote-ask/' + encodeURIComponent(d.id), { body: { allow: allow } }).then(function () {
+      if (allow) V.toast((d.from || 'They') + ' can now use their phone as this screen’s remote', { ms: 8000, action: { label: 'Stop', fn: function () { V.api('/api/remote-ok/stop', { method: 'POST' }).then(function () { V.toast('No other phones can control this screen now'); }).catch(V.fail); } } });
+    });
+  }).catch(V.fail);
+});
+// The answer, on the phone that asked (the Remote pages also act on it).
+V.on('remote-answer', function (d) {
+  if (!d) return;
+  var onRemote = document.body.dataset.page === 'remote';
+  if (d.ok && !onRemote) V.toast((d.name || 'The screen') + ' allowed your phone as its remote', { ms: 7000, action: { label: 'Remote', fn: function () { V.router.go('#/remote/' + encodeURIComponent(d.conn)); } } });
+  else if (d.ok) V.toast((d.name || 'The screen') + ' allowed it');
+  else V.toast((d.name || 'The screen') + ' didn’t allow it', { error: true });
+});
