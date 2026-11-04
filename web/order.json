@@ -23,6 +23,7 @@
     "picsubs.js",
     "captions.js",
     "ui.js",
+    "motion.js",
     "home.js",
     "browse.js",
     "guide.js",
@@ -94,6 +95,7 @@
     "p23.css",
     "p24.css",
     "p25.css",
-    "p26.css"
+    "p26.css",
+    "p27.css"
   ]
 }

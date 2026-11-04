@@ -217,6 +217,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 <img src="docs/screenshots/themes.jpg" alt="The Look settings: 25 themes, including dark, OLED black, high contrast and light themes" width="560">
 
 - 25 themes (dark, OLED black, high contrast, light and more), or match the device.
+- **Posters with a little life:** a poster settles in with a small rock when its picture arrives, and the posters in a row lean gently as you scroll it left or right, then nod back when it stops. Settings → *Reduce motion* (or the system's reduced-motion setting) turns it off.
 - Keyboard access everywhere, labelled controls and visible focus, reduced motion, adjustable text size and subtitle styling.
 
 ### For the admin

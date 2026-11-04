@@ -1,0 +1,15 @@
+/* Posters that move a little (web/js/motion.js): a small rock as a picture arrives, a gentle sway as a row moves. */
+@keyframes artRock {
+  0% { transform: translateY(5px) rotate(var(--in-lean, -1.6deg)) scale(.975); }
+  45% { transform: translateY(-1px) rotate(calc(var(--in-lean, -1.6deg) * -0.45)) scale(1.005); }
+  75% { transform: translateY(0) rotate(calc(var(--in-lean, -1.6deg) * 0.15)); }
+  100% { transform: none; }
+}
+@keyframes artFade { from { opacity: 0; } to { opacity: 1; } }
+.card.art-in { animation: artRock .7s cubic-bezier(.3, .7, .3, 1) both; transform-origin: 50% 100%; }
+.card.art-in .card-art img { animation: artFade .35s ease-out both; }
+/* Leaning with the row (hung from the top, so the bottom trails), and back with a small overshoot: the nod. */
+.row-scroll.swaying .card { transform: rotate(var(--sway, 0deg)); transform-origin: 50% 0; transition: transform .55s cubic-bezier(.34, 1.7, .5, 1); will-change: transform; }
+.row-scroll.swaying .card.art-in { transition: none; }
+.reduce-motion .card.art-in, .reduce-motion .row-scroll.swaying .card { animation: none; transform: none; transition: none; }
+@media (prefers-reduced-motion: reduce) { .card.art-in, .row-scroll.swaying .card { animation: none; transform: none; } }
