@@ -18,6 +18,7 @@
    * With clear dialogue or night mode in use (soundfx.js), "speakers" is the start of their chain (p._fxIn).
    */
   V.audioGraph = function (p) {
+    if (!window.AudioContext && !window.webkitAudioContext) return p; // (no Web Audio here: nothing to wire)
     if (!p._audioSrc || p._graphFor !== p.video) {
       p._ac = p._ac || new (window.AudioContext || window.webkitAudioContext)();
       p._audioSrc = p._ac.createMediaElementSource(p.video);
@@ -76,9 +77,11 @@
   PP.applyAvSync = function (announce) {
     var p = this, ms = p.avOffset || 0;
     if (!ms) { if (p._delay) p._delay.delayTime.value = 0; stopPicture(p); if (announce) p.osd(describe(0), 1400); return; }
+    // (Sound held back needs Web Audio: a browser without it isn't sent through the relay for nothing.)
+    if (ms > 0 && !window.AudioContext && !window.webkitAudioContext) { p.osd('Holding the sound back isn’t possible on this device', 2400); return; }
     if (!readable(p)) return toRelay(p);
     try {
-      if (ms > 0) { V.audioGraph(p); p._delay.delayTime.value = ms / 1000; stopPicture(p); }
+      if (ms > 0) { V.audioGraph(p); if (p._delay) p._delay.delayTime.value = ms / 1000; else p.osd('Holding the sound back isn’t possible on this device', 2400); stopPicture(p); }
       else { if (p._delay) p._delay.delayTime.value = 0; startPicture(p, -ms); }
     } catch (e) { console.warn('[avsync]', e); p.osd('Audio sync isn’t possible in this browser', 2500); return; }
     if (announce) p.osd(describe(ms), 1600);

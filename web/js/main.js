@@ -72,6 +72,7 @@ V._enterApp = function () {
 
 /** Handoff: if this profile was watching something on another device a moment ago, offer to carry on here. */
 V.offerResume = function () {
+  if (!S.profile || !S.data) return;
   var cw = V.continueWatching()[0];
   if (!cw || cw.next) return;
   var p = V.progressOf(cw.it.k);

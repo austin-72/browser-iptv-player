@@ -478,6 +478,8 @@ V.saveHome = function () { return V.put('/api/home', S.data.home).catch(V.fail);
 V.continueWatching = function () {
   var out = [];
   var seenShows = new Set();
+  // (No profile open — back at "Who's watching?" while something was still on its way: nothing to continue.)
+  if (!S.data || !S.data.progress) return out;
   var prog = S.data.progress;
   var keys = Object.keys(prog).sort(function (a, b) { return prog[b].at - prog[a].at; });
   for (var i = 0; i < keys.length && out.length < 40; i++) {

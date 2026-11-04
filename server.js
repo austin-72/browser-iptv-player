@@ -143,15 +143,23 @@ catalog.tagger = () => Smart.tagger(settings(), {
 // The TMDB entry each title was matched to (by its key in the last build): titles that are one entry are merged.
 // (Only a sure match: picked by hand, or TMDB's title is clearly this title — a match found by searching a name is
 // sometimes another film, and merging on it would hide one of them.)
+// The provider's own TMDB number counts too when its year agrees with the title's own (a wrong number — "Fall" given
+// "Fall 2: Deadpoint"'s — is years off, and is looked up by name instead: lib/tmdb.js).
 catalog.tmdbOf = (k, it) => {
   try {
     const m = tmdb.map.data.m[k];
     if (!m || !m.id) return null;
     if (m.manual) return m;
     const d = tmdb.meta.data.m[k];
-    return d && d.title && String(d.tmdb) === String(m.id) && it && Titles.sameTitle(it.n, it.y, d.title, d.y) ? m : null;
+    if (!d || String(d.tmdb) !== String(m.id) || !it) return null;
+    if (d.title && Titles.sameTitle(it.n, it.y, d.title, d.y)) return m;
+    const own = it._ym ? 0 : it.y;
+    return m.list && own && d.y && Math.abs(own - d.y) <= 1 ? m : null;
   } catch { return null; }
 };
+// Copies in other languages (a French "L'Étrange Noël de monsieur Jack" beside "The Nightmare Before Christmas"): shown
+// once to each profile, in its own language, when they're surely one TMDB entry (lib/catalog.js payload).
+catalog.foldId = (it) => { const m = catalog.tmdbOf(it.k, it); return m && m.id ? it.t + ':' + m.id : ''; };
 // The languages anyone in the household can see (each profile's own, or the server default): titles in others are
 // left out of the catalogue. null = someone sees every language, keep all.
 catalog.keepLangs = () => {
@@ -219,7 +227,7 @@ function applyMeta(it, m) {
   // TMDB's genres are the consistent ones (the provider's vary from category to category).
   if (m.gn && m.gn.length) it.gn = genresOf(m.gn);
   for (const k of ['plot', 'cast', 'dir', 'bd', 'c', 'tmdb']) if ((force || !it[k]) && m[k] && (!Array.isArray(m[k]) || m[k].length)) it[k] = m[k];
-  if ((force || !it.y) && m.y) it.y = m.y;
+  if ((force || !it.y) && m.y) { if (!it.y) it._ym = 1; it.y = m.y; } // (_ym: the year is TMDB's, not the provider's — lib/tmdb.js ownYear)
   if ((force || !it.r) && m.r) it.r = m.r;
   if ((force || !it.d) && m.d) it.d = m.d;
   if (m.col) it.col = m.col.id; else if (force) delete it.col;
@@ -2280,13 +2288,19 @@ function startEnrich(auto = false, opts = {}) {
   const noMatch = (it) => map[it.k] && map[it.k].none && !(opts.retry && !map[it.k].manual);
   const filters = accounts.profiles.map((pr) => catalog.filterFor(pr));
   const visible = (it) => filters.some((f) => f.test(it));
-  // Titles with no year of their own that a name search matched to a film from years after the list had them
-  // ("Resident Evil" added in 2020 → the 2026 film): looked up again (tmdb.doubtful). The catalogue is built again
-  // first, so the wrong poster, plot and year come off.
+  // Titles matched to a film years apart from them — a name search for a title with no year ("Resident Evil" added
+  // in 2020 → the 2026 film), or a provider's wrong TMDB number ("Fall" 2022 → "Fall 2: Deadpoint"): looked up again
+  // (tmdb.doubtful). The catalogue is built again first, so the wrong poster, plot and year come off.
   if (auto || mode === 'visible' || mode === 'missing') {
     let wrong = 0;
-    for (const it of catalog.items) if ((it.t === 'movie' || it.t === 'show') && tmdb.doubtful(it)) { delete map[it.k]; delete meta[it.k]; wrong++; }
-    if (wrong) { tmdb.map.save(); tmdb.meta.save(); log(`TMDB: ${wrong} titles without a year were matched to a newer title of the same name — looking them up again`); scheduleRebuild(3000); return null; }
+    for (const it of catalog.items) {
+      if ((it.t !== 'movie' && it.t !== 'show') || !tmdb.doubtful(it)) continue;
+      // (A wrong number from the provider: not used again — the name is looked up instead.)
+      if (map[it.k].list) map[it.k] = { badList: map[it.k].id }; else delete map[it.k];
+      delete meta[it.k];
+      wrong++;
+    }
+    if (wrong) { tmdb.map.save(); tmdb.meta.save(); log(`TMDB: ${wrong} titles were matched to a film or series years apart from them — looking them up again`); scheduleRebuild(3000); return null; }
   }
   // (Smarter categories want each title's streaming services and keywords: details from before those were kept are fetched again.)
   const extras = tmdb.wantExtras();

@@ -1612,8 +1612,12 @@ PP.togglePip = function () {
 PP.setRate = function (r) { this.video.playbackRate = r; V.setPref('speed', r); this.osd('Speed ' + (r === 1 ? 'normal' : r + '×'), 1000); if (this.onUserAction) this.onUserAction('rate'); };
 PP.step = function (dir) { var v = this.video; if (!this.vod) return; v.pause(); v.currentTime = Math.max(0, v.currentTime + dir / 25); };
 
+/** Can this browser process sound at all (Web Audio)? */
+V.canBoost = function () { return !!(window.AudioContext || window.webkitAudioContext); };
   /** Louder than 100% through Web Audio (only for streams the browser may process). */
 PP.setBoost = function (x, quietly) {
+  // (No Web Audio in this browser — PlayStation, some TVs: no way to make it louder here, whichever way it plays.)
+  if (x !== 1 && !V.canBoost()) { if (!quietly) V.toast('Volume boost isn’t available on this device.', { error: true }); return; }
   var a = this.attempt;
   var safe = !a || (V.audioReadable ? V.audioReadable(this, a, true) : a.via !== 'direct' || a.kind !== 'native');
   if (x !== 1 && !safe) { if (!quietly) V.toast('Volume boost isn’t possible for this stream. Reload it through the server to use it.', { error: true }); return; }
@@ -1891,7 +1895,7 @@ PP._menuPages = function (kind) {
     { label: 'Reset', fn: function () { self.adjust = { b: 1, c: 1, s: 1 }; V.ls.set('adjust', self.adjust); self._applyFit(); } },
   ];
   ['b', 'c', 's'].forEach(function (k) { pages['adj-' + k] = levels.map(function (x) { return { label: Math.round(x * 100) + '%', on: a[k] === x, fn: function () { self.setAdjust(k, x); }, back: 'adjust' }; }); });
-  main.push({ label: 'Volume boost', value: this.boost === 1 ? 'Off' : Math.round(this.boost * 100) + '%', page: 'boost' });
+  if (V.canBoost()) main.push({ label: 'Volume boost', value: this.boost === 1 ? 'Off' : Math.round(this.boost * 100) + '%', page: 'boost' });
   pages.boost = [1, 1.5, 2, 3].map(function (x) { return { label: x === 1 ? 'Off' : Math.round(x * 100) + '%', on: self.boost === x, fn: function () { self.setBoost(x); } }; });
   var left = V.sleepLeft();
   main.push({ label: 'Sleep timer', value: left ? Math.ceil(left / 60000) + ' min left' : 'Off', page: 'sleep' });
