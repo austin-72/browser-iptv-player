@@ -225,7 +225,7 @@ PP.load = function (it, opts) {
   };
   return (pickSource ? this._sources(it, token, opts) : Promise.resolve(true)).then(function (go) {
     if (!go || token !== self.token) return;
-    return (opts.only ? Promise.resolve([opts.only]) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined || token !== self.token ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
+    return (opts.only ? Promise.resolve([opts.only]) : opts.plan ? Promise.resolve(opts.plan.slice()) : self._plan(it, opts.force).then(function (p0) { return opts.quiet || opts.alt !== undefined || token !== self.token ? p0 : self._directCopy(it, opts.force, p0); })).then(function (p) {
       // (Another title started while this one was being looked up: nothing more to do here.)
       if (token !== self.token) return;
       // A watch party sharing one connection: the party's stream through the server first (see lib/fanout.js).
@@ -691,6 +691,12 @@ PP._attach = function (a, token, startAt, over) {
       if (s.duration) self.vod = true;
       go.kind = 'hls'; go.url = s.url;
       var sid = s.sessionId;
+      if (a.airplay) {
+        // (The Apple TV fetches it, without this browser's sign-in: an address signed for it.)
+        var pinged = setInterval(function () { V.api('/api/session/' + sid + '/ping', { method: 'POST' }).catch(function () {}); }, 15000);
+        clearInterval(self._pinger); self._pinger = pinged;
+        return V.api('/api/cast/link', { body: { path: s.url } }).then(function (r) { go.url = location.origin + r.url; return go; });
+      }
       clearInterval(self._pinger); // (never two keep-alives at once)
       self._pinger = setInterval(function () { V.api('/api/session/' + sid + '/ping', { method: 'POST' }).catch(function () {}); }, 15000);
       return go;
@@ -1070,7 +1076,7 @@ PP._watchPicture = function () {
     lastT = v.currentTime;
     // (Only while it really plays: paused, seeking, buffering or in sound-only mode isn't the picture's fault.)
     // (Nor in a hidden tab: browsers stop drawing the picture there to save power.)
-    if (v.paused || v.seeking || v.readyState < 3 || moved < 1 || self._aoActive || document.hidden) { black = still = none = 0; lastFrames = null; return; }
+    if (v.paused || v.seeking || v.readyState < 3 || moved < 1 || self._aoActive || document.hidden || v.webkitCurrentPlaybackTargetIsWireless) { black = still = none = 0; lastFrames = null; return; }
     if (!v.videoWidth) none += STEP; else none = 0;
     if (v.videoWidth && g && readable) {
       try {
@@ -1130,13 +1136,70 @@ PP._badPicture = function (why) {
   V.toast('“' + it.n + '” shows ' + why + ' and has no other copy to switch to. Its provider may be having trouble.', { error: true, ms: 9000 });
 };
 
+/**
+ * AirPlay sends the address of what's playing and the Apple TV fetches it itself — but streams this page feeds to the
+ * video itself (hls.js, mpegts.js, a conversion in the browser) have no such address, so only the sound went across.
+ * When the video goes to an AirPlay device that way, it's started again from an address the TV can fetch: the
+ * stream's own HLS or MP4 address (through the stream relay when it's on), else a conversion on the server, signed
+ * so the TV needs no sign-in.
+ */
+PP._feedsItself = function () { var v = this.video; return !!(this.hls || this.mts || this.shaka || this.mb || v.srcObject || /^blob:/.test(v.currentSrc || '')); };
+PP._airplayPlan = function () {
+  var a = this.attempt || {}, info = this.reachInfo || {}, plan = [];
+  var abs = function (u) { return /^https?:\/\//i.test(u || ''); };
+  var plain = !this.headers || !Object.keys(this.headers).length;
+  if (a.via === 'direct' && plain && abs(a.url)) {
+    if (a.kind === 'hls') plan.push({ via: 'direct', kind: 'hls', url: a.url, native: true, airplay: true });
+    else if (a.kind === 'native' && !a.mkv) plan.push({ via: 'direct', kind: 'native', url: a.url, airplay: true });
+    else if (a.kind === 'ts' && info.alt && abs(info.alt.url)) plan.push({ via: 'direct', kind: 'hls', url: info.alt.url, native: true, airplay: true });
+  }
+  // (The TV plays H.264 and HEVC; the server repackages the stream as HLS for it, converting only what it must.)
+  if (S.settings.ffmpeg) plan.push({ via: 'session', mode: a.via === 'session' && a.mode === 'transcode' ? 'transcode' : 'remux', native: true, airplay: true });
+  return plan;
+};
+/**
+ * The AirPlay button: playing in a way the TV can fetch first (on an iPhone or iPad the page's own player even turns
+ * AirPlay off for the video while it feeds it), then the device list. (The list needs a tap to open: when the stream had
+ * to be started again, a button says when it's ready.)
+ */
+PP.airplay = function () {
+  var v = this.video, self = this, it = this.it;
+  if (!v.webkitShowPlaybackTargetPicker) return;
+  if (!it || !this._feedsItself()) { try { v.disableRemotePlayback = false; } catch (e) {} v.webkitShowPlaybackTargetPicker(); return; }
+  var plan = this._airplayPlan();
+  if (!plan.length) { V.toast('Only the sound can go to AirPlay for this stream: the server can’t convert it (ffmpeg isn’t installed).', { error: true, ms: 8000 }); v.webkitShowPlaybackTargetPicker(); return; }
+  var at = this.vod ? this.position : 0;
+  this._apBusy = this.token;
+  this._apPick = true;
+  this.load(it, { quiet: true, plan: plan, alt: this.alt, startAt: at || undefined });
+};
+PP._apReady = function () {
+  if (!this._apPick || this._feedsItself()) return;
+  this._apPick = false;
+  var v = this.video, self = this;
+  this._msg({ title: 'Ready for AirPlay', sub: 'The picture can go to your TV now.', actions: [
+    { label: 'Choose the AirPlay device', primary: true, fn: function () { self._msg(null); try { v.disableRemotePlayback = false; } catch (e) {} v.webkitShowPlaybackTargetPicker(); } },
+    { label: 'Not now', fn: function () { self._msg(null); } },
+  ] });
+};
+PP._toAirplay = function () {
+  var it = this.it, self = this, tok = this.token;
+  if (!it || this._apBusy === tok || !this._feedsItself()) return;
+  var plan = this._airplayPlan();
+  if (!plan.length) { V.toast('Only the sound can go to AirPlay for this stream: the server can’t convert it (ffmpeg isn’t installed).', { error: true, ms: 8000 }); return; }
+  this._apBusy = tok;
+  var at = this.vod ? this.position : 0;
+  this.osd('Sending the picture to AirPlay…', 3000);
+  setTimeout(function () { if (tok === self.token) self.load(it, { quiet: true, plan: plan, alt: self.alt, startAt: at || undefined }); }, 200);
+};
+
   /**
    * Playing straight from the provider with the browser's own player: when the picture plays but no sound is decoded
    * (AC-3/DTS audio in an MKV or MP4), switch to the server's conversion at the same spot.
    */
 PP._checkSound = function () {
   var a = this.attempt, v = this.video, tok = this.token, self = this;
-  if (!a || a.via !== 'direct' || a.kind !== 'native' || !this.vod || v.webkitAudioDecodedByteCount === undefined) return;
+  if (!a || a.via !== 'direct' || a.kind !== 'native' || !this.vod || v.webkitAudioDecodedByteCount === undefined || v.webkitCurrentPlaybackTargetIsWireless) return;
   if (!S.settings.ffmpeg && !(this.reachInfo && this.reachInfo.mse && V.mbSupported())) return;
   var t0 = v.currentTime;
   setTimeout(function () {
@@ -1272,6 +1335,9 @@ PP._teardownMedia = function () {
   V.$$('track', v).forEach(function (t) { t.remove(); });
   v.removeAttribute('src');
   try { v.load(); } catch (e) {}
+  // (hls.js and mpegts.js turn AirPlay off on the element while they feed it on an iPhone or iPad; the next way of
+  // playing may be one the TV can fetch.)
+  try { if (v.disableRemotePlayback) v.disableRemotePlayback = false; } catch (e) {}
   this._netRetry = this._mediaRetry = false;
 };
 
@@ -1928,6 +1994,7 @@ PP._replaceVideo = function () {
   var old = this.video;
   var nv = document.createElement('video');
   nv.playsInline = true; nv.preload = 'auto'; nv.volume = old.volume; nv.muted = old.muted;
+  nv.setAttribute('x-webkit-airplay', 'allow');
   old.replaceWith(nv);
   this.video = nv;
   this._audioSrc = null; this._gain = null; this.boost = 1;
@@ -1960,6 +2027,9 @@ PP._wakeLock = function (on) {
 
 PP._bindVideo = function (v) {
   var h = this.host, self = this;
+  // AirPlay: the TV fetches the stream itself (see _toAirplay).
+  v.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () { if (v === self.video && v.webkitCurrentPlaybackTargetIsWireless) self._toAirplay(); });
+  v.addEventListener('playing', function () { if (v !== self.video) return; if (v.webkitCurrentPlaybackTargetIsWireless) self._toAirplay(); else if (self._apPick) setTimeout(function () { self._apReady(); }, 300); });
   v.addEventListener('volumechange', function () { self._volUi(); });
   v.addEventListener('play', function () { V.$('[data-a=play]', h).innerHTML = V.icon('pause'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Pause'); self.el.classList.remove('paused'); self._wakeLock(true); });
   v.addEventListener('pause', function () { V.$('[data-a=play]', h).innerHTML = V.icon('play'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Play'); self.el.classList.add('paused'); self._saveProgress(); self._wake(true); });

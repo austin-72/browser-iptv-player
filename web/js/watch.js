@@ -502,7 +502,7 @@ V.cast = function (btn) {
   var p = V.player, v = p.video, it = V.watch.it;
   var items = [];
   if (window.cast && window.cast.framework) items.push({ label: 'Chromecast', icon: 'cast', fn: V.chromecast });
-  if (v.webkitShowPlaybackTargetPicker) items.push({ label: 'AirPlay', icon: 'cast', fn: function () { v.webkitShowPlaybackTargetPicker(); } });
+  if (v.webkitShowPlaybackTargetPicker) items.push({ label: 'AirPlay', icon: 'cast', fn: function () { p.airplay(); } });
   else if (v.remote && v.remote.prompt) items.push({ label: 'Cast this video', icon: 'cast', fn: function () { v.remote.prompt().catch(function (e) { V.toast(e.message || 'No devices found', { error: true }); }); } });
   V.api('/api/devices').then(function (devs) {
     var others = devs.filter(function (d) { return d.conn !== S.conn; });
