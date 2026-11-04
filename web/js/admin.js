@@ -432,7 +432,8 @@ V.adminTabs.playback = function (body, A) {
     '<label class="check"><input type="radio" name="routing" value="direct-first"' + (s.routing === 'direct-first' ? ' checked' : '') + '><span><b>Direct first</b> — each device connects straight to the provider. When a provider blocks web players (CORS), the browser’s built-in player or the provider’s own HLS copy is used, or only the playlist text comes through here while the video still goes direct. A stream goes fully through this server only when nothing else works (or it needs special headers or converting). Desktop browsers can add the <i>direct-streams helper</i> (Settings) to make every stream direct.</span></label>' +
     '<label class="check"><input type="radio" name="routing" value="server"' + (s.routing === 'server' ? ' checked' : '') + '><span><b>Always through this server</b> — most compatible; the provider sees one address.</span></label>' +
     '<label class="check"><input type="radio" name="routing" value="direct-only"' + (s.routing === 'direct-only' ? ' checked' : '') + '><span><b>Direct only</b> — never send video through this server. Streams that can’t be reached directly won’t play (unless the viewer has the direct-streams helper).</span></label>' +
-    '<label class="field"><span>User-Agent sent to providers</span><input class="input" data-s="userAgent" value="' + V.esc(s.userAgent) + '"></label></section>' +
+    '<label class="field"><span>User-Agent sent to providers</span><input class="input" data-s="userAgent" value="' + V.esc(s.userAgent) + '"></label>' +
+    '<label class="switch"><input type="checkbox" data-b="smartFailover"' + (s.smartFailover !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Switch to a working copy quickly</b><small>When a channel or film has copies from several lists and the one playing fails (or is slow to start), the server tries the others all at once — through the stream relay when it’s on, one per provider account, never on an account with no free connection — and the player goes straight to the quickest one that works, instead of trying them one by one. Off: one after another, as before.</small></span></label></section>' +
     '<section class="card-sec"><h2>Conversion (ffmpeg)</h2>' + (st.ffmpeg ? '' : '<p class="note warn">ffmpeg isn’t installed.</p>') +
     '<div class="grid2"><label class="field"><span>Hardware encoder</span><select class="input" data-s="hwaccel">' + opt(s.hwaccel, [['', 'None (software)'], ['vaapi', 'Intel/AMD (VAAPI)'], ['qsv', 'Intel Quick Sync'], ['nvenc', 'NVIDIA (NVENC)'], ['videotoolbox', 'Apple (VideoToolbox)']]) + '</select><small class="dim">Available: ' + (st.encoders.length ? st.encoders.join(', ') : 'none detected') + '. Falls back to software if it fails.</small></label>' +
     '<label class="field"><span>Software speed</span><select class="input" data-s="transcodePreset">' + opt(s.transcodePreset, [['ultrafast', 'Fastest (bigger)'], ['superfast', 'Very fast'], ['veryfast', 'Fast (recommended)'], ['faster', 'Balanced'], ['fast', 'Better quality'], ['medium', 'Best quality (slow)']]) + '</select></label>' +
@@ -448,7 +449,7 @@ V.adminTabs.playback = function (body, A) {
     else if (t.dataset.s) p[t.dataset.s] = t.dataset.s === 'transcodeMaxHeight' ? +t.value : t.value;
     else if (t.dataset.b) p[t.dataset.b] = t.checked;
     else return;
-    V.adminSave(p).then(function () { if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }); });
+    V.adminSave(p).then(function () { if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }, 'smartFailover' in p ? { smartFailover: p.smartFailover } : {}); });
   };
 };
 

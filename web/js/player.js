@@ -157,7 +157,23 @@ PP.load = function (it, opts) {
   if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (!opts.quiet) this._picRetried = this._picConverted = false;
-  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; }
+  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; }
+  // Smart failover: a copy that's slow to start (6 s) — the others are looked at meanwhile, so if it fails the next
+  // one is a copy that works right now.
+  clearTimeout(this._raceT);
+  if (!opts.quiet && !opts.only && it.t !== 'catchup' && S.settings && S.settings.smartFailover !== false && it.a && it.a.length) {
+    var rtok = token;
+    this._raceT = setTimeout(function () {
+      if (rtok !== self.token || self.started || !self._altsLeft || !self._altsLeft.length) return;
+      self._race(true).then(function (r) {
+        // This copy's provider isn't answering and another copy works: go there now, not after every way of playing
+        // this one has timed out.
+        if (rtok !== self.token || self.started || !self._raceSaysSwitch(r)) return;
+        if (V.crumb) V.crumb('player', 'copy ' + (self.alt + 2) + ' isn’t answering: switching now');
+        self._failed(new Error('The provider isn’t answering for this copy.'));
+      });
+    }, 6000);
+  }
   else if (opts.alt !== undefined) this.alt = opts.alt;
   this._teardown();
   this.it = it;
@@ -209,6 +225,9 @@ PP.load = function (it, opts) {
       if (/decode|format|codec/i.test(e.message) && a.via !== 'session') { var rest = plan.slice(i + 1).filter(function (x) { return x.via === 'session' || (x.via === 'browser' && a.via !== 'browser'); }); plan = plan.slice(0, i + 1).concat(rest); }
       // The server said the provider allows this, but it didn't load: have it check again next time.
       if (a.via === 'direct' && !a.native && !a.helper && a.kind !== 'native' && !/decode|format|codec/i.test(e.message)) V.api('/api/play/reach', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: self.alt, url: it.t === 'catchup' ? it.u : undefined, origin: location.origin, forget: true } }).catch(function () {});
+      // (Smart failover: the server found this copy's provider not answering and another copy working — the other
+      // ways of playing this one would only time out too.)
+      if (i < plan.length - 1 && !/decode|format|codec/i.test(e.message) && self._raceSaysSwitch(self._raced)) { if (opts.onFail) { self._teardownMedia(); return opts.onFail(e); } return self._failed(e); }
       if (i < plan.length - 1) self._msg({ spin: true, title: plan[i + 1].via === 'relay' ? 'Connecting through the server…' : plan[i + 1].via === 'session' ? 'Converting on the server…' : plan[i + 1].via === 'browser' ? 'Converting in this browser…' : 'Trying another way…' });
       return next(i + 1);
     });
@@ -989,7 +1008,9 @@ PP._fatal = function (err) {
     }
     this._relayHoldSince = -1; // (given up holding for this title)
   }
-  if (!this.vod && this.reconnects < 4) {
+  // (Smart failover with other copies to go to: one quick reconnect to this one, not four.)
+  var smart = S.settings && S.settings.smartFailover !== false && this._altsLeft && this._altsLeft.length;
+  if (!this.vod && this.reconnects < (smart ? 1 : 4)) {
     this.reconnects++;
     var it = this.it, tok = this.token, a = this.attempt;
     this._msg({ spin: true, title: 'Reconnecting…' });
@@ -1008,10 +1029,64 @@ PP._fatal = function (err) {
   this._failed(err);
 };
 
+  /**
+   * Smart failover: which of the copies not tried yet work right now, all asked at once by the server (/api/play/race).
+   * Resolves to its answer (also kept for 45 s), or null.
+   */
+PP._race = function (withCurrent) {
+  var it = this.it, self = this;
+  if (!it || !S.settings || S.settings.smartFailover === false) return Promise.resolve(null);
+  if (this._raced && Date.now() - this._raced.at < 45000 && (!withCurrent || this._raced.cur === this.alt)) return Promise.resolve(this._raced);
+  if (this._racing) return this._racing;
+  var cur = this.alt;
+  var ex = (this._triedAlts || []).concat(withCurrent ? [] : [cur]);
+  this._racing = V.api('/api/play/race', { body: { k: it.k, exclude: ex, current: withCurrent ? cur : undefined } }).then(function (r) {
+    self._racing = null;
+    if (self.it !== it) return null;
+    self._raced = { at: Date.now(), order: (r && r.order) || [], cur: withCurrent ? cur : null };
+    if (V.crumb) V.crumb('player', 'copies tried at once: ' + self._raced.order.map(function (e) { return (e.alt + 2) + (e.ok ? ' ok ' + e.ms + 'ms' : e.busy ? ' busy' : e.untested ? ' ?' : ' failed') ; }).join(', '));
+    return self._raced;
+  }, function () { self._racing = null; return null; });
+  return this._racing;
+};
+  /** The race found this copy failing and another one working (so trying more ways of playing this one won't help). */
+PP._raceSaysSwitch = function (r) {
+  if (!r || r.cur !== this.alt) return false;
+  var me = r.order.filter(function (e) { return e.alt === r.cur; })[0];
+  var left = this._altsLeft || [];
+  return !!me && !me.ok && !me.busy && !me.untested && r.order.some(function (e) { return e.ok && left.indexOf(e.alt) >= 0; });
+};
+  /** The copies still to try, in the order the race found them: working ones first (quickest first), failed ones last. */
+PP._reorderAlts = function (raced) {
+  if (!raced || !raced.order || !raced.order.length || !this._altsLeft) return;
+  var left = this._altsLeft, pos = {};
+  raced.order.forEach(function (e, i) { pos[e.alt] = { i: i, bad: !e.ok && !e.untested && !e.busy }; });
+  this._altsLeft = left.slice().sort(function (x, y) {
+    var a = pos[x], b = pos[y];
+    var ra = a ? (a.bad ? 2 : 0) : 1, rb = b ? (b.bad ? 2 : 0) : 1;
+    return ra - rb || (a ? a.i : 0) - (b ? b.i : 0);
+  });
+};
   /** Everything failed for this stream: try a backup stream if the channel has one. */
 PP._failed = function (err) {
+  // (With just one other copy there's nothing to choose between: straight to it.)
+  if (this._altsLeft && this._altsLeft.length > 1 && S.settings && S.settings.smartFailover !== false && !this._raceDone) {
+    // (First the others are looked at, all at once: the next copy tried is one that works right now.)
+    var tk = this.token, me0 = this, e0 = err;
+    this._raceDone = true;
+    if ((this._triedAlts || []).indexOf(this.alt) < 0) (this._triedAlts || (this._triedAlts = [])).push(this.alt);
+    this._msg({ spin: true, title: 'Finding a copy that works…' });
+    this._teardownMedia();
+    return this._race().then(function (r) {
+      if (tk !== me0.token) return;
+      me0._reorderAlts(r);
+      me0._failed(e0);
+    });
+  }
+  this._raceDone = false;
   if (this._altsLeft && this._altsLeft.length) {
     this._healthFail(err, true);
+    if ((this._triedAlts || []).indexOf(this.alt) < 0) (this._triedAlts || (this._triedAlts = [])).push(this.alt);
     var next = this._altsLeft.shift();
     var total = (this.it.a || []).length + 1;
     this._msg({ spin: true, title: 'Trying backup stream ' + (next + 2) + ' of ' + total + '…' });

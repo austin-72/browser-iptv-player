@@ -558,6 +558,7 @@ function publicSettings() {
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
     features: ['browserRoute', 'copyCodecs'],
+    smartFailover: s.smartFailover !== false, // (see /api/play/race)
     epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
     // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
     relayLists: relayOf.conf() ? lists.all().filter((l) => relayOf.uses(l.id)).map((l) => l.id) : [],
@@ -1450,6 +1451,51 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   if (allBusy && out.length) concurrency.turnedAway(ctx.sess.id + '|' + it.k, out.map((x) => x.list)); // (Statistics: turned away)
   return { sources: order, allBusy, directAddress: settings().directAddress || '' };
 });
+/**
+ * Smart failover (Admin → Playback): which copies of a title work right now, tried all at once instead of one after
+ * another (each taking up to a minute to give up). Each copy's provider is asked briefly — through the stream relay when
+ * its list uses it: an HLS playlist and its newest segment, or a stream's first bytes. Only one copy per provider
+ * account at a time, and none on an account with no free connection (this device's own failing stream doesn't count).
+ * { order: [{ alt, ok, ms, err, busy, untested }] }: working ones first, quickest first.
+ */
+const { probe: probeCopy } = require('./lib/health');
+route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  if (settings().smartFailover === false) return { order: [] };
+  const b = await readJSON(req);
+  const it = item(ctx, String(b.k || ''));
+  const skip = new Set((Array.isArray(b.exclude) ? b.exclude : []).map(Number));
+  // (current: the copy this device is trying right now — looked at too when its account has room for one more.)
+  const current = Number.isInteger(b.current) ? b.current : null;
+  const copies = [-1, ...(it.alts || []).map((x, i) => i)].filter((a) => !skip.has(a));
+  const use = listUsage();
+  const others = (lid) => (use.get(lid) || []).filter((c) => !(c.relayShared ? (c.viewers || []).every((v) => v.id === ctx.conn) : c.id === ctx.conn));
+  const out = [], tasks = [], lists = new Set();
+  for (const alt of copies) {
+    const a = alt >= 0 ? it.alts[alt] : { u: it.u, h: it.h, l: it.src };
+    const lid = srcList(it, alt);
+    if (!a || !/^https?:\/\//i.test(a.u || '')) { out.push({ alt, untested: true }); continue; }
+    const limit = connLimit(it, alt);
+    if (limit > 0 && others(lid).length + (alt === current ? 1 : 0) >= limit) { out.push({ alt, busy: true }); continue; }
+    // (One look per account at a time, at most six at once: the rest stay untested.)
+    if (lists.has(lid) || tasks.length >= 6) { out.push({ alt, untested: true }); continue; }
+    lists.add(lid);
+    const h = proxy.headers({ h: a.h || {} });
+    const via = viaRelay(a.u, h, lid);
+    tasks.push(probeCopy(via ? via.url : a.u, via ? via.headers : h, { fetch: fetchAny, timeout: 8000 }).then((r) => {
+      const e = { alt, ok: !!r.ok, ms: r.ms || 0, err: r.ok ? '' : r.err || 'No answer', list: lid };
+      if (p9Hooks.probed) { try { p9Hooks.probed(it, alt, r); } catch {} }
+      out.push(e);
+      return e;
+    }));
+  }
+  await Promise.all(tasks);
+  const rank = (e) => (e.ok ? 0 : e.untested ? 1 : e.busy ? 2 : 3);
+  out.sort((x, y) => rank(x) - rank(y) || (x.ms || 0) - (y.ms || 0));
+  // (A one-connection account: give the provider a moment to let the look's connection go before the device opens its own.)
+  if (out[0] && out[0].ok && oneConnection(it, out[0].alt)) await new Promise((ok) => setTimeout(ok, 1200));
+  return { order: out.map(({ list, ...e }) => e) };
+});
 // Playback statistics: the player says which route it used and for how long (Admin → Statistics).
 route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -1982,7 +2028,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover']) if (k in b) s[k] = !!b[k];
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
   if (['open', 'off'].includes(b.tmdbEpisodes)) s.tmdbEpisodes = b.tmdbEpisodes;
   if (typeof b.tmdbLang === 'string' && /^([a-z]{2}(-[A-Z]{2})?)?$/.test(b.tmdbLang)) s.tmdbLang = b.tmdbLang;
