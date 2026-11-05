@@ -77,3 +77,19 @@
   // (A page drawn again: rows from before are gone.)
   V.on('route', function () { rows = []; });
 })();
+
+// ---------------------------------------------------------------- the background behind the posters
+// A few soft glows of colour (the theme's own, and two quieter ones) drifting very slowly behind everything — a
+// minute or more to cross the screen, so it's felt more than seen. Off with Settings → Look → "Moving background";
+// still (not moving) with Reduce motion. Not on the player or the guide, where it would only be in the way.
+(function () {
+  var put = function () {
+    if (document.getElementById('ambient')) return;
+    var a = document.createElement('div');
+    a.id = 'ambient';
+    a.setAttribute('aria-hidden', 'true');
+    a.innerHTML = '<i class="amb a1"></i><i class="amb a2"></i><i class="amb a3"></i>';
+    document.body.insertBefore(a, document.body.firstChild);
+  };
+  if (document.body) put(); else document.addEventListener('DOMContentLoaded', put);
+})();

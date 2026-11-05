@@ -218,6 +218,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 
 - 25 themes (dark, OLED black, high contrast, light and more), or match the device.
 - **Posters with a little life:** a poster settles in with a small rock when its picture arrives, and the posters in a row lean gently as you scroll it left or right, then nod back when it stops. Settings → *Reduce motion* (or the system's reduced-motion setting) turns it off.
+- **A moving background:** soft glows in the theme's colours drift slowly behind the posters, taking a minute or more to cross the screen. It's turned off on the player and the guide. Settings → Look → *Moving background* switches it off, and *Reduce motion* holds it still.
 - Keyboard access everywhere, labelled controls and visible focus, reduced motion, adjustable text size and subtitle styling.
 
 ### For the admin

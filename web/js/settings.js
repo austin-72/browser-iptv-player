@@ -22,6 +22,7 @@ V.route('settings', function (view) {
     '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.THEMES.map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto" aria-pressed="' + (pf.theme === 'auto') + '"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
     '<div class="grid2"><label class="field"><span>Text size</span><select class="input" data-pref-sel="uiScale">' + [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large'], [1.5, 'Huge']].map(function (o) { return '<option value="' + o[0] + '"' + (+pf.uiScale === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>TV mode (big, remote-friendly)</span><select class="input" data-pref-sel="tvMode">' + [['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(function (o) { return '<option value="' + o[0] + '"' + (pf.tvMode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
+    '<label class="switch"><input type="checkbox" data-pref="movingBg"' + (pf.movingBg !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Moving background</b><small>Soft colours drifting slowly behind the posters</small></span></label>' +
     sw('reduceMotion', 'Reduce motion', 'Fewer animations') + '</section>' +
 
     '<section class="card-sec"><h2>Playback</h2>' + sw('autoplayNext', 'Play the next episode automatically') + sw('autoSkipIntro', 'Skip intros automatically') + sw('autoSkipCredits', 'Skip end credits automatically') +
@@ -79,7 +80,7 @@ V.route('settings', function (view) {
   view.addEventListener('change', function (e) {
     var t = e.target;
     if (t.hasAttribute('data-askprofile')) { V.ls.set('askProfile', t.checked); V.toast(t.checked ? 'This device will ask who’s watching' : 'This device opens straight into your profile'); return; }
-    if (t.dataset.pref) { V.setPref(t.dataset.pref, t.checked); if (t.dataset.pref === 'reduceMotion') V.applyLook(); }
+    if (t.dataset.pref) { V.setPref(t.dataset.pref, t.checked); if (t.dataset.pref === 'reduceMotion' || t.dataset.pref === 'movingBg') V.applyLook(); }
     else if (t.dataset.prefSel) { var v = t.value; if (t.dataset.prefSel === 'uiScale') v = +v; V.setPref(t.dataset.prefSel, v); V.applyLook(); }
     else if (t.name === 'lmode') V.$('.lang-pick', view).hidden = t.value !== 'own';
     else if (t.dataset.interest !== undefined) V.put('/api/me', { interests: V.$$('[data-interest]:checked', view).map(function (x) { return x.value; }) }).then(function (p) { if (p && p.id) S.profile = p; }).catch(V.fail); // (kept, so the page shows them when opened again)
@@ -142,6 +143,7 @@ V.applyLook = function () {
   var r = document.documentElement;
   r.style.fontSize = (16 * (+pf.uiScale || 1)) + 'px';
   r.classList.toggle('reduce-motion', !!pf.reduceMotion);
+  r.classList.toggle('bg-still', pf.movingBg === false); // (Settings → Look → Moving background: web/css/p27.css)
   var tv = pf.tvMode === 'on' || (pf.tvMode !== 'off' && V.device.tv);
   r.classList.toggle('tv', tv);
   V.tvMode = tv;

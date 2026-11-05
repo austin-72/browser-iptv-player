@@ -13,3 +13,20 @@
 .row-scroll.swaying .card.art-in { transition: none; }
 .reduce-motion .card.art-in, .reduce-motion .row-scroll.swaying .card { animation: none; transform: none; transition: none; }
 @media (prefers-reduced-motion: reduce) { .card.art-in, .row-scroll.swaying .card { animation: none; transform: none; } }
+
+/* The moving background (web/js/motion.js): soft glows drifting slowly behind the pages. Only transforms move
+   (no blur, no repainting), so it costs next to nothing, TVs included. */
+#ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
+#ambient .amb { position: absolute; display: block; width: 70vmax; height: 70vmax; border-radius: 50%; will-change: transform; }
+#ambient .a1 { left: -18vmax; top: -22vmax; background: radial-gradient(closest-side, var(--accent), transparent); opacity: .16; animation: ambA 70s ease-in-out infinite alternate; }
+#ambient .a2 { right: -24vmax; top: 18vh; background: radial-gradient(closest-side, #4b63ff, transparent); opacity: .13; animation: ambB 90s ease-in-out infinite alternate; }
+#ambient .a3 { left: 22vw; bottom: -38vmax; background: radial-gradient(closest-side, #12b5a6, transparent); opacity: .10; animation: ambC 110s ease-in-out infinite alternate; }
+@keyframes ambA { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(28vw, 14vh) scale(1.15); } 100% { transform: translate(52vw, -4vh) scale(.95); } }
+@keyframes ambB { 0% { transform: translate(0, 0) scale(1.05); } 50% { transform: translate(-30vw, 22vh) scale(.9); } 100% { transform: translate(-12vw, -16vh) scale(1.12); } }
+@keyframes ambC { 0% { transform: translate(0, 0) scale(.95); } 50% { transform: translate(-24vw, -18vh) scale(1.1); } 100% { transform: translate(18vw, -30vh) scale(1); } }
+.theme-light #ambient .amb { opacity: .07; }
+.theme-light #ambient .a3 { opacity: .05; }
+/* Off: by choice, on the player and the guide; still with Reduce motion. */
+.bg-still #ambient, body[data-page="play"] #ambient, body[data-page="multiview"] #ambient, body[data-page="guide"] #ambient { display: none; }
+.reduce-motion #ambient .amb { animation: none; }
+@media (prefers-reduced-motion: reduce) { #ambient .amb { animation: none; } }
