@@ -81,7 +81,8 @@ function vodPage(view, r, type, title) {
     '<label class="sel"><span class="sr-only">Rating</span><select class="input" data-f="rmin">' + [['', 'Any rating'], ['6', '★ 6+'], ['7', '★ 7+'], ['8', '★ 8+']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(minR || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     (type === 'movie' ? '<label class="sel"><span class="sr-only">Length</span><select class="input" data-f="len">' + [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(maxLen || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' : '') +
     '<label class="sel"><span class="sr-only">Sort</span><select class="input" data-f="sort">' + [['default', chart ? 'Chart order' : 'Suggested'], ['pop', 'Popular worldwide'], ['new', 'Newest'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
-    (g ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to home</button>' : '') + '</div>') +
+    (g ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to home</button>' : '') +
+    '<a class="btn sm" href="#/trailers?t=' + (type === 'show' ? 'show' : 'movie') + '">' + V.icon('film') + ' Trailers</a></div>') +
     // (No row of genre buttons as well: the Genre list above does the same, and the page starts sooner. With smarter
     // categories: the charts, the holiday in season and the big services, one tap away.)
     (smart ? V.smart.chips(type, g, r.name) : '') +

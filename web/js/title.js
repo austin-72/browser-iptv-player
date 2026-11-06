@@ -98,8 +98,20 @@ V.route('title', function (view, r) {
     V.$('.tp-plot', view).textContent = d.plot || '';
     var people = function (s) { return String(s).split(',').map(function (x) { x = x.trim(); return x ? '<a href="#/search?q=' + encodeURIComponent(x) + '">' + V.esc(x) + '</a>' : ''; }).filter(Boolean).join(', '); };
     V.$('.tp-credits', view).innerHTML = (d.cast ? '<div><b>Cast:</b> ' + people(d.cast) + '</div>' : '') + (d.dir ? '<div><b>' + (isShow ? 'Created by' : 'Director') + ':</b> ' + people(d.dir) + '</div>' : '') +
-      (d.tr ? '<div><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.tr) + '" target="_blank" rel="noopener">' + V.icon('film') + ' Watch the trailer</a></div>' : '') +
+      (d.tr && V.ytId(d.tr) ? '<div><button class="linkish" data-trailer>' + V.icon('film') + ' Watch the trailer</button></div>' : '') +
       (S.settings.tmdb && !S.profile.kids ? '<div class="tp-fix"><button class="linkish" data-fix>' + (d.fixed ? 'Details corrected by your household · change' : 'Wrong poster or details?') + '</button></div>' : '');
+    var tb = V.$('[data-trailer]', view);
+    if (tb) tb.onclick = function () { V.playTrailer(d.tr, it.n); }; // (here, not on a YouTube tab: web/js/trailers.js)
+    // No trailer from the provider: TMDB's, when there's one.
+    else if (S.settings.tmdb && (it.t === 'movie' || it.t === 'show')) V.api('/api/trailers?k=' + encodeURIComponent(it.k)).then(function (t) {
+      var x = t && t[it.k], cr = V.$('.tp-credits', view);
+      if (!x || !x.v || !cr || V.$('[data-trailer]', cr)) return;
+      var div = document.createElement('div');
+      div.innerHTML = '<button class="linkish" data-trailer>' + V.icon('film') + ' Watch the trailer</button>';
+      var fix = V.$('.tp-fix', cr);
+      cr.insertBefore(div, fix || null);
+      V.$('[data-trailer]', div).onclick = function () { V.playTrailer(x.v, it.n); };
+    }).catch(function () {});
     var fx = V.$('[data-fix]', view);
     if (fx) fx.onclick = function () { V.fixDetails(it, d); };
     if (d.col) V.drawCollection(V.$('.tp-col', view), it);
@@ -120,7 +132,10 @@ V.route('title', function (view, r) {
       if (!eps.length && d.epsError) {
         V.$('.eps', view).innerHTML = '<p class="dim">' + V.esc(d.epsError) + '</p><button class="btn" data-eps-retry>' + V.icon('refresh') + ' Try again</button>';
         V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };
-      } else drawEpisodes(eps);
+      } else drawEpisodes(eps, d.upcoming || []);
+      // What's coming: the next episode's date (TMDB), under the facts at the top.
+      if (d.next && d.next.air) V.$('.tp-meta', view).insertAdjacentHTML('beforeend', '<div class="tp-next">' + V.icon('clock', 'tiny') + ' Next episode ' + V.esc(V.epLabel({ t: 'episode', s: d.next.s, e: d.next.e })) + (d.next.et && !/^Episode \d+$/i.test(d.next.et) ? ' “' + V.esc(d.next.et) + '”' : '') + ' — ' + V.esc(V.airsOn(d.next.air)) + '</div>');
+      else if (d.ended) V.$('.tp-meta', view).insertAdjacentHTML('beforeend', '<div class="tp-next dim">Series ended</div>');
       drawActs(eps);
       if (typeof drawBookmarks === 'function') drawBookmarks(); // (episode bookmarks, now the episodes are known)
     }
@@ -130,16 +145,29 @@ V.route('title', function (view, r) {
     V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };
   });
 
-  function drawEpisodes(eps) {
+  function drawEpisodes(eps, coming) {
     var box = V.$('.eps', view);
     var sel = V.$('[data-season]', view);
+    coming = coming || [];
     if (!eps.length) { box.innerHTML = '<p class="dim">No episodes found.</p>'; return; }
     var seasons = [];
     eps.forEach(function (e) { if (seasons.indexOf(e.s) < 0) seasons.push(e.s); });
+    // (A season only TMDB knows of yet — coming soon — is listed after the others.)
+    coming.forEach(function (c) { if (seasons.indexOf(c.s) < 0) seasons.push(c.s); });
     var rp = V.resumePoint(it, eps);
     var cur = rp.ep ? rp.ep.s : seasons[0];
-    sel.innerHTML = seasons.map(function (s) { return '<option value="' + s + '"' + (s === cur ? ' selected' : '') + '>' + (s ? 'Season ' + s : 'Specials') + ' (' + eps.filter(function (e) { return e.s === s; }).length + ')</option>'; }).join('');
+    sel.innerHTML = seasons.map(function (s) {
+      var n = eps.filter(function (e) { return e.s === s; }).length, soon = coming.filter(function (c) { return c.s === s; }).length;
+      return '<option value="' + s + '"' + (s === cur ? ' selected' : '') + '>' + (s ? 'Season ' + s : 'Specials') + ' (' + (n ? n + (soon ? ' + ' + soon + ' coming' : '') : soon + ' coming') + ')</option>';
+    }).join('');
     sel.hidden = seasons.length < 2;
+    // Episodes after the last one here (TMDB's): still to air, or aired and not on the lists yet. Not playable.
+    var comingRows = function (s) {
+      return coming.filter(function (c) { return c.s === s; }).map(function (c) {
+        return '<div class="ep ep-soon" aria-disabled="true"><span class="ep-play"><span class="ep-n num">' + c.e + '</span><span class="ep-art" style="--tint:' + V.tint(it.n) + '">' + (c.i ? '<img src="' + V.esc(c.i) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '<span class="ep-when">' + V.esc(c.out ? 'Not here yet' : V.airsOn(c.air, true)) + '</span></span></span>' +
+          '<div class="ep-body"><div class="ep-t"><b>' + (c.et ? '<span class="ep-tn num">' + c.e + ' · </span>' + V.esc(c.et) : V.esc(V.epLabel({ t: 'episode', s: c.s, e: c.e }))) + '</b><span class="dim">' + [c.air ? (c.out ? 'Aired ' + V.epAirDate(c.air) + ' · not on your lists yet' : V.airsOn(c.air)) : 'Date not known yet', c.d ? V.fmtLen(c.d) : ''].filter(Boolean).join(' · ') + '</span></div>' + (c.plot ? '<p class="dim clamp3">' + V.esc(c.plot) + '</p>' : '') + '</div></div>';
+      }).join('');
+    };
     var render = function (s) {
       box.innerHTML = eps.filter(function (e) { return e.s === s; }).map(function (e) {
         var pct = V.pctOf(e.k);
@@ -147,14 +175,15 @@ V.route('title', function (view, r) {
         var isNew = V.isNewEpisode(it.k, e.k);
         // (The number before the title shows only on phones, where the number column is hidden: "3 · Low Tide".)
         return '<div class="ep' + (rp.ep && rp.ep.k === e.k ? ' cur' : '') + '" data-k="' + V.esc(e.k) + '"><button class="ep-play" data-ep="play" aria-label="Play ' + V.esc(V.epLabel(e) + ' ' + (e.et || '')) + '"><span class="ep-n num">' + e.e + '</span><span class="ep-art" style="--tint:' + V.tint(e.n) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') + '<span class="ep-pl">' + V.icon('play') + '</span>' + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span></button>' +
-          '<div class="ep-body"><div class="ep-t"><b>' + (e.et && e.e != null ? '<span class="ep-tn num">' + e.e + ' · </span>' : '') + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + [e.air ? V.epAirDate(e.air) : '', e.d ? V.fmtLen(e.d) : ''].filter(Boolean).join(' · ') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
+          '<div class="ep-body"><div class="ep-t"><b>' + (e.et && e.e != null ? '<span class="ep-tn num">' + e.e + ' · </span>' : '') + V.esc(e.et || V.epLabel(e)) + '</b>' + (isNew ? ' <span class="badge new">New</span>' : '') + (pct >= 1 ? ' ' + V.icon('check', 'tiny ok') : '') + '<span class="dim">' + [e.air ? V.epAirDate(e.air) : '', e.d ? V.fmtLen(e.d) : '', e.r ? '★ ' + e.r : ''].filter(Boolean).join(' · ') + '</span></div>' + (e.plot ? '<p class="dim clamp3">' + V.esc(e.plot) + '</p>' : '') + '</div>' +
           '<button class="icon-btn" data-ep="menu" aria-label="More for this episode">' + V.icon('dots') + '</button></div>';
-      }).join('');
+      }).join('') + comingRows(s);
     };
     render(cur);
     sel.onchange = function () { render(+sel.value); };
     box.onclick = function (e) {
       var row = e.target.closest('[data-k]');
+      if (row && !V.entry(row.dataset.k)) return;
       if (!row) return;
       var ep = V.entry(row.dataset.k);
       var b = e.target.closest('[data-ep]');
@@ -259,6 +288,19 @@ V.fixDetails = function (it, d) {
 };
 
 /** "2008-02-10" → "10 Feb 2008" (an episode's first showing, from TMDB). */
+/** "Airs tomorrow", "Airs Thu 12 Nov", "Airs 3 Feb 2027" (short: without "Airs"), from TMDB's "2026-11-12". */
+V.airsOn = function (d, short) {
+  var m = /^(\d{4})-(\d\d)-(\d\d)/.exec(d || '');
+  if (!m) return '';
+  var day = new Date(+m[1], +m[2] - 1, +m[3]), now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var n = Math.round((day - today) / 86400e3), txt;
+  try {
+    if (n === 0) txt = 'today'; else if (n === 1) txt = 'tomorrow';
+    else if (n > 1 && n < 7) txt = day.toLocaleDateString(undefined, { weekday: 'long' });
+    else txt = day.toLocaleDateString(undefined, n > 0 && n < 300 ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch (e) { txt = d; }
+  return short ? txt.charAt(0).toUpperCase() + txt.slice(1) : 'Airs ' + txt;
+};
 V.epAirDate = function (d) {
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''));
   if (!m) return '';

@@ -771,10 +771,30 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
       await Promise.race([tmdb.episodes(it, { seasons }).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
     }
     out.episodes = withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
+    Object.assign(out, comingEpisodes(it, eps));
   }
   if (it.sk) { const show = catalog.get(it.sk); if (show) out.show = { k: show.k, n: show.n, i: show.logo || '' }; }
   // Others in the household who watched it.
   out.watchedBy = accounts.profiles.filter((x) => x.id !== prof.id && userdata.of(x.id).data.history.some((h) => h.k === it.k || h.sk === it.k)).map((x) => x.id);
+  return out;
+});
+/** A YouTube video id from what a provider sends as its trailer (an id, or a link to it): '' if neither. */
+const youtubeId = (s) => { const m = /(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/.exec(String(s || '')) || /^([\w-]{11})$/.exec(String(s || '').trim()); return m ? m[1] : ''; };
+/**
+ * Trailers (Trailers page, and "Watch the trailer"): the YouTube video of each title asked for — the provider's,
+ * or TMDB's — { key: { v: videoId, p: plot } }, for up to 12 titles at a time that this profile may see.
+ */
+route('GET', '/api/trailers', async (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const keys = [...new Set(String(q.get('k') || '').split(',').filter(Boolean))].slice(0, 12);
+  const out = {};
+  await Promise.all(keys.map(async (k) => {
+    let it;
+    try { it = item(ctx, k); } catch { return; }
+    if (it.t !== 'movie' && it.t !== 'show') return;
+    const tr = youtubeId(it.tr) || (tmdb.enabled() ? await tmdb.trailer(it).catch(() => '') : '');
+    if (tr) out[k] = { v: tr, p: String(it.plot || '').slice(0, 320) };
+  }));
   return out;
 });
 route('GET', '/api/show/:k/episodes', async (req, res, p, q, ctx) => {
@@ -786,6 +806,36 @@ route('GET', '/api/show/:k/episodes', async (req, res, p, q, ctx) => {
   }
   return withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
 });
+/**
+ * Episodes TMDB knows of that come after the last one on the lists: ones still to air ("Airs 12 Nov") and ones aired
+ * that the lists haven't added yet. (Only after the last one here: a gap in the middle is more often a numbering
+ * difference than a missing episode.) And the next one to air: { upcoming: [...], next: { s, e, et, air } }.
+ */
+function comingEpisodes(show, eps) {
+  const m = tmdb.eps.data.m[show.k];
+  if (!m || !m.s) return {};
+  let ls = -1, le = -1;
+  for (const e of eps) if (Number.isInteger(e.s) && e.s > 0 && Number.isInteger(e.e) && (e.s > ls || (e.s === ls && e.e > le))) { ls = e.s; le = e.e; }
+  if (ls < 0) return {};
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = [];
+  for (const sn of Object.keys(m.s).map(Number).filter((n) => n >= ls).sort((a, b) => a - b)) {
+    const se = m.s[sn];
+    for (const en of Object.keys(se).map(Number).sort((a, b) => a - b)) {
+      if (sn === ls && en <= le) continue;
+      const [t, plot, still, air, mins, r] = se[en];
+      // (Aired a long while ago and still not here: likely never coming to these lists — not listed.)
+      if (air && air < today && Date.now() - Date.parse(air) > 120 * 86400e3) continue;
+      upcoming.push({ s: sn, e: en, et: t || '', air: air || '', plot: String(plot || '').slice(0, 300), i: still || '', d: mins ? mins * 60 : 0, r: r || 0, out: !!(air && air <= today) });
+      if (upcoming.length >= 40) break;
+    }
+  }
+  const out = { upcoming };
+  // (Only one after the last here: the provider's seasons numbered differently would make it look behind.)
+  if (m.nx && m.nx[3] && m.nx[3] >= today && (m.nx[0] > ls || (m.nx[0] === ls && m.nx[1] > le))) out.next = { s: m.nx[0], e: m.nx[1], et: m.nx[2], air: m.nx[3] };
+  if (m.end) out.ended = true;
+  return out;
+}
 /** A name that says nothing ("Episode 3", "S01E03", the series' own name): TMDB's episode title is better. */
 const plainEpTitle = (t, show) => !t || /^(?:(?:episode|ep\.?|e|folge|cap[ií]tulo|[ée]pisode)\s*\d+|s\d+\s*[ex]\s*\d+|\d+)$/i.test(String(t).trim()) || catalogNorm(t) === catalogNorm(show.n);
 /** Episodes (as sent to devices) with TMDB's details of each filled in where the provider's are missing or plain. */

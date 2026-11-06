@@ -49,3 +49,33 @@
 .bg-still #ambient, body[data-page="play"] #ambient, body[data-page="multiview"] #ambient, body[data-page="guide"] #ambient { display: none; }
 .reduce-motion #ambient .amb { animation: none; }
 @media (prefers-reduced-motion: reduce) { #ambient .amb { animation: none; } }
+
+/* Trailers (web/js/trailers.js): one trailer at a time, its title and buttons beside or below it. */
+.trl { display: flex; flex-direction: column; gap: 1rem; min-height: calc(100vh - 7rem); }
+.trl-top { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.trl-top h1 { margin: 0; font-size: 1.5rem; }
+.trl-stage { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 24rem) auto; gap: 1.4rem; align-items: center; }
+.trl-vid { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #000; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); }
+.trl-frame, .trl-box iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.trl-info { display: flex; flex-direction: column; gap: 1rem; }
+.trl-info h2 { margin: 0 0 .3rem; font-size: 1.6rem; line-height: 1.15; }
+.trl-plot { margin: .6rem 0 0; }
+.trl-acts { display: flex; flex-wrap: wrap; gap: .5rem; }
+.trl-nav { display: flex; flex-direction: column; gap: .6rem; }
+.trl-count { font-size: .85rem; }
+.trl-box { position: relative; aspect-ratio: 16 / 9; background: #000; }
+dialog.dlg.trl-dlg { width: min(1100px, calc(100vw - 24px)); }
+dialog.dlg.trl-dlg .dlg-b { padding: 0; }
+@media (max-width: 860px) {
+  .trl-stage { grid-template-columns: 1fr; }
+  .trl-nav { flex-direction: row; justify-content: center; }
+  .trl-info h2 { font-size: 1.3rem; }
+}
+/* Series pages: what's coming (TMDB) — the next episode's date, and episodes not here yet. */
+.tp-next { margin-top: .5rem; font-weight: 600; }
+.ep-soon { opacity: .62; }
+.ep-soon .ep-play { cursor: default; }
+.ep-when { position: absolute; left: 0; right: 0; bottom: 0; padding: .2rem .4rem; font-size: .75rem; font-weight: 600; background: rgba(0, 0, 0, .65); color: #fff; text-align: center; }
+.trl-vid { background-size: cover; background-position: center; }
+.trl-up .i { transform: rotate(90deg); }
+.trl-down .i { transform: rotate(-90deg); }
