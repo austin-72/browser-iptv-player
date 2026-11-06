@@ -1,66 +1,84 @@
 /* A little life in the posters: a picture settles in with a small rock when it arrives, and the posters in a row
    sway gently as the row moves left or right (leaning with the motion, swinging back with a small nod when it stops).
    Kept small and short so it's never in the way; off with Settings → Reduce motion (or the system's reduced motion),
-   and for pictures already shown a moment ago (a page drawn again doesn't set everything moving again). */
+   on devices that are slow to draw (TVs, games consoles: V.lite in settings.js), and for pictures already shown a
+   moment ago (a page drawn again doesn't set everything moving again). */
 'use strict';
 
 (function () {
-  var still = function () { return !!(V.reduceMotion && V.reduceMotion()) || document.documentElement.classList.contains('reduce-motion'); };
+  var root = document.documentElement;
+  // (Lite: TVs and games consoles — a PlayStation's browser repaints far more than a computer's — get none of it.)
+  var still = function () { return !!(V.reduceMotion && V.reduceMotion()) || root.classList.contains('reduce-motion') || root.classList.contains('lite'); };
 
   // ------------------------------------------------------------ a picture arriving
+  // (Nothing measured here — no layout read per picture, which on a page of a hundred posters added up: lazy-loaded
+  // pictures only arrive near the screen anyway. Class changes wait for the next frame, all together.)
   var seen = {}; // picture → when it last did its arrival (ms)
-  var seenN = 0;
+  var seenN = 0, queue = [], queued = false;
+  var flush = function () {
+    queued = false;
+    var q = queue; queue = [];
+    for (var n = 0; n < q.length; n++) q[n].classList.add('art-in');
+  };
   document.addEventListener('load', function (e) {
     var img = e.target;
     if (!img || img.tagName !== 'IMG' || still()) return;
-    var card = img.parentNode && img.parentNode.classList && img.parentNode.classList.contains('card-art') ? img.parentNode.parentNode : null;
-    if (!card || !card.classList || !card.classList.contains('card')) return;
-    var src = img.currentSrc || img.src, now = Date.now();
+    var art = img.parentNode, card = art && art.parentNode;
+    if (!card || !art.classList || !art.classList.contains('card-art') || !card.classList || !card.classList.contains('card')) return;
+    var src = img.src, now = Date.now();
     if (seen[src] && now - seen[src] < 60000) return;
     if (++seenN > 3000) { seen = {}; seenN = 0; }
     seen[src] = now;
-    // (Off screen — a row's far end, a long grid below: nothing to see, so nothing to do.)
-    var r = img.getBoundingClientRect();
-    if (r.right < 0 || r.left > window.innerWidth || r.bottom < 0 || r.top > window.innerHeight) return;
-    // Left and right alike, a different lean for each poster (from its place), so a row doesn't move as one block.
-    var i = Array.prototype.indexOf.call(card.parentNode ? card.parentNode.children : [], card);
-    card.style.setProperty('--in-lean', (i % 2 ? 1 : -1) * (1.2 + (i % 3) * 0.5) + 'deg');
-    card.classList.remove('art-in');
-    void card.offsetWidth; // (again from the start, if it was mid-way)
-    card.classList.add('art-in');
+    if (card.classList.contains('art-in')) return;
+    // A different lean for each poster (from its place), so a row doesn't move as one block.
+    var i = 0;
+    for (var x = card.previousElementSibling; x && i < 6; x = x.previousElementSibling) i++;
+    card.classList.remove('art-b', 'art-c');
+    if (i % 3) card.classList.add(i % 3 === 1 ? 'art-b' : 'art-c');
+    queue.push(card);
+    if (!queued) { queued = true; requestAnimationFrame(flush); }
   }, true);
   document.addEventListener('animationend', function (e) {
-    if (e.animationName === 'artRock' && e.target.classList) { e.target.classList.remove('art-in'); e.target.style.removeProperty('--in-lean'); }
+    if (/^artRock/.test(e.animationName) && e.target.classList) e.target.classList.remove('art-in', 'art-b', 'art-c');
   }, true);
 
   // ------------------------------------------------------------ a row moving
-  // How fast the row moves sets how far its posters lean (a little, at most); when it stops they swing back.
+  // How fast the row moves sets how far its posters lean (a little, at most); when it stops they swing back with a
+  // small nod. (A few changes a scroll — not one on every step, which had every poster's style worked out again each
+  // time: the posters then glide there on the graphics chip.)
   var MAX = 2.6; // degrees
   var rows = [];
   var track = function (sc) {
     for (var i = 0; i < rows.length; i++) if (rows[i].sc === sc) return rows[i];
-    var o = { sc: sc, x: sc.scrollLeft, t: Date.now(), lean: 0, peak: 0, idle: null, settle: null };
+    var o = { sc: sc, x: sc.scrollLeft, t: Date.now(), lean: 0, want: 0, peak: 0, idle: null, settle: null, frame: false };
     rows.push(o);
     if (rows.length > 40) rows.shift();
     return o;
   };
+  var apply = function (o) {
+    o.frame = false;
+    if (o.want === o.lean) return;
+    o.lean = o.want;
+    if (o.lean) o.sc.classList.add('swaying');
+    o.sc.style.setProperty('--sway', o.lean.toFixed(1) + 'deg');
+  };
   var setLean = function (o, deg) {
-    if (Math.abs(deg - o.lean) < 0.15 && deg !== 0) return;
-    if (deg === o.lean) return;
-    o.lean = deg;
-    if (deg) o.sc.classList.add('swaying');
-    o.sc.style.setProperty('--sway', deg.toFixed(2) + 'deg');
+    if (deg && Math.abs(deg - o.want) < 0.4) return;
+    o.want = deg;
+    if (!o.frame) { o.frame = true; requestAnimationFrame(function () { apply(o); }); }
   };
   document.addEventListener('scroll', function (e) {
     var sc = e.target;
-    if (!sc || !sc.classList || !sc.classList.contains('row-scroll')) return;
+    if (!sc || !sc.classList || !sc.classList.contains('row-scroll') || still()) return;
     var o = track(sc);
     var now = Date.now(), x = sc.scrollLeft, dt = Math.max(16, now - o.t), v = (x - o.x) / dt; // px per ms
     o.x = x; o.t = now;
-    if (still()) return;
-    // (Moving right — the posters slide left — they trail behind: the bottom swings back the other way.)
+    // (Moving right — the posters slide left — hung from the top, their bottoms trail behind.)
+    // (In two steps only — a little, or the most — so the slant changes a few times a scroll, not on every step:
+    // the change itself then glides on the graphics chip.)
     var deg = Math.max(-MAX, Math.min(MAX, -v * 1.1));
-    setLean(o, Math.round(deg * 10) / 10);
+    deg = Math.abs(deg) < 0.5 ? 0 : (Math.abs(deg) < 1.8 ? 1.3 : MAX) * (deg < 0 ? -1 : 1);
+    setLean(o, deg);
     if (Math.abs(deg) > Math.abs(o.peak || 0)) o.peak = deg;
     clearTimeout(o.idle); clearTimeout(o.settle);
     // Stopped: a small swing past upright (the nod), then still.
@@ -80,7 +98,8 @@
 
 // ---------------------------------------------------------------- the background behind the posters
 // A few soft glows of colour (the theme's own, and two quieter ones) drifting very slowly behind everything — a
-// minute or more to cross the screen, so it's felt more than seen. Off with Settings → Look → "Moving background";
+// minute or more to cross the screen, so it's felt more than seen. Off with Settings → Look → "Moving background"
+// (and on a slow device unless turned on there);
 // still (not moving) with Reduce motion. Not on the player or the guide, where it would only be in the way.
 (function () {
   var put = function () {

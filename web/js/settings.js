@@ -22,7 +22,7 @@ V.route('settings', function (view) {
     '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.THEMES.map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto" aria-pressed="' + (pf.theme === 'auto') + '"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
     '<div class="grid2"><label class="field"><span>Text size</span><select class="input" data-pref-sel="uiScale">' + [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large'], [1.5, 'Huge']].map(function (o) { return '<option value="' + o[0] + '"' + (+pf.uiScale === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>TV mode (big, remote-friendly)</span><select class="input" data-pref-sel="tvMode">' + [['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(function (o) { return '<option value="' + o[0] + '"' + (pf.tvMode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
-    '<label class="switch"><input type="checkbox" data-pref="movingBg"' + (pf.movingBg !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Moving background</b><small>Soft colours drifting slowly behind the posters</small></span></label>' +
+    '<label class="switch"><input type="checkbox" data-pref="movingBg"' + (V.movingBg() ? ' checked' : '') + '><span class="sw"></span><span><b>Moving background</b><small>Soft colours drifting slowly behind the posters' + (V.lite() ? ' (off on this device unless you turn it on: it can slow it down)' : '') + '</small></span></label>' +
     sw('reduceMotion', 'Reduce motion', 'Fewer animations') + '</section>' +
 
     '<section class="card-sec"><h2>Playback</h2>' + sw('autoplayNext', 'Play the next episode automatically') + sw('autoSkipIntro', 'Skip intros automatically') + sw('autoSkipCredits', 'Skip end credits automatically') +
@@ -138,12 +138,26 @@ V.changePin = function () {
 
 V.shortcutsHelp = function () { V.keyHelp('all'); };
 
+/**
+ * A device that's slow to draw: TVs and games consoles (a PlayStation's browser above all), and the smallest phones
+ * and computers (2 processor cores or 2 GB or less). They get no poster animations and no moving background unless
+ * it's turned on (web/js/motion.js, web/css/p27.css).
+ */
+V.lite = function () {
+  var n = navigator.hardwareConcurrency || 0, m = navigator.deviceMemory || 0;
+  return !!V.device.tv || (n > 0 && n <= 2) || (m > 0 && m <= 2);
+};
+/** The moving background: on unless turned off — and on a slow device, off unless turned on. */
+V.movingBg = function () { var pf = (S.data && S.data.prefs) || {}; return pf.movingBg === true || (pf.movingBg !== false && !V.lite()); };
+
 V.applyLook = function () {
   var pf = (S.data && S.data.prefs) || {};
   var r = document.documentElement;
   r.style.fontSize = (16 * (+pf.uiScale || 1)) + 'px';
   r.classList.toggle('reduce-motion', !!pf.reduceMotion);
-  r.classList.toggle('bg-still', pf.movingBg === false); // (Settings → Look → Moving background: web/css/p27.css)
+  r.classList.toggle('bg-still', !V.movingBg()); // (Settings → Look → Moving background: web/css/p27.css)
+  // Lite: a device that's slow to draw (V.lite) — no poster animations (web/js/motion.js).
+  r.classList.toggle('lite', V.lite());
   var tv = pf.tvMode === 'on' || (pf.tvMode !== 'off' && V.device.tv);
   r.classList.toggle('tv', tv);
   V.tvMode = tv;

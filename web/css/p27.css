@@ -1,29 +1,48 @@
 /* Posters that move a little (web/js/motion.js): a small rock as a picture arrives, a gentle sway as a row moves. */
+/* (Three leans, fixed values: an animation that reads a variable is worked out on every frame by the page itself
+   instead of the graphics chip — which made a scroll past arriving posters stutter.) */
 @keyframes artRock {
-  0% { transform: translateY(5px) rotate(var(--in-lean, -1.6deg)) scale(.975); }
-  45% { transform: translateY(-1px) rotate(calc(var(--in-lean, -1.6deg) * -0.45)) scale(1.005); }
-  75% { transform: translateY(0) rotate(calc(var(--in-lean, -1.6deg) * 0.15)); }
+  0% { transform: translateY(5px) rotate(-1.2deg) scale(.975); }
+  45% { transform: translateY(-1px) rotate(.55deg) scale(1.005); }
+  75% { transform: translateY(0) rotate(-.18deg); }
+  100% { transform: none; }
+}
+@keyframes artRock2 {
+  0% { transform: translateY(5px) rotate(1.7deg) scale(.975); }
+  45% { transform: translateY(-1px) rotate(-.75deg) scale(1.005); }
+  75% { transform: translateY(0) rotate(.25deg); }
+  100% { transform: none; }
+}
+@keyframes artRock3 {
+  0% { transform: translateY(5px) rotate(-2.2deg) scale(.975); }
+  45% { transform: translateY(-1px) rotate(1deg) scale(1.005); }
+  75% { transform: translateY(0) rotate(-.3deg); }
   100% { transform: none; }
 }
 @keyframes artFade { from { opacity: 0; } to { opacity: 1; } }
 .card.art-in { animation: artRock .7s cubic-bezier(.3, .7, .3, 1) both; transform-origin: 50% 100%; }
+.card.art-in.art-b { animation-name: artRock2; }
+.card.art-in.art-c { animation-name: artRock3; }
 .card.art-in .card-art img { animation: artFade .35s ease-out both; }
 /* Leaning with the row (hung from the top, so the bottom trails), and back with a small overshoot: the nod. */
-.row-scroll.swaying .card { transform: rotate(var(--sway, 0deg)); transform-origin: 50% 0; transition: transform .55s cubic-bezier(.34, 1.7, .5, 1); will-change: transform; }
+.row-scroll.swaying .card { transform: rotate(var(--sway, 0deg)); transform-origin: 50% 0; transition: transform .55s cubic-bezier(.34, 1.7, .5, 1); }
 .row-scroll.swaying .card.art-in { transition: none; }
-.reduce-motion .card.art-in, .reduce-motion .row-scroll.swaying .card { animation: none; transform: none; transition: none; }
-@media (prefers-reduced-motion: reduce) { .card.art-in, .row-scroll.swaying .card { animation: none; transform: none; } }
+/* Lite (TVs and games consoles: html.lite, web/js/settings.js applyLook) and Reduce motion: none of it. */
+.reduce-motion .card.art-in, .lite .card.art-in, .reduce-motion .card.art-in .card-art img, .lite .card.art-in .card-art img { animation: none; }
+.reduce-motion .row-scroll.swaying .card, .lite .row-scroll.swaying .card { transform: none; transition: none; }
+@media (prefers-reduced-motion: reduce) { .card.art-in, .card.art-in .card-art img { animation: none; } .row-scroll.swaying .card { transform: none; } }
 
-/* The moving background (web/js/motion.js): soft glows drifting slowly behind the pages. Only transforms move
-   (no blur, no repainting), so it costs next to nothing, TVs included. */
+/* The moving background (web/js/motion.js): soft glows drifting slowly behind the pages. Only transforms move, in
+   sizes of the glow itself (%: a size in vw/vh had the page work out every frame itself, and repaint, instead of the
+   graphics chip — what made a PlayStation crawl). Off on slow devices unless turned on (V.movingBg). */
 #ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
 #ambient .amb { position: absolute; display: block; width: 70vmax; height: 70vmax; border-radius: 50%; will-change: transform; }
 #ambient .a1 { left: -18vmax; top: -22vmax; background: radial-gradient(closest-side, var(--accent), transparent); opacity: .16; animation: ambA 70s ease-in-out infinite alternate; }
 #ambient .a2 { right: -24vmax; top: 18vh; background: radial-gradient(closest-side, #4b63ff, transparent); opacity: .13; animation: ambB 90s ease-in-out infinite alternate; }
 #ambient .a3 { left: 22vw; bottom: -38vmax; background: radial-gradient(closest-side, #12b5a6, transparent); opacity: .10; animation: ambC 110s ease-in-out infinite alternate; }
-@keyframes ambA { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(28vw, 14vh) scale(1.15); } 100% { transform: translate(52vw, -4vh) scale(.95); } }
-@keyframes ambB { 0% { transform: translate(0, 0) scale(1.05); } 50% { transform: translate(-30vw, 22vh) scale(.9); } 100% { transform: translate(-12vw, -16vh) scale(1.12); } }
-@keyframes ambC { 0% { transform: translate(0, 0) scale(.95); } 50% { transform: translate(-24vw, -18vh) scale(1.1); } 100% { transform: translate(18vw, -30vh) scale(1); } }
+@keyframes ambA { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(40%, 12%) scale(1.15); } 100% { transform: translate(74%, -3%) scale(.95); } }
+@keyframes ambB { 0% { transform: translate(0, 0) scale(1.05); } 50% { transform: translate(-43%, 18%) scale(.9); } 100% { transform: translate(-17%, -13%) scale(1.12); } }
+@keyframes ambC { 0% { transform: translate(0, 0) scale(.95); } 50% { transform: translate(-34%, -15%) scale(1.1); } 100% { transform: translate(26%, -25%) scale(1); } }
 .theme-light #ambient .amb { opacity: .07; }
 .theme-light #ambient .a3 { opacity: .05; }
 /* Off: by choice, on the player and the guide; still with Reduce motion. */
