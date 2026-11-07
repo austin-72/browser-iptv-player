@@ -497,6 +497,7 @@ const MIME = {
   '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.ts': 'video/mp2t', '.m3u8': 'application/vnd.apple.mpegurl',
 };
 
+const gzCache = new Map(); // (compressed scripts and styles, by file and time changed: serveFile)
 function serveFile(req, res, file, { type, download, cache, headers: extra } = {}) {
   let st;
   try { st = fs.statSync(file); } catch { throw new HttpError(404, 'File not found'); }
@@ -507,6 +508,16 @@ function serveFile(req, res, file, { type, download, cache, headers: extra } = {
   };
   if (download) headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(typeof download === 'string' ? download : path.basename(file))}`;
   const range = req.headers.range && req.headers.range.match(/bytes=(\d*)-(\d*)/);
+  // Not changed since the copy the browser has: nothing to send.
+  if (!range && !download && req.headers['if-modified-since'] && Date.parse(req.headers['if-modified-since']) >= Math.floor(st.mtimeMs / 1000) * 1000) { res.writeHead(304, { 'Cache-Control': headers['Cache-Control'], 'Last-Modified': headers['Last-Modified'] }); return res.end(); }
+  // Text (scripts, styles) compressed: a third of the size, which a slow device (a games console) feels at every start.
+  if (!range && !download && /\.(js|mjs|css|json|svg|txt|html|vtt)$/i.test(file) && st.size > 1024 && st.size < 8e6 && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    const key = file + '|' + st.mtimeMs;
+    let gz = gzCache.get(key);
+    if (!gz) { gz = zlib.gzipSync(fs.readFileSync(file), { level: 9 }); gzCache.set(key, gz); while (gzCache.size > 64) gzCache.delete(gzCache.keys().next().value); }
+    res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': gz.length, Vary: 'Accept-Encoding' });
+    return res.end(req.method === 'HEAD' ? undefined : gz);
+  }
   if (range && st.size) {
     let start = range[1] === '' ? st.size - parseInt(range[2], 10) : parseInt(range[1], 10);
     let end = range[1] !== '' && range[2] !== '' ? parseInt(range[2], 10) : st.size - 1;
@@ -724,14 +735,16 @@ route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
 // ---- catalogue & details
 route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
+  // ?lite=1: the light catalogue (TVs and games consoles: Catalog.liteItem) — not kept on the device, so no changes-only.
+  const lite = q.get('lite') === '1';
   // The device has this version already (after a restart too: the saved catalogue keeps its version): nothing to
   // make or send.
-  const current = catalog.etagFor(prof);
-  if (!q.get('page') && (req.headers['if-none-match'] === current || q.get('since') === current)) { res.writeHead(304, { ETag: current }); return res.end(); }
+  const current = catalog.etagFor(prof, lite);
+  if (!q.get('page') && (req.headers['if-none-match'] === current || (!lite && q.get('since') === current))) { res.writeHead(304, { ETag: current }); return res.end(); }
   // (Made in slices: a big catalogue takes a second or so to put together, and nobody else should wait for it.)
   // A huge catalogue can take a while to put together (and other profiles' copies are made one at a time): rather
   // than keep the device waiting past what a proxy allows (Cloudflare: 100 s), say "not yet" and let it ask again.
-  const making = catalog.payloadAsync(prof);
+  const making = catalog.payloadAsync(prof, lite);
   const out = await Promise.race([making, new Promise((r) => setTimeout(r, 50e3, null).unref())]);
   if (!out) { res.setHeader('Retry-After', '5'); throw new HttpError(503, 'The catalogue is still being put together.'); }
   // In pages (see Catalog._payloadSteps): page 0 says how many there are, and the device fetches the rest with
@@ -744,13 +757,29 @@ route('GET', '/api/catalog', async (req, res, p, q, ctx) => {
     return sendGz({ headers: { ...req.headers, 'if-none-match': '' } }, res, () => out.raw(page), out.pages[page], 'application/json; charset=utf-8', out.etag);
   }
   // A device that has an older copy asks for just the changes.
-  const since = q.get('since');
+  const since = lite ? '' : q.get('since');
   if (since && req.headers['if-none-match'] !== out.etag) {
     const d = await catalog.deltaAsync(prof, since);
     if (d && d.same) { res.writeHead(304, { ETag: d.etag }); return res.end(); }
     if (d) return sendGz(req, res, d.raw, d.gz, 'application/json; charset=utf-8', d.etag);
   }
   sendGz(req, res, () => out.raw(0), out.pages[0], 'application/json; charset=utf-8', out.etag);
+});
+/**
+ * Stream addresses for titles from the light catalogue (lz: sent without them), asked for when one is played: { items:
+ * [{k, u, a, h}] } for up to 50 the profile may see. (Behind the parental PIN: not until it's entered.)
+ */
+route('GET', '/api/addresses', (req, res, p, q, ctx) => {
+  requireProfile(ctx);
+  const items = [];
+  for (const k of String(q.get('keys') || '').split(',').filter(Boolean).slice(0, 50)) {
+    let it;
+    try { it = item(ctx, k); } catch { continue; }
+    if (overrides.hasLocks && overrides.isLocked(it, (x) => catalog.get(x)) && !overrides.allowed(ctx)) continue;
+    const c = Catalog.compact(it);
+    items.push({ k, u: c.u, a: c.a, h: c.h });
+  }
+  return { items };
 });
 route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -2140,7 +2169,7 @@ const castSign = (pathq, hours = 8) => {
 };
 route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  const { path: pq } = await readObj(req);
+  const { path: pq, hours } = await readObj(req);
   if (!/^\/api\/(session|proxy|local)\b/.test(String(pq || ''))) throw new HttpError(400, 'Only stream addresses can be cast');
   // A media-folder file or a recording: only one this profile may watch.
   const lm = String(pq).split('?')[0].match(/^\/api\/local\/([^/]+)\/([^/]+)$/);
@@ -2152,7 +2181,8 @@ route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
     if (!it) throw new HttpError(404, 'File not found');
     item(ctx, it.k); // (hidden or locked for this profile: refused)
   }
-  return { url: castSign(String(pq)) };
+  // (hours: a TV's own player, signed for a day — see web/js/player.js signMedia — rather than a cast's 8 hours.)
+  return { url: castSign(String(pq), clampInt(hours, 1, 24, 8)) };
 });
 
 // ---- admin

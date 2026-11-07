@@ -221,6 +221,8 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - 25 themes (dark, OLED black, high contrast, light and more), or match the device.
 - **Posters with a little life:** a poster settles in with a small rock when its picture arrives, and the posters in a row lean gently as you scroll it left or right, then nod back when it stops. Settings → *Reduce motion* (or the system's reduced-motion setting) turns it off.
 - **A moving background:** soft glows in the theme's colours drift slowly behind the posters, taking a minute or more to cross the screen. It's turned off on the player and the guide. Settings → Look → *Moving background* switches it off, and *Reduce motion* holds it still. TVs, games consoles and very small devices get neither the background nor the poster animations unless you turn them on there, so they stay quick.
+- **Light catalogue for TVs and games consoles:** a PlayStation's browser runs out of memory on a big catalogue and the page just dies. So TVs, consoles, and any device where loading didn't finish twice in a row get a lighter one: the same titles at about half the size, sent in small pieces. Films' stream addresses are fetched when you press play, and nothing is kept on the device between visits. Settings → Look → *Light catalogue on this device* turns it on or off for that device. On these devices a catalogue update doesn't reload while something is playing, and reloads at most every 20 minutes.
+- **Playing on a PlayStation or TV:** a TV's own video player fetches the stream without the page's sign-in. So on these devices the server's streams (converted ones, the relay, your own files) are given a signed address that works for a day, like the one for casting. A PlayStation is only sent H.264 video, even though it claims to play HEVC and AV1. A picture that is playing is no longer mistaken for a black screen and switched to a converted stream partway in, and a stream played as it is gets a little longer to start, since a TV's player is slower to get going.
 - Keyboard access everywhere, labelled controls and visible focus, reduced motion, adjustable text size and subtitle styling.
 
 ### For the admin
@@ -349,7 +351,7 @@ Everything lives in `DATA_DIR`: `accounts.json`, `settings.json`, `lists/`, `epg
 - DRM: ClearKey works, and so does Widevine/PlayReady where the browser supports it and the playlist provides a licence URL. Nothing is decrypted on the server.
 - Casting to Chromecast falls back to the server's address when the Chromecast can't play the provider's, so the server must be reachable from the Chromecast.
 - Intro detection needs at least two episodes of a season.
-- The PlayStation browser has no Web Audio, so Volume boost, clear dialogue, night mode and holding the sound back aren't offered there, and so far it hasn't played the server's converted streams; streams it can play as they are work.
+- The PlayStation browser has no Web Audio, so Volume boost, clear dialogue, night mode and holding the sound back aren't offered there, and its player fetches streams without the page's sign-in, so the server's own streams are given signed addresses there.
 - Smarter categories work from what each provider and TMDB say: a title with no TMDB details yet is grouped by its genres and its provider's category until the details come in.
 - A recording holds one of the provider's connections for as long as it runs, like a viewer. When none is free at the start time it waits, and gives up if none comes free before the programme ends.
 

@@ -23,6 +23,7 @@ V.route('settings', function (view) {
     '<div class="grid2"><label class="field"><span>Text size</span><select class="input" data-pref-sel="uiScale">' + [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large'], [1.5, 'Huge']].map(function (o) { return '<option value="' + o[0] + '"' + (+pf.uiScale === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>TV mode (big, remote-friendly)</span><select class="input" data-pref-sel="tvMode">' + [['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(function (o) { return '<option value="' + o[0] + '"' + (pf.tvMode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
     '<label class="switch"><input type="checkbox" data-pref="movingBg"' + (V.movingBg() ? ' checked' : '') + '><span class="sw"></span><span><b>Moving background</b><small>Soft colours drifting slowly behind the posters' + (V.lite() ? ' (off on this device unless you turn it on: it can slow it down)' : '') + '</small></span></label>' +
+    '<label class="switch"><input type="checkbox" data-litecat' + (V.liteCatalog() ? ' checked' : '') + '><span class="sw"></span><span><b>Light catalogue on this device</b><small>Loads quicker and uses less memory (films’ addresses are fetched when played, and nothing is kept between visits). On by itself on TVs and games consoles.</small></span></label>' +
     sw('reduceMotion', 'Reduce motion', 'Fewer animations') + '</section>' +
 
     '<section class="card-sec"><h2>Playback</h2>' + sw('autoplayNext', 'Play the next episode automatically') + sw('autoSkipIntro', 'Skip intros automatically') + sw('autoSkipCredits', 'Skip end credits automatically') +
@@ -80,6 +81,8 @@ V.route('settings', function (view) {
   view.addEventListener('change', function (e) {
     var t = e.target;
     if (t.hasAttribute('data-askprofile')) { V.ls.set('askProfile', t.checked); V.toast(t.checked ? 'This device will ask who’s watching' : 'This device opens straight into your profile'); return; }
+    // (The light catalogue: this device only. Loaded again straight away the new way.)
+    if (t.hasAttribute('data-litecat')) { try { V.ls.set('catLite', t.checked ? '1' : '0'); V.ls.set('catLoads', '0'); } catch (x) {} V.toast(t.checked ? 'Light catalogue on — loading it now.' : 'Full catalogue — loading it now.'); V.loadCatalog(true).then(function () { V.renderShell(); }).catch(V.fail); return; }
     if (t.dataset.pref) { V.setPref(t.dataset.pref, t.checked); if (t.dataset.pref === 'reduceMotion' || t.dataset.pref === 'movingBg') V.applyLook(); }
     else if (t.dataset.prefSel) { var v = t.value; if (t.dataset.prefSel === 'uiScale') v = +v; V.setPref(t.dataset.prefSel, v); V.applyLook(); }
     else if (t.name === 'lmode') V.$('.lang-pick', view).hidden = t.value !== 'own';

@@ -5,18 +5,68 @@ V.TYPE_NAMES = { live: 'Live TV', radio: 'Radio', movie: 'Movie', show: 'Series'
 V.entry = function (k) { return (S.byKey && S.byKey.get(k)) || (S.extra && S.extra.get(k)) || null; };
 
 // ---------------------------------------------------------------- catalogue
+/**
+ * The light catalogue (server: Catalog.liteItem): for TVs and games consoles — a PlayStation's browser runs out of
+ * memory on a big full one and the page just dies — and for any device where loading the catalogue didn't finish
+ * twice running (the page died partway: catLite, kept). About half the size, in small pieces, not kept on the device.
+ */
+V.liteCatalog = function () {
+  var c = null;
+  try { c = V.ls.get('catLite'); } catch (e) {}
+  if (c === '1') return true;
+  if (c === '0') return false; // (turned off on this device: Settings → Look)
+  return !!(V.lite && V.lite());
+};
+// (Loading started and never finished, twice running: from then on the light one.)
+function loadStarted() {
+  if (S.catCounted) return; // (once a page load: switching profiles mid-load isn't a page that died)
+  S.catCounted = true;
+  try {
+    var n = +(V.ls.get('catLoads') || 0);
+    if (n >= 2 && V.ls.get('catLite') !== '1') { V.ls.set('catLite', '1'); S.catLiteNew = true; }
+    V.ls.set('catLoads', String(n + 1));
+  } catch (e) {}
+}
+function loadFinished() { try { V.ls.set('catLoads', '0'); } catch (e) {} }
+/** Reads a light catalogue's shortened addresses ("~3~1234.mkv": table P) and category numbers (table SC). */
+V.unpackCatalog = function (items, P, SC) {
+  if (!items || (!P && !SC)) return;
+  var un = function (s) {
+    if (typeof s !== 'string' || s.charAt(0) !== '~') return s;
+    var j = s.indexOf('~', 1), h = P && P[parseInt(s.slice(1, j), 36)];
+    return h === undefined || h === null ? s : h + s.slice(j + 1);
+  };
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.i) it.i = un(it.i);
+    if (it.u) it.u = un(it.u);
+    if (it.a) for (var a = 0; a < it.a.length; a++) it.a[a].u = un(it.a[a].u);
+    if (it.sc && SC) for (var c = 0; c < it.sc.length; c++) if (typeof it.sc[c] === 'number') it.sc[c] = SC[it.sc[c]];
+  }
+};
+/** Stream addresses for titles from the light catalogue (sent without them), fetched when one is played. */
+V.fetchAddresses = function (keys) {
+  return V.api('/api/addresses?keys=' + keys.map(encodeURIComponent).join(',')).then(function (r) {
+    (r.items || []).forEach(function (x) { var it = V.entry(x.k); if (!it) return; if (x.u) it.u = x.u; if (x.a) it.a = x.a; if (x.h) it.h = x.h; });
+  });
+};
+
 V.loadCatalog = function (force, tries) {
   var pid = S.profile.id;
   var cacheKey = 'catalog:' + pid;
   var cached = null;
+  if (!tries) loadStarted();
+  var lite = V.liteCatalog();
+  S.catLite = lite;
   // (A newer load replaces this one: the pages still coming for this one stop.)
   var token = S.catalogLoad = (S.catalogLoad || 0) + 1;
-  var start = force ? Promise.resolve(null) : V.readCatalogCache(cacheKey);
+  var start = force || lite ? Promise.resolve(null) : V.readCatalogCache(cacheKey);
   return start.then(function (c) {
     cached = c;
     var h = {};
     if (c && c.etag) h['If-None-Match'] = c.etag;
     // With a copy here already, the server can send just what changed since.
+    if (lite) return fetch('/api/catalog?lite=1', { credentials: 'same-origin' });
     return fetch('/api/catalog' + (c && c.etag && c.data && c.data.items ? '?since=' + encodeURIComponent(c.etag) : ''), { headers: h, credentials: 'same-origin' });
   }).then(function (r) {
     if (r.status === 304 && cached) return cached.data;
@@ -29,6 +79,7 @@ V.loadCatalog = function (force, tries) {
     if (!r.ok) return V.catalogError(r);
     var etag = r.headers.get('ETag');
     return r.json().then(function (data) {
+      if (data.lite) V.unpackCatalog(data.items, data.P, data.SC);
       if (data.delta) {
         if (!cached || !cached.data) return V.loadCatalog(true);
         data = V.applyCatalogDelta(cached.data, data);
@@ -38,7 +89,7 @@ V.loadCatalog = function (force, tries) {
         V.catalogRest(token, pid, cacheKey, etag, data);
         return data;
       }
-      V.saveCatalogCache(cacheKey, etag, data);
+      if (!lite) V.saveCatalogCache(cacheKey, etag, data);
       return data;
     });
   }, function (e) {
@@ -51,6 +102,9 @@ V.loadCatalog = function (force, tries) {
     // A big copy from this device: the first part now (the page can be drawn), the rest in slices just after.
     if (items.length > 150000 && !data.pages) indexInParts(token, items);
     else V.index(items);
+    if (!data.pages || data.pages <= 1) loadFinished();
+    S.catLoadedAt = Date.now();
+    if (S.catLiteNew) { S.catLiteNew = false; setTimeout(function () { V.toast('This device had trouble loading everything, so it now loads a lighter catalogue (the same titles, less kept in memory).', { ms: 8000 }); }, 1500); }
     V.emit('catalog');
     return data;
   });
@@ -205,18 +259,21 @@ V.catalogRest = function (token, pid, cacheKey, etag, first) {
     S.catalogLoading = null; show();
     V.fetchCatalogPage.done();
     S.catalogVersion = data.base || data.version;
+    loadFinished();
     V.catalogComplete();
-    // (A very big catalogue may not fit in this browser's storage: then it's fetched again next time.)
-    V.saveCatalogCache(cacheKey, etag, data);
+    // (A very big catalogue may not fit in this browser's storage: then it's fetched again next time. The light one
+    // isn't kept: reading it back would cost a slow device as much as fetching it.)
+    if (!first.lite) V.saveCatalogCache(cacheKey, etag, data);
   };
   var next = function () {
     if (stale()) return;
     if (page >= first.pages) { indexing.then(finish); return; }
-    return V.fetchCatalogPage('/api/catalog?page=' + page + '&v=' + encodeURIComponent(etag || '')).then(function (r) {
+    return V.fetchCatalogPage('/api/catalog?page=' + page + '&v=' + encodeURIComponent(etag || '') + (first.lite ? '&lite=1' : '')).then(function (r) {
       if (stale()) return;
       // The catalogue changed meanwhile: start again with the new one.
       if (r.status === 409) { S.catalogLoading = null; show(); return V.loadCatalog(true).catch(function () {}); }
       if (r.status !== 200) throw new Error('HTTP ' + r.status);
+      if (first.lite) V.unpackCatalog(r.items, first.P, first.SC);
       for (var i = 0; i < r.items.length; i++) all.push(r.items[i]);
       page++; tries = 0;
       S.catalogLoading.got = all.length;

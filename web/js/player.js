@@ -26,6 +26,8 @@ V.codecs = (function () {
   var f = function () {
     if (c) return c;
     c = ['h264'];
+    // (A PlayStation's browser says "probably" to HEVC and AV1 and then shows no picture: H.264 only there.)
+    if (/PlayStation/i.test(navigator.userAgent)) return c;
     var MS = window.ManagedMediaSource || window.MediaSource;
     var v = document.createElement('video');
     var ok = function (t) { try { return (MS && MS.isTypeSupported(t)) || v.canPlayType(t) === 'probably'; } catch (e) { return false; } };
@@ -40,6 +42,19 @@ V.codecs = (function () {
   f.forget = function () { c = null; };
   return f;
 })();
+
+/**
+ * Does this device's own video player fetch the stream without the page's sign-in? A PlayStation's does (its media
+ * player runs apart from the page and sends no cookies), and so may other TVs': this server's own stream addresses
+ * (conversions, the relay, media folders) then answer it with "sign in first" — "can't play this format", or a
+ * conversion that never starts. For them those addresses are signed, like a cast link (valid for a day).
+ */
+V.signMedia = function () { return /PlayStation/i.test(navigator.userAgent) || !!(V.device && V.device.tv); };
+/** A stream address this device's player can open: signed (see signMedia) when it's one of this server's. */
+V.mediaUrl = function (url) {
+  if (!V.signMedia() || !/^\/api\/(session|proxy|local)\b/.test(url || '')) return Promise.resolve(url);
+  return V.api('/api/cast/link', { body: { path: url, hours: 24 } }).then(function (r) { return location.origin + r.url; }, function () { return url; });
+};
 
 /** Can the browser's own player (no JavaScript reading the bytes, so no CORS needed) play this kind? */
 V.nativePlays = (function () {
@@ -629,7 +644,7 @@ PP._attempt = function (a, token, startAt) {
     v.addEventListener('error', onErr);
     v.addEventListener('canplay', onCanPlay);
     // Direct attempts give up quickly so the server can take over.
-    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'browser' ? 45000 : a.via === 'direct' || a.via === 'split' ? 12000 : 25000);
+    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'browser' ? 45000 : a.via === 'direct' || a.via === 'split' ? (V.signMedia() ? 18000 : 12000) : 25000); // (a TV's player is slower to get going)
     // A server conversion that's still showing nothing after 25 s: the conversion is usually fine and it's this
     // browser's player that's stuck (some TV and console browsers claim hls.js support that doesn't work). Swap to
     // the other HLS player once; whichever starts is remembered for this device.
@@ -683,6 +698,8 @@ PP._attach = function (a, token, startAt, over) {
   var prep = Promise.resolve(go);
   if (a.via === 'relay') {
     prep = V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, sniff: go.kind === '?' } }).then(function (r) {
+      return V.mediaUrl(r.url).then(function (u) { r.url = u; return r; });
+    }).then(function (r) {
       if (gone()) return null;
       go.url = r.url;
       if (go.kind === '?') {
@@ -721,8 +738,10 @@ PP._attach = function (a, token, startAt, over) {
       }
       clearInterval(self._pinger); // (never two keep-alives at once)
       self._pinger = setInterval(function () { V.api('/api/session/' + sid + '/ping', { method: 'POST' }).catch(function () {}); }, 15000);
-      return go;
+      return V.mediaUrl(go.url).then(function (u) { go.url = u; return go; });
     });
+  } else if (go.url && /^\/api\/local\//.test(go.url)) {
+    prep = V.mediaUrl(go.url).then(function (u) { go.url = u; return go; });
   }
   return prep.then(function (g) { if (g && !gone()) return self._attachMedia(a, token, startAt, g.kind, g.url, gone); });
 };
@@ -1171,7 +1190,9 @@ PP._watchPicture = function () {
         // Black: dark on average and hardly anything lit (a small channel logo in a corner still counts as black).
         // (Only where the page has seen the picture lit, or the counter counting: on some TVs the picture is drawn
         // where the page can't see it, and every look comes back black.)
-        if (sum / 576 < 12 && lit < 15) { if (litSeen || counted >= 3) black += STEP; } else { black = 0; litSeen = true; }
+        // (Only once the page has seen the picture lit: a PlayStation's frame counter counts while every look at its
+        // picture comes back black — it's drawn where the page can't see it — and that had films "converted" for nothing.)
+        if (sum / 576 < 12 && lit < 15) { if (litSeen) black += STEP; } else { black = 0; litSeen = true; }
         // (A rough picture of the picture: four rows of brightness. Moving pictures change it.)
         var pic = [0, 0, 0, 0];
         for (var j = 0; j < d.length; j += 4) pic[Math.floor(j / 4 / 32 / 4.5)] += d[j] + d[j + 1] + d[j + 2];

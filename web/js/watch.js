@@ -13,6 +13,8 @@ V.play = function (it, opts) {
   // A 24/7 channel from My channels: plays whatever is on it now (see mychannels.js).
   if (V.mychPlay && /^mych:/.test(it.u || '') && !opts.mych) return V.mychPlay(it, opts);
   V.watch.mych = opts.mych || null;
+  // From the light catalogue (TVs, consoles): the stream address is fetched now.
+  if (it.lz && !it.u && !opts._addr) return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true })); }, V.fail);
   if (it.t === 'show') return V.loadEpisodes(it).then(function (eps) { var r = V.resumePoint(it, eps); if (r.ep) V.play(r.ep, Object.assign({}, opts, { startAt: r.pos })); else V.toast('No episodes found', { error: true }); }).catch(V.fail);
   // Episodes fetched on demand (Xtream) live only in the server's memory: after a server restart, have it fetch
   // the show's episodes again before playing (once per show per page load).
