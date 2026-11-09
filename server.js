@@ -1597,7 +1597,7 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   // Free first (a copy that needs someone bumped after a truly free one); then the admin's preferred backup and copies
   // that work (channel health); then ones this page can play directly; then the list order.
   const hr = p9Hooks.rank ? p9Hooks.rank(it) : null;
-  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (hr ? hr(x.alt) - hr(y.alt) : 0) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
+  const order = out.slice().sort((x, y) => (x.busy - y.busy) || (!!x.bump.length - !!y.bump.length) || (hr ? hr(x.alt) - hr(y.alt) : 0) || (slowList(x.list) - slowList(y.list)) || (x.mixed - y.mixed) || (x.proxy - y.proxy) || (x.fmt - y.fmt) || (copies.indexOf(x.alt) - copies.indexOf(y.alt)));
   const allBusy = out.every((x) => x.busy);
   // About to start on an account whose films the relay shares: it hears about the new viewer now, not in a few seconds.
   if (!allBusy && out.some((x) => !x.busy && (use.get(x.list) || []).some((c) => c.relayShared))) relayFinished.poke(true);
@@ -1619,6 +1619,22 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
  * { order: [{ alt, ok, ms, err, busy, untested }] }: working ones first, quickest first.
  */
 const { probe: probeCopy } = require('./lib/health');
+/**
+ * How quickly each list's provider has been answering lately: from the looks smart failover takes (/api/play/race)
+ * and from how long plays took to start (/api/stats/play). /api/play/sources puts a copy on a provider that's been
+ * very slow (over 8 seconds) or didn't answer when looked at in the last ten minutes after the others (failed plays
+ * are Channel health's to rank, as the admin set it) — so it isn't the one
+ * tried first, which was where the 30–60 second starts came from.
+ */
+const listSpeed = new Map(); // list id → { ms (smoothed), failAt }
+function noteSpeed(lid, ms, ok) {
+  if (!lid) return;
+  const s = listSpeed.get(lid) || { ms: 0, failAt: 0 };
+  if (!ok) s.failAt = Date.now();
+  else { s.ms = s.ms ? s.ms * 0.6 + ms * 0.4 : ms; if (ms < 5000) s.failAt = 0; }
+  listSpeed.set(lid, s);
+}
+const slowList = (lid) => { const s = lid && listSpeed.get(lid); return !!s && ((s.failAt && Date.now() - s.failAt < 600e3) || s.ms > 8000); };
 route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   if (settings().smartFailover === false) return { order: [] };
@@ -1631,6 +1647,11 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   const use = listUsage();
   const others = (lid) => (use.get(lid) || []).filter((c) => !(c.relayShared ? (c.viewers || []).every((v) => v.id === ctx.conn) : c.id === ctx.conn));
   const out = [], tasks = [], lists = new Set();
+  // (Answered 1.5 seconds after the first copy that works, not when the slowest has given up — up to 8 s: a copy still
+  // silent by then is "slow to answer", which the player treats as not working.)
+  const t0 = Date.now(), asked = new Set();
+  let done = false, firstOk;
+  const someOk = new Promise((ok) => { firstOk = ok; });
   for (const alt of copies) {
     const a = alt >= 0 ? it.alts[alt] : { u: it.u, h: it.h, l: it.src };
     const lid = srcList(it, alt);
@@ -1642,14 +1663,19 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
     lists.add(lid);
     const h = proxy.headers({ h: a.h || {} });
     const via = viaRelay(a.u, h, lid);
+    asked.add(alt);
     tasks.push(probeCopy(via ? via.url : a.u, via ? via.headers : h, { fetch: fetchAny, timeout: 8000 }).then((r) => {
       const e = { alt, ok: !!r.ok, ms: r.ms || 0, err: r.ok ? '' : r.err || 'No answer', list: lid };
+      noteSpeed(lid, e.ms, e.ok);
       if (p9Hooks.probed) { try { p9Hooks.probed(it, alt, r); } catch {} }
-      out.push(e);
+      if (e.ok) firstOk();
+      if (!done) { out.push(e); asked.delete(alt); }
       return e;
     }));
   }
-  await Promise.all(tasks);
+  await Promise.race([Promise.all(tasks), someOk.then(() => new Promise((ok) => setTimeout(ok, 1500)))]);
+  done = true;
+  for (const alt of asked) out.push({ alt, ok: false, ms: Date.now() - t0, err: 'Slow to answer', slow: true });
   const rank = (e) => (e.ok ? 0 : e.untested ? 1 : e.busy ? 2 : 3);
   out.sort((x, y) => rank(x) - rank(y) || (x.ms || 0) - (y.ms || 0));
   // (A one-connection account: give the provider a moment to let the look's connection go before the device opens its own.)
@@ -1668,8 +1694,10 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
     if (src && !src.local && isUrl(src.input)) provider = new URL(src.input).host;
   } catch {}
   if (it && p9Hooks.played) { try { p9Hooks.played(it, Number.isInteger(b.alt) ? b.alt : -1, b); } catch (e) { log(`Channel health: ${e.message}`); } }
-  if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; }
-  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type }) };
+  if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; } // (a copy that failed: Channel health's to rank, as the admin set it)
+  // (Played straight from the provider: how long it took is the provider's doing. A converted start isn't counted.)
+  if (it && Number(b.ms) > 0 && !b.failed && /^(native|direct|helper)$/.test(String(b.route || ''))) noteSpeed(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Math.min(Number(b.ms), 120000), true);
+  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type, startMs: b.ms }) };
 });
 route('POST', '/api/stats/watch', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);

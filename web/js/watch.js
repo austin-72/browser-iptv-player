@@ -5,6 +5,7 @@ V.watch = { it: null, list: null, mini: false };
 
 /** Plays an item. opts: { startAt, list (for channel up/down), resume: true|false (ask), party, quiet } */
 V.play = function (it, opts) {
+  V._clickAt = Date.now(); // ("Time to start": counted from here — player.js _statStart)
   if (it && it.k) V.ls.session('playedHere', it.k);
   opts = opts || {};
   if (!it) return;

@@ -100,6 +100,19 @@ test('quick start, and episodes read again after a restart', { timeout: 90000, s
     assert.strictEqual(png.slice(1, 4).toString(), 'PNG');
     assert.strictEqual(png.readUInt32BE(16), 320, 'full width');
 
+    // A copy on a very slow provider goes after the others next time (the 30–60 second starts came from a slow copy
+    // being tried first). A second list with the same series: each episode then has a backup copy.
+    await api('POST', '/api/admin/lists', { type: 'xtream', name: 'Y', server: `http://localhost:${panel.address().port}`, username: 'u', password: 'p' });
+    let two = null;
+    for (let i = 0; i < 100 && !two; i++) { const r = (await api('GET', `/api/show/${show.k}/episodes`)).body; const l = Array.isArray(r) ? r : (r && r.episodes) || []; const x = l.find((e) => e.e === 1); if (x && x.a && x.a.length) two = x; else await wait(150); }
+    assert.ok(two, 'the episode has a backup copy');
+    const firstAlt = (await api('POST', '/api/play/sources', { k: two.k })).body.sources[0].alt;
+    // (That copy took 20 seconds to start, straight from its provider.)
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, route: 'native', reason: '', ms: 20000 });
+    const after = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
+    assert.notStrictEqual(after[0], firstAlt, 'the slow copy is no longer first: ' + JSON.stringify(after));
+    assert.strictEqual(after[after.length - 1], firstAlt);
+
     // A restart: the server no longer knows the episode until its series is read again.
     app.kill(); await new Promise((r) => app.once('exit', r));
     await boot();

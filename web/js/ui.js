@@ -172,14 +172,15 @@ V.hrefOf = function (it) {
   return '#/channel/' + encodeURIComponent(it.k);
 };
 
-/** Clicking a card: channels and "continue" cards play straight away; titles open their page. */
+/** Clicking a card: channels play straight away; titles — those in Continue watching too — open their page, which offers
+    Resume (a series: "Resume S1:E3", or the next episode). */
 V.cardClick = function (e) {
   var a = e.target.closest('a.card');
   if (!a) return;
   var it = V.entry(a.dataset.k);
   if (!it) return;
   if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
-  if (it.t === 'live' || it.t === 'radio' || a.dataset.play === '1' || (it.t === 'episode' && a.closest('[data-row=continue]'))) {
+  if (it.t === 'live' || it.t === 'radio' || a.dataset.play === '1') {
     e.preventDefault();
     var row = a.closest('[data-list]');
     V.play(it, { list: row && row._items && (it.t === 'live' || it.t === 'radio') ? row._items.filter(function (x) { return x.t === it.t; }) : undefined });

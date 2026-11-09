@@ -121,7 +121,7 @@ V.route('home', function (view) {
       // (Light catalogue: these are the likeliest to be played next — their stream addresses fetched now, not after Play.)
       var need = cw.map(function (c) { return c.it; }).filter(function (x) { return x && x.lz && !x.u; }).slice(0, 40).map(function (x) { return x.k; });
       if (need.length && V.fetchAddresses) V.fetchAddresses(need).catch(function () {});
-      add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: cw.map(function (c) { return { it: c.it, next: c.next, play: true }; }), cardOpts: { shape: 'wide', showName: true }, play: true });
+      add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: cw.map(function (c) { return { it: c.it, next: c.next }; }), cardOpts: { shape: 'wide', showName: true } }); // (opens its page, with Resume: ui.js V.cardClick)
     },
     list: function () { add({ id: 'list', title: 'My List', items: V.myListOrdered ? V.myListOrdered().filter(notHidden) : keysToItems(S.data.list), more: '#/mine' }); },
     neweps: function () {

@@ -90,6 +90,18 @@
           return '<tr><td><i class="sw s' + gi + '"></i><b>' + V.esc(r[1]) + '</b><br><small class="dim">' + V.esc(r[2]) + '</small></td><td class="r num">' + (plays[r[0]] || 0).toLocaleString() + '</td><td class="r num">' + dur(secs[r[0]]) + '</td><td class="r num">' + pct(secs[r[0]] || 0, allSecs) + '</td></tr>';
         }).join('') + '</tbody></table></div></section>';
 
+      // Time to start: from pressing Play to the picture (player.js) — overall, and per provider (slowest first).
+      var stt = d.start || {};
+      if (stt.n) {
+        var secOf = function (ms, n) { return (Math.round(ms / n / 100) / 10).toLocaleString() + ' s'; };
+        var slowHosts = (d.hosts || []).filter(function (h) { return h.starts >= 3; }).sort(function (a, b) { return b.startMs / b.starts - a.startMs / a.starts; }).slice(0, 12);
+        html += '<section class="card-sec"><h2>Time to start</h2><p>From pressing Play to the picture: <b>' + secOf(stt.ms, stt.n) + '</b> on average over ' + stt.n.toLocaleString() + ' plays. ' +
+          pct(stt.n - (stt.s5 || 0), stt.n) + ' started within 5 seconds; ' + (stt.s15 || 0).toLocaleString() + ' took over 15 seconds' + (stt.s30 ? ', ' + stt.s30.toLocaleString() + ' over 30' : '') + '.</p>' +
+          (slowHosts.length ? '<div class="tbl-wrap"><table class="st-table"><thead><tr><th>Provider</th><th class="r">Plays</th><th class="r">Average start</th><th class="r">Over 15 s</th></tr></thead><tbody>' +
+            slowHosts.map(function (h) { return '<tr><td>' + V.esc(h.name) + '</td><td class="r num">' + h.starts.toLocaleString() + '</td><td class="r num">' + secOf(h.startMs, h.starts) + '</td><td class="r num">' + (h.slow || 0).toLocaleString() + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') +
+          '<p class="dim small">Slow starts are also in Admin → Error reports (as “Slow to start”), with what each step took.</p></section>';
+      }
+
       // Why through the server
       var reasons = Object.keys(d.reasons).sort(function (a, b) { return d.reasons[b] - d.reasons[a]; });
       if (reasons.length) {

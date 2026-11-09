@@ -83,3 +83,7 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
    the posters elsewhere (endcard.js). */
 .ve-card .ve-p { position: relative; background: var(--tint, rgba(255,255,255,.08)); }
 .ve-card .ve-p .art { position: relative; }
+
+/* Starting to play: the step, how long it's been, and — when it's slow — what's being done about it (player.js _step). */
+.vp-msg[data-step] .s { margin-bottom: .35rem; font-variant-numeric: tabular-nums; }
+.vp-msg[data-step] .s.h { margin: .6rem auto 0; max-width: 30rem; font-size: .88em; opacity: .85; }
