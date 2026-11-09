@@ -431,7 +431,12 @@ function inputOf(it, alt = -1, overrideUrl = '', { raw = false } = {}) {
   // about a stream is kept by its address.)
   if (!raw && /^https?:\/\//i.test(u || '') && relayOf.uses(lists.ownerOf(u) || (alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src))) {
     const h = { ...(settings().userAgent ? { 'User-Agent': settings().userAgent } : {}), ...(a.h || {}) };
-    return { input: relayWrapped(u, h), headers: {}, viaRelay: true, raw: u };
+    // Films and episodes (one file, not HLS): from the relay's own copy of the whole film — the same one devices play
+    // from — so a film is fetched from the provider once, at full speed, the conversion starts on what's already
+    // there and seeks within it straight away, and the provider connection is free again once it's all in.
+    const whole = (it.t === 'movie' || it.t === 'episode') && !overrideUrl && !/^(hls|dash)$/.test(kindOfUrl(u))
+      ? { whole: true, k: it.k, alt, list: alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src, len: it.d || 0 } : null;
+    return { input: relayWrapped(u, h, whole), headers: {}, viaRelay: true, raw: u, whole: !!whole };
   }
   // Behind a proxy: ffmpeg reads it through the server's own relay, which goes through the proxy.
   if (isUrl(u) && listProxy(lists.ownerOf(u) || (alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src))) {
@@ -441,11 +446,11 @@ function inputOf(it, alt = -1, overrideUrl = '', { raw = false } = {}) {
 }
 /** The stream relay's address for one provider address, for this server's own use (kept for a day; good for a week). */
 const relayMemo = new Map();
-function relayWrapped(u, h) {
-  const key = u + '\n' + JSON.stringify(h) + '\n' + ((settings().relay || {}).url || '');
+function relayWrapped(u, h, whole) {
+  const key = u + '\n' + JSON.stringify(h) + '\n' + ((settings().relay || {}).url || '') + (whole ? '\nw' + whole.k + '|' + whole.alt : '');
   const m = relayMemo.get(key);
   if (m && Date.now() - m.at < 86400e3) return m.url;
-  const url = relayOf.wrap(u, h, { ttl: 7 * 86400 });
+  const url = relayOf.wrap(u, h, { ttl: 7 * 86400, ...(whole || {}) });
   if (relayMemo.size > 20000) relayMemo.clear();
   relayMemo.set(key, { url, at: Date.now() });
   return url;

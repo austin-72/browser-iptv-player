@@ -458,6 +458,17 @@ test('the real server: relay addresses for direct streams, per list, for other a
       assert.ok(reach.url.startsWith(r2.base + '/e/') && !reach.url.includes('s3cret'), reach.url);
       const master = await (await fetch(reach.url)).text();
       assert.match(master, /#EXT-X-STREAM-INF/, 'the channel’s User-Agent went with it');
+      // The server's own reading of a film — a conversion, a look inside — is from the relay's whole copy too (the one
+      // devices play from), so the film is fetched from the provider once.
+      let ffprobe = true;
+      try { require('child_process').execFileSync('ffprobe', ['-version'], { stdio: 'ignore' }); } catch { ffprobe = false; }
+      if (ffprobe) {
+        await api('GET', `/api/probe/${film.k}?alt=-1`); // (not a real video: what matters is how the relay was asked)
+        const t0 = String(Math.floor(Date.now() / 1000));
+        const sig0 = require('crypto').createHmac('sha256', secret).update('downloads::' + t0).digest('base64url').slice(0, 32);
+        const dl0 = await (await fetch(`${r2.base}/downloads?t=${t0}&s=${sig0}`)).json();
+        assert.ok(dl0.films.some((f) => f.ids.includes(require('../lib/streamrelay').playId(film.k, -1))), 'asked for whole: ' + JSON.stringify(dl0));
+      }
       reach = (await api('POST', '/api/play/reach', { k: film.k, origin: base })).body;
       assert.strictEqual(reach.kind, 'native');
       // A film: the relay is asked to fetch it whole (the channel isn't).

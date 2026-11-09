@@ -176,6 +176,7 @@ PP.load = function (it, opts) {
   // Smart failover: a copy that's slow to start (6 s) — the others are looked at meanwhile, so if it fails the next
   // one is a copy that works right now.
   clearTimeout(this._raceT); clearTimeout(this._stallT);
+  if (!opts.quiet || opts.alt !== undefined) this._dropWarm(); // (another title, or another copy: a head start for the old one isn't wanted)
   if (!opts.quiet && !opts.only && it.t !== 'catchup' && S.settings && S.settings.smartFailover !== false && it.a && it.a.length) {
     var rtok = token;
     var loadAt = Date.now();
@@ -243,12 +244,17 @@ PP.load = function (it, opts) {
     var a = plan[i];
     var t0 = Date.now();
     if (!self._everStarted || !opts.quiet) self._stepFor(a, i, plan.length);
+    var later = a.via !== 'session' ? plan.slice(i + 1).filter(function (x) { return x.via === 'session'; })[0] : null;
+    var warmT = later ? setTimeout(function () { if (token === self.token && !self.started) self._warmSession(later, opts.startAt || 0); }, 4000) : null;
     return self._attempt(a, token, opts.startAt || 0).then(function () {
+      clearTimeout(warmT);
       if (token !== self.token) return;
+      if (a.via !== 'session') self._dropWarm(); // (this way started: the head start isn't needed)
       self.attempt = a;
       if (V.crumb) V.crumb('player', 'started via ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' in ' + (Date.now() - t0) + ' ms');
       self._afterStart();
     }, function (e) {
+      clearTimeout(warmT);
       if (token !== self.token) return;
       // The server can't be reached (restarting after an update, or the connection dropped): wait for it and try this
       // same way again — the other ways and copies all go through it too, and would only fail the same way.
@@ -512,6 +518,9 @@ PP._planNow = function (it, force) {
       // (For files the server doesn't ask whether the page may read them — a <video> doesn't need it — so the
       // conversion finds out itself, at once.)
       if (!info.blocked && !q && V.mbSupported() && (it.t === 'movie' || it.t === 'episode' || (info.finite && it.t !== 'live' && it.t !== 'radio')) && (info.kind === 'ffmpeg' || info.kind === 'native' || (info.kind === 'ts' && info.mse))) plan.push({ via: 'browser', kind: 'mb', url: info.url || url });
+      // (iPhones and iPads: the server's conversion before this browser's own — there it often hung, and the server's
+      // started in a few seconds.)
+      if (V.device.ios && sessions.length && routing !== 'direct-only') { var mbs = plan.filter(function (x) { return x.via === 'browser'; }); if (mbs.length) { plan = plan.filter(function (x) { return x.via !== 'browser'; }); sessions = sessions.slice(0, 1).concat(mbs, sessions.slice(1)); } }
       if (info.kind === 'ffmpeg') return plan.concat(routing === 'direct-only' ? [] : sessions);
       if (routing === 'direct-only') {
         if (!plan.length) throw new Error(info.blocked === 'headers' ? 'This channel needs special headers that browsers can’t send. Ask the admin to allow playback through the server.' : info.blocked === 'mixed' ? 'This page is https but the stream is plain http, which browsers block. Ask the admin to allow playback through the server.' : 'The provider doesn’t let browsers play this directly. Ask the admin to allow playback through the server.');
@@ -693,7 +702,10 @@ PP._attempt = function (a, token, startAt) {
     v.addEventListener('error', onErr);
     v.addEventListener('canplay', onCanPlay);
     // Direct attempts give up quickly so the server can take over.
-    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 60000 : a.via === 'browser' ? 45000 : a.via === 'direct' || a.via === 'split' ? (V.signMedia() ? 18000 : 12000) : 25000); // (a TV's player is slower to get going)
+    // (How long each way gets before the next is tried. Short, so a start that's stuck doesn't keep the viewer waiting:
+    // the server's conversion — usually what comes next — has had a head start meanwhile, see _warmSession. The
+    // conversion in this browser had 45 s: on iPhones it could hang that long before the server took over.)
+    var timer = setTimeout(function () { fail(new Error('It didn’t start in time.')); }, a.via === 'session' ? 30000 : a.via === 'browser' ? 8000 : a.via === 'direct' || a.via === 'split' ? (V.signMedia() ? 12000 : 8000) : 12000); // (a TV's player is slower to get going)
     // A server conversion that's still showing nothing after 25 s: the conversion is usually fine and it's this
     // browser's player that's stuck (some TV and console browsers claim hls.js support that doesn't work). Swap to
     // the other HLS player once; whichever starts is remembered for this device.
@@ -767,10 +779,12 @@ PP._attach = function (a, token, startAt, over) {
       return go;
     });
   } else if (a.via === 'session') {
-    var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
-    if (a.audioOnly) body.audioOnly = true;
-    if (V.signMedia()) body.sign = true; // (signed in the same answer: server.js)
-    prep = V.api('/api/play/session', { body: body }).then(function (s) {
+    // (Started early — while the way before this one was still trying: _warmSession — and that's this one: used.)
+    var w = this._warmS, body = this._sessionBody(a, startAt);
+    this._warmS = null;
+    var asked = w && w.key === JSON.stringify(body) ? w.p : V.api('/api/play/session', { body: body });
+    if (w && asked !== w.p) w.p.then(function (s0) { V.api('/api/session/' + s0.sessionId, { method: 'DELETE' }).catch(function () {}); }, function () {});
+    prep = asked.then(function (s) {
       // (Too late: end it, or it keeps converting — and holding a provider connection — with nobody watching.)
       if (gone()) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
       self.sessionId = s.sessionId;
@@ -796,6 +810,35 @@ PP._attach = function (a, token, startAt, over) {
     prep = V.mediaUrl(go.url).then(function (u) { go.url = u; return go; });
   }
   return prep.then(function (g) { if (g && !gone()) return self._attachMedia(a, token, startAt, g.kind, g.url, gone); });
+};
+/** What /api/play/session is asked for this way of playing. */
+PP._sessionBody = function (a, startAt) {
+  var it = this.it;
+  var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: it.t === 'catchup' ? it.u : undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
+  if (a.audioOnly) body.audioOnly = true;
+  if (V.signMedia()) body.sign = true; // (signed in the same answer: server.js)
+  return body;
+};
+/**
+ * A head start: the way being tried hasn't started after 4 seconds, and a server conversion comes next — the server
+ * starts getting it ready now, so if this way fails it's (nearly) there, instead of only starting then. Only when the
+ * provider allows a second connection, or the film comes from the stream relay's own copy (no second connection).
+ * Not needed in the end (this way started): ended at once.
+ */
+PP._warmSession = function (a, startAt) {
+  if (this._warmS || !S.settings.ffmpeg) return;
+  var ri = this.reachInfo || {};
+  var shared = ri.relay && this.vod;
+  if (!shared && this._connLimit && this._connLimit < 2) return;
+  var body = this._sessionBody(a, startAt);
+  if (V.crumb) V.crumb('player', 'getting the server’s conversion ready meanwhile (' + a.mode + ')');
+  this._warmS = { key: JSON.stringify(body), p: V.api('/api/play/session', { body: body }) };
+  this._warmS.p.catch(function () {});
+};
+PP._dropWarm = function () {
+  var w = this._warmS;
+  this._warmS = null;
+  if (w) w.p.then(function (s) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); }, function () {});
 };
 PP._attachMedia = function (a, token, startAt, kind, url, gone) {
   var self = this, v = this.video, it = this.it;
@@ -1545,7 +1588,11 @@ PP._stepSub = function () {
 PP._stepHint = function () {
   var secs = (Date.now() - (this._stT0 || Date.now())) / 1000;
   if (this._racing && !this.started) return 'Taking a moment: checking the other copies at the same time…';
+  if (this._warmS && !this.started) return 'Taking a moment: the server is getting its own version ready at the same time, in case this way doesn’t start.';
   if (secs < 10) return '';
+  // (The provider answered quickly when asked: it's this way of playing it that's slow, not the provider.)
+  var me = this._raced && this._raced.order ? this._raced.order.filter(function (e) { return e.alt === this.alt; }, this)[0] : null;
+  if (me && me.ok && me.ms < 2500) return 'The provider is answering quickly; this way of playing it is what’s slow. The next way is tried shortly.';
   var more = this._altsLeft && this._altsLeft.length;
   if (more) return 'Slow to answer. If another copy answers faster, it switches to it by itself.';
   if (secs > 25) return 'This provider is very slow right now. It keeps trying, then moves on to another way of playing it.';
