@@ -4,13 +4,17 @@
 (function () {
   // ------------------------------------------------------------ subtitles found online
   var ext = function (p) { return p._extSubs || (p._extSubs = []); };
-  var subUrl = function (p, url) { return url + (p.sessionId && p.offset ? '?offset=' + p.offset : ''); };
+  var subUrl = function (p, url) { return url + (p.sessionId && p.offset ? (url.indexOf('?') < 0 ? '?' : '&') + 'offset=' + p.offset : ''); };
 
   /** Adds a fetched subtitle to the video and shows it. */
-  V.addExtSub = function (p, url, label, lang) {
+  V.addExtSub = function (p, url, label, lang, again) {
     var v = p.video;
-    var list = ext(p);
+    var list = ext(p).filter(function (x) { return x.el && x.el.parentNode === v; }); // (a reload took the old ones off)
+    p._extSubs = list;
+    // (Kept, so a reload — a jump in a converted stream, a new quality — puts it back with the times moved right.)
+    p._extKeep = { k: p.it && p.it.k, url: url, label: label, lang: lang };
     var have = list.filter(function (x) { return x.url === url; })[0];
+    if (have && again) { have.el.remove(); list.splice(list.indexOf(have), 1); have = null; }
     if (!have) {
       var tr = document.createElement('track');
       tr.kind = 'subtitles';
@@ -35,10 +39,10 @@
     p._extSubs = list;
     if (!list.length) return;
     var v = p.video;
-    var hideExt = function () { list.forEach(function (x) { if (x.el.track) x.el.track.mode = 'disabled'; }); p._extOn = null; };
+    var hideExt = function () { list.forEach(function (x) { if (x.el.track) x.el.track.mode = 'disabled'; }); p._extOn = null; p._extKeep = null; };
     var items = out.subs ? out.subs.items.filter(function (x) { return !list.some(function (e) { return e.label === x.label; }); }).map(function (x) { var fn = x.fn; return { label: x.label, on: x.on && !p._extOn, fn: function () { hideExt(); fn(); } }; }) : [{ label: 'Off', on: !p._extOn, fn: hideExt }];
     list.forEach(function (e) {
-      items.push({ label: e.label, on: p._extOn === e.url, fn: function () { for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === e.label ? 'showing' : 'disabled'; p._extOn = e.url; } });
+      items.push({ label: e.label, on: p._extOn === e.url, fn: function () { for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === e.label ? 'showing' : 'disabled'; p._extOn = e.url; p._extKeep = { k: p.it && p.it.k, url: e.url, label: e.label, lang: e.lang }; } });
     });
     out.subs = { value: p._extOn ? (list.filter(function (e) { return e.url === p._extOn; })[0] || {}).label : out.subs ? out.subs.value : 'Off', items: items };
   };
@@ -54,13 +58,15 @@
     V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k)).then(function (r) {
       var box = V.$('.os-list', body);
       if (!box) return;
-      if (!r.list.length) { box.innerHTML = '<p>Nothing found for “' + V.esc(it.n) + '” in your languages.</p>'; return; }
+      // (A source that couldn't search — SubDL with a bad key, or one that's down — is said, not left out silently.)
+      var warn = (r.warnings || []).length ? '<p class="dim small os-warn">' + r.warnings.map(V.esc).join('<br>') + '</p>' : '';
+      if (!r.list.length) { box.innerHTML = '<p>Nothing found for “' + V.esc(it.n) + '” in your languages.</p>' + warn; return; }
       var left = osLeft(r.quota);
       var anyCostly = r.list.some(function (x) { return x.costly; });
       box.innerHTML = '<ul class="os-ul">' + r.list.map(function (x) {
         return '<li><button class="btn ghost block os-pick" data-f="' + V.esc(x.id || x.fileId) + '" data-l="' + V.esc(x.lang) + '" data-s="' + V.esc(x.from || '') + '"' + (x.costly && left === 0 ? ' disabled' : '') + '><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="truncate">' + V.esc(x.name) + '</span><small class="dim">' +
           [x.from, x.pack ? 'whole season' : '', x.downloads ? V.plural(x.downloads, 'download') : '', x.hi ? 'for the hard of hearing' : '', x.machine ? 'machine translated' : '', x.fromTrusted ? 'trusted' : '', x.cached ? 'saved here' : x.costly ? 'uses 1 of today’s OpenSubtitles downloads' : ''].filter(Boolean).join(' · ') + '</small></button></li>';
-      }).join('') + '</ul>' + (anyCostly ? '<p class="dim small">' + (left !== null ? 'OpenSubtitles: ' + V.plural(left, 'download') + ' left today.' : 'OpenSubtitles allows only a few downloads a day.') + ' The others are free.</p>' : '');
+      }).join('') + '</ul>' + warn + (anyCostly ? '<p class="dim small">' + (left !== null ? 'OpenSubtitles: ' + V.plural(left, 'download') + ' left today.' : 'OpenSubtitles allows only a few downloads a day.') + ' The others are free.</p>' : '');
       box.onclick = function (e) {
         var b = e.target.closest('.os-pick');
         if (!b || b.disabled) return;

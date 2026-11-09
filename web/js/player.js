@@ -165,7 +165,7 @@ PP.load = function (it, opts) {
   opts = opts || {};
   var self = this;
   var token = ++this.token;
-  if (!opts.quiet) { this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; this._fileTracks = null; this._fileSub = -1; }
+  if (!opts.quiet) { this._extKeep = null; this.audioTrack = undefined; this._saveProgress(); this._accountWatched(); this._inHistory = false; this.reconnects = 0; this._watchStart = Date.now(); this._watched = 0; this._forced = !!opts.force; this._statFlush(); this._statSig = null; this._statId = null; this._fileTracks = null; this._fileSub = -1; }
   this._triedDirect = false;
   this._failedWith = null;
   this._loadAt = opts.startAt || 0; // (where this load starts: a backup stream tried after it fails starts there too)
@@ -1847,8 +1847,65 @@ PP._applySubStyle = function () {
   var el = V.$('#cue-style') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'cue-style' }));
   var edge = { shadow: '0 2px 4px rgba(0,0,0,.9)', outline: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 4px #000', raised: '1px 1px 0 #000, 2px 2px 0 #000', none: 'none' }[st.edge] || 'none';
   var font = { sans: 'system-ui, sans-serif', serif: 'Georgia, serif', mono: 'ui-monospace, monospace', casual: '"Comic Sans MS", "Comic Neue", cursive', large: 'system-ui, sans-serif' }[st.font] || 'system-ui, sans-serif';
-  el.textContent = '.vp video::cue { font-size: ' + Math.round((st.size || 100) * 0.032 * 100) / 100 + 'em; color: ' + st.color + '; background: ' + st.bg + '; text-shadow: ' + edge + '; font-family: ' + font + '; line-height: 1.25; }' +
-    '.vp { --cue-scale: ' + (st.size || 100) / 100 + '; }';
+  // Size: from the height of the picture on screen — 4.5% of it at 100% (a TV's or a film's usual size), so it's the
+  // same size against the picture in a small window, full screen, on a phone held upright or on a TV. (It was "3.2em":
+  // over three times the page's text size, which each browser took differently, and nothing to do with the picture.)
+  var px = this._cuePx(st.size || 100);
+  this._cueAt = px;
+  el.textContent = '.vp video::cue { font-size: ' + px + 'px; color: ' + st.color + '; background: ' + st.bg + '; text-shadow: ' + edge + '; font-family: ' + font + '; line-height: 1.25; }' +
+    // (Closed captions — laid out on a 32-column grid — a little smaller: captions.js.)
+    '.vp.cc-on video::cue { font-size: ' + Math.round(px * 0.7) + 'px; }' +
+    '.vp { --cue-scale: ' + (st.size || 100) / 100 + '; --cue-px: ' + px + 'px; }';
+  this._watchCueSize();
+};
+/** The subtitle size in pixels for this size setting (100 = normal), from the picture's height on screen. */
+PP._cuePx = function (size) {
+  var v = this.video, h = (v && v.clientHeight) || 0;
+  // (The picture itself, inside the box: a wide film in a tall box — a phone held upright — has bars above and below.)
+  if (v && v.videoWidth && v.videoHeight && v.clientWidth && (!this.fit || this.fit === 'contain')) h = Math.min(h, v.clientWidth * v.videoHeight / v.videoWidth);
+  if (!h) h = window.innerHeight || 720;
+  var px = h * 0.045 * size / 100;
+  return Math.round(Math.max(13 * size / 100, Math.min(80 * size / 100, px)));
+};
+/** The size follows the picture: a window resized, full screen, a phone turned, a new video's shape. */
+PP._watchCueSize = function () {
+  var self = this, v = this.video;
+  if (!v || v._cueWatch) return;
+  v._cueWatch = true;
+  var again = function () {
+    var st = V.pref('subStyle') || {};
+    var px = self._cuePx(st.size || 100);
+    if (Math.abs(px - (self._cueAt || 0)) >= 2) self._applySubStyle();
+    self._placeCues();
+  };
+  if (window.ResizeObserver) { try { new ResizeObserver(again).observe(v); } catch (e) {} }
+  window.addEventListener('resize', again);
+  v.addEventListener('loadedmetadata', again);
+  // Where the lines go: just above the bottom of the picture — not the bottom of the video's box, which on a phone
+  // held upright (a wide picture in a tall box) is far below it, in the black.
+  var hook = function (t) { if (t && !t._placed) { t._placed = true; t.addEventListener('cuechange', function () { self._placeCues(t); }); } };
+  for (var i = 0; i < v.textTracks.length; i++) hook(v.textTracks[i]);
+  if (v.textTracks.addEventListener) v.textTracks.addEventListener('addtrack', function (e) { hook(e.track); });
+};
+/** Puts the lines showing now just above the bottom of the picture (lines a subtitle file places itself, and closed
+    captions, keep their own places). */
+PP._placeCues = function (only) {
+  var v = this.video;
+  if (!v || !v.clientHeight) return;
+  var H = v.clientHeight, W = v.clientWidth, h = H;
+  if (v.videoWidth && v.videoHeight && (!this.fit || this.fit === 'contain')) h = Math.min(H, W * v.videoHeight / v.videoWidth);
+  var bottom = (H + h) / 2 - h * 0.05; // (5% of the picture up from its bottom edge)
+  var line = Math.max(10, Math.min(100, Math.round(bottom / H * 1000) / 10));
+  var tracks = only ? [only] : Array.prototype.slice.call(v.textTracks);
+  tracks.forEach(function (t) {
+    if (t.mode !== 'showing' || t.kind === 'captions' || !t.activeCues) return;
+    for (var j = 0; j < t.activeCues.length; j++) {
+      var c = t.activeCues[j];
+      if (c._own === undefined) c._own = c.line !== 'auto' && c.line !== undefined && !c._placedAt;
+      if (c._own || c._placedAt === line || !('snapToLines' in c)) continue;
+      try { c.snapToLines = false; c.lineAlign = 'end'; c.line = line; c._placedAt = line; } catch (e) {}
+    }
+  });
 };
 
 PP.screenshot = function () {
@@ -1937,7 +1994,11 @@ PP._loadExtras = function () {
     if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
     V.api('/api/probe/' + encodeURIComponent(it.k) + '?alt=' + this.alt).then(function (p) { if (tok === me.token) { me._fileTracks = { audio: me.mb ? me.mb.audioTracks || [] : p.audio || [], subs: (p.subs || []).filter(function (s) { return s.text || (s.pic && V.picdec); }) }; me._menuRefresh(); me._resumeSubs(); } }).catch(function () {});
   } else if (this.mb) this._fileTracks = { audio: this.mb.audioTracks || [], subs: [] };
-  if (this.sessionInfo) this._resumeSubs();
+  // (Subtitles fetched online that were on: on again — a reload takes every subtitle off the video, and a conversion
+  // that started somewhere else needs their times moved by the new amount.)
+  var keep = this._extKeep;
+  if (keep && keep.k === it.k && V.addExtSub) V.addExtSub(this, keep.url, keep.label, keep.lang, true);
+  else if (this.sessionInfo) this._resumeSubs();
   if (it.t === 'episode' || it.t === 'movie') {
     var me2 = this;
     V.api('/api/markers/' + encodeURIComponent(it.k)).then(function (m) { if (tok === me2.token) { me2.markers = m; me2._drawMarks(); } }).catch(function () {});
@@ -2326,6 +2387,7 @@ PP._replaceVideo = function () {
   this._audioSrc = null; this._gain = null; this.boost = 1;
   this._applyFit();
   this._bindVideo(nv);
+  this._watchCueSize();
 };
 
 PP._mediaSession = function () {

@@ -70,11 +70,8 @@
   // ---------------------------------------------------------------- closed captions: a little smaller
   // CEA-608 captions are laid out on a 32-column grid, so at the full subtitle size they wrap a lot. While captions
   // show, they're drawn at 70% of the subtitle size (still following Subtitle style).
-  function capStyle() {
-    var st = V.pref('subStyle') || {};
-    var el = V.$('#cc-size-style') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'cc-size-style' }));
-    el.textContent = '.vp.cc-on video::cue { font-size: ' + Math.round((st.size || 100) * 0.032 * 0.7 * 100) / 100 + 'em; }';
-  }
+  // (The size itself is worked out with the subtitles' — from the picture's height: player.js _applySubStyle.)
+  function capStyle() { if (V.player && V.player._applySubStyle) V.player._applySubStyle(); V.$('#cc-size-style') || document.head.appendChild(Object.assign(document.createElement('style'), { id: 'cc-size-style' })); }
   V.on('prefs', function (k) { if (k === 'subStyle') capStyle(); });
   PP._capsShowing = function () {
     var tt = this.video && this.video.textTracks, on = false;

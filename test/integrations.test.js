@@ -135,6 +135,22 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     assert.deepStrictEqual([t.subdl.ok, t.gestdown.on, t.opensubtitles.on], [false, true, false]);
     conf.subdl.apiKey = 'sdkey'; subs.clear();
     assert.strictEqual((await subs.search({ parentTmdb: 4242, query: 'Show', season: 2, episode: 3, langs: ['en'] })).length, 2, 'SubDL still answers with Gestdown down');
+    // Not under its TMDB number at SubDL: asked again by name and year. No language field on its subtitles: the one
+    // language asked for.
+    subs.clear();
+    const nameless = await subs.search({ tmdb: '777', query: 'Nameless Film', year: 2019, langs: ['en'] });
+    const sdl = nameless.filter((x) => x.source === 'subdl');
+    assert.strictEqual(sdl.length, 1, JSON.stringify(nameless));
+    assert.strictEqual(sdl[0].lang, 'en');
+    const asks = m.state.subs.subdl.slice(-2);
+    assert.deepStrictEqual([asks[0].tmdb_id, asks[1].tmdb_id, asks[1].film_name, asks[1].year], ['777', undefined, 'Nameless Film', '2019']);
+    // SubDL refusing (today's searches used up) while another source answers: said with the results, not dropped.
+    const osKey = conf.opensubtitles.apiKey; conf.opensubtitles.apiKey = 'oskey'; subs.clear();
+    const broken = await subs.search({ query: 'Broken', year: 2001, langs: ['en'] });
+    assert.ok(broken.length > 0);
+    assert.deepStrictEqual(broken.warnings, ['SubDL: Daily limit reached']);
+    conf.opensubtitles.apiKey = osKey; subs.clear();
+
     m.state.subs.gestdownDown = false;
     await assert.rejects(subs.get('zz:1'), /Bad subtitle/);
     await assert.rejects(subs.get('pn:0:0:abc'), /Bad subtitle/);
@@ -188,4 +204,12 @@ test('Webhooks: signed, only the events asked for, retried after a failure', asy
     const t = await h.test(saved.id);
     assert.ok(t.ok);
   } finally { h.stop(); m.close(); JsonFile.all.delete(h.store); }
+});
+
+test('subtitles from a conversion that started part-way: ffmpeg’s short times move too, earlier lines are dropped', () => {
+  const { shiftVtt } = require('../lib/routes-p5');
+  // (ffmpeg writes "mm:ss.mmm" under an hour: the end times of those weren't moved, so every earlier line showed at
+  // once from 0:00 — a screen full of subtitles on a film resumed through the server.)
+  const vtt = 'WEBVTT\n\n04:56.000 --> 04:59.000\nbefore\n\n04:58.000 --> 05:03.000\nacross\n\n05:02.000 --> 05:05.000 line:90%\nafter\n\n01:02:03.500 --> 01:02:05.000\nlater';
+  assert.strictEqual(shiftVtt(vtt, -300), 'WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nacross\n\n00:00:02.000 --> 00:00:05.000 line:90%\nafter\n\n00:57:03.500 --> 00:57:05.000\nlater');
 });

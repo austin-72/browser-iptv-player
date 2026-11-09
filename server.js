@@ -1901,16 +1901,9 @@ route('GET', '/api/subs/:k/:track', async (req, res, p, q, ctx) => {
   const src = inputOf(it, clampInt(q.get('alt'), -1, 99, -1));
   if (!src) throw new HttpError(404, 'Not found');
   let vtt = await media.subtitles(src.input, clampInt(p.track, 0, 99, 0), { headers: src.headers });
+  // (A conversion that started part-way through: the cues move back by that much — lib/routes-p5.js shiftVtt.)
   const off = Number(q.get('offset')) || 0;
-  if (off) {
-    const shift = (t) => {
-      const [h, m, s] = t.split(':');
-      const ms = Math.max(0, Math.round(((+h) * 3600 + (+m) * 60 + parseFloat(s) - off) * 1000));
-      const z = (n, l = 2) => String(n).padStart(l, '0');
-      return `${z(Math.floor(ms / 3600000))}:${z(Math.floor(ms / 60000) % 60)}:${z(Math.floor(ms / 1000) % 60)}.${z(ms % 1000, 3)}`;
-    };
-    vtt = vtt.replace(/(\d+:\d{2}:\d{2}\.\d{3})/g, (m) => shift(m)).replace(/^(\d{2}:\d{2}\.\d{3})/gm, (m) => shift('00:' + m));
-  }
+  if (off) vtt = require('./lib/routes-p5').shiftVtt(vtt, -off);
   sendText(res, 200, vtt, 'text/vtt; charset=utf-8');
 });
 route('GET', '/api/frame/:k', async (req, res, p, q, ctx) => {
@@ -3033,7 +3026,7 @@ otherAppConns = () => [...p4.outputs.active].filter(([, a]) => a.kind === 'hdhr'
 // Subtitles found online, the live viewing dashboard, the speed test, API keys and webhooks.
 const p5 = require('./lib/routes-p5')({
   route, requireProfile, requireAdmin, readJSON, D, lists, accounts, userdata, hub, tmdb, item, clientIp, listUsage, srcList, connLimit, accountAlerts, COMMANDS,
-  catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }),
+  catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }), log,
 });
 p5Public = p5.publicFlags;
 

@@ -22,6 +22,10 @@ function start(opts = {}) {
       state.subs.subdl.push(q);
       if (q.api_key !== 'sdkey') return json(res, 200, { status: false, error: 'Invalid API key' });
       if (state.subs.subdlOff) return json(res, 200, { status: false, error: "Can't find movie or tv" });
+      // (A title SubDL has under its name only — not its TMDB number — and whose subtitles carry no language field.)
+      if (q.tmdb_id === '777') return json(res, 200, { status: false, error: "Can't find movie or tv" });
+      if (q.film_name === 'Nameless Film') return json(res, 200, { status: true, results: [{ name: 'Nameless Film' }], subtitles: [{ release_name: 'Nameless.Film.2019', url: '/subtitle/nameless.zip' }] });
+      if (q.film_name === 'Broken') return json(res, 200, { status: false, error: 'Daily limit reached' });
       if (q.type === 'tv') return json(res, 200, { status: true, results: [{ name: 'Show' }], subtitles: [
         { release_name: 'Show.S02E03.WEB', language: 'EN', url: '/subtitle/ep-2-3.zip', season: 2, episode: 3, hi: false },
         { release_name: 'Show.S02.Complete', language: 'EN', url: '/subtitle/season-2.zip', season: 2, episode: null, full_season: true },
