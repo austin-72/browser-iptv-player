@@ -33,7 +33,7 @@ V.route('title', function (view, r) {
     '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(V.catLabel ? V.catLabel(it) : it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
     (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
-    (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select></div><div class="eps"><div class="spinner"></div></div></section>' : '') +
+    (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select>' + (S.settings.allowDownloads && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></section>' : '') +
     '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
   // A poster that doesn't load isn't replaced with initials here — the title is right next to it anyway.
   var pimg = V.$('.tp-poster img', view);
@@ -62,7 +62,7 @@ V.route('title', function (view, r) {
       '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
       '<button class="icon-btn lg" data-a="up" aria-pressed="' + (rate > 0) + '" title="I like this" aria-label="I like this">' + V.icon(rate > 0 ? 'thumbupf' : 'thumbup') + '</button>' +
       '<button class="icon-btn lg" data-a="down" aria-pressed="' + (rate < 0) + '" title="Not for me" aria-label="Not for me">' + V.icon(rate < 0 ? 'thumbdownf' : 'thumbdown') + '</button>' +
-      (!isShow && S.settings.allowDownloads ? '<button class="icon-btn lg" data-a="dl" title="Download" aria-label="Download">' + V.icon('download') + '</button>' : '') +
+      (S.settings.allowDownloads && !V.device.tv ? '<button class="icon-btn lg" data-a="dl" title="' + (isShow ? 'Download episodes' : 'Download') + '" aria-label="' + (isShow ? 'Download episodes' : 'Download') + '">' + V.icon('download') + '</button>' : '') +
       (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
       '<button class="icon-btn lg" data-a="more" title="More: queue, send, watch together…" aria-label="More">' + V.icon('dots') + '</button></div>';
     // (Drawn again — the episodes arrived, a rating — the button that had the focus keeps it: on a TV it would be lost.)
@@ -75,6 +75,9 @@ V.route('title', function (view, r) {
   };
   drawActs(S.epsByShow.get(it.k));
 
+  // (The episode list's "Season" download: that season chosen in the dialog.)
+  var dlSeason = V.$('[data-a=dlseason]', view);
+  if (dlSeason) dlSeason.addEventListener('click', function () { var s2 = V.$('[data-season]', view); V.downloads.chooseSeries(it, s2 && s2.value !== '' ? +s2.value : undefined); });
   V.$('.tp-acts', view).addEventListener('click', function (e) {
     var b = e.target.closest('[data-a]');
     if (!b) return;
@@ -86,7 +89,7 @@ V.route('title', function (view, r) {
     else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var cur = V.ratingOf(it.k); V.rate(it.k, cur === v ? 0 : v); drawActs(it._eps || S.epsByShow.get(it.k)); if (cur !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
     else if (a === 'share') V.shareDialog(it);
     else if (a === 'party') V.party.startDialog(it);
-    else if (a === 'dl') V.downloads.start(it);
+    else if (a === 'dl') { if (isShow) { var ss = V.$('[data-season]', view); V.downloads.chooseSeries(it, ss && ss.value !== '' ? +ss.value : undefined); } else V.downloads.start(it); }
     else if (a === 'more') V.itemMenu(b, it, { onPage: true });
     else if (a === 'bell' && V.toggleBell) V.toggleBell(it, b);
     else if (a === 'queue') V.queue.menu(b, it);

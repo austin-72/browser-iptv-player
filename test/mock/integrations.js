@@ -38,6 +38,9 @@ function start(opts = {}) {
     if (p.startsWith('/subdl-dl/subtitle/')) {
       const n = p.slice('/subdl-dl/subtitle/'.length);
       state.subs.subdlDownloads = (state.subs.subdlDownloads || 0) + 1;
+      // (A styled .ass subtitle only, and one with spaces and brackets in its name.)
+      if (n === 'styled.zip') return res.writeHead(200, { 'Content-Type': 'application/zip' }), res.end(zip([{ name: 'Styled.S01E01.ass', data: '[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\b1}Styled line\n' }]));
+      if (decodeURIComponent(n) === 'Odd Name (2019) [x264].zip') return res.writeHead(200, { 'Content-Type': 'application/zip' }), res.end(zip([{ name: 'odd.srt', data: '1\n00:00:01,000 --> 00:00:02,000\nOdd name\n' }]));
       const files = n === 'season-2.zip' ? [{ name: 'Show.S02E02.srt', data: SRT('Episode two') }, { name: 'Show.S02E03.srt', data: SRT('Episode three') }, { name: 'readme.txt', data: 'x' }]
         : [{ name: n.replace('.zip', '.srt'), data: SRT('SubDL ' + n) }];
       res.writeHead(200, { 'Content-Type': 'application/zip' });

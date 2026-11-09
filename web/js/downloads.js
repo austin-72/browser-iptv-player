@@ -99,7 +99,7 @@ V.downloads = (function () {
     var url = '/api/download/' + encodeURIComponent(it.k) + (opts.quality ? '?height=' + opts.quality : '');
     var du = opts.quality ? '' : directUrl(it);
     // Saving it as a file, in the original quality, in Chrome/Edge: straight from the provider into the file.
-    if ((!canStore() || opts.asFile) && du && window.showSaveFilePicker) {
+    if ((!canStore() || opts.asFile) && du && window.showSaveFilePicker && !opts.quiet) {
       var name = String(it.n || 'video').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 120) + '.mp4';
       var rr = { k: it.k, n: it.n, bytes: 0, size: 0 }, ac0 = new AbortController();
       window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Video', accept: { 'video/mp4': ['.mp4'] } }] }).then(function (fh) {
@@ -118,7 +118,7 @@ V.downloads = (function () {
       var a = document.createElement('a');
       a.href = url; a.download = '';
       document.body.appendChild(a); a.click(); a.remove();
-      V.toast('Download started — the server converts it to MP4 if needed.');
+      if (!opts.quiet) V.toast('Download started — the server converts it to MP4 if needed.');
       return;
     }
     var show = V.showOf(it);
@@ -126,8 +126,56 @@ V.downloads = (function () {
     save(r);
     queue.push(r);
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
-    V.toast('Added to Downloads', { action: { label: 'View', fn: function () { V.router.go('#/downloads'); } } });
+    if (!opts.quiet) V.toast('Added to Downloads', { action: { label: 'View', fn: function () { V.router.go('#/downloads'); } } });
     pump();
+  }
+
+  /**
+   * Several episodes at once — a season, the whole series, the ones not watched yet — with one choice of quality.
+   * Ones already downloaded (or on their way) are left out. Kept in the app, they download one after another in
+   * Downloads; as files, the browser saves them one by one (it may ask once whether this site may save several).
+   */
+  function startMany(eps, opts) {
+    var have = function (k) { var r = items.get(k); return r && r.status !== 'failed' && r.status !== 'cancelled'; };
+    var todo = eps.filter(function (e) { return e && e.k && !have(e.k); });
+    if (!todo.length) return V.toast('Those are all downloaded already.');
+    if (opts.asFile) {
+      V.toast('Saving ' + V.plural(todo.length, 'episode') + ' as files. Your browser may ask whether this site may save several.', { ms: 6000 });
+      todo.forEach(function (e, i) { setTimeout(function () { start(e, { quality: opts.quality, asFile: true, quiet: true }); }, i * 1500); });
+      return;
+    }
+    todo.forEach(function (e) { start(e, { quality: opts.quality, quiet: true }); });
+    V.toast(V.plural(todo.length, 'episode') + ' added to Downloads' + (eps.length > todo.length ? ' (' + (eps.length - todo.length) + ' downloaded already)' : ''), { action: { label: 'View', fn: function () { V.router.go('#/downloads'); } } });
+  }
+
+  /** A series' Download: which episodes (this season, the whole series, the ones not watched yet), and the quality. */
+  function chooseSeries(show, season) {
+    if (!S.settings.allowDownloads && !S.profile.admin) return V.toast('Downloads are turned off on this server.', { error: true });
+    var stored = canStore();
+    V.loadEpisodes(show).then(function (eps) {
+      eps = (eps || []).filter(function (e) { return e && e.t === 'episode'; });
+      if (!eps.length) return V.toast('No episodes to download.', { error: true });
+      var seasons = [];
+      eps.forEach(function (e) { if (seasons.indexOf(e.s) < 0) seasons.push(e.s); });
+      var unwatched = eps.filter(function (e) { var pr = V.progressOf(e.k); return !(pr && pr.w); });
+      var cur = season !== undefined && seasons.indexOf(season) >= 0 ? season : seasons[0];
+      var opt = function (v, label, n, sel) { return '<option value="' + v + '"' + (sel ? ' selected' : '') + '>' + V.esc(label) + ' (' + V.plural(n, 'episode') + ')</option>'; };
+      V.dialog({
+        title: 'Download “' + show.n + '”',
+        body: '<label class="field"><span>Episodes</span><select class="input" data-which>' +
+            seasons.map(function (s) { return opt('s' + s, s ? 'Season ' + s : 'Specials', eps.filter(function (e) { return e.s === s; }).length, s === cur); }).join('') +
+            (unwatched.length && unwatched.length < eps.length ? opt('new', 'Not watched yet', unwatched.length) : '') +
+            (seasons.length > 1 ? opt('all', 'The whole series', eps.length) : '') + '</select></label>' +
+          '<label class="field"><span>Quality</span><select class="input" data-q><option value="0">Original</option><option value="1080">1080p</option><option value="720" selected>720p (smaller)</option><option value="480">480p (smallest)</option></select></label>' +
+          (stored ? '<label class="check"><input type="checkbox" data-file><span>Save as files on this device instead of inside the app</span></label>' : '<p class="dim small">This address isn’t secure (https), so each episode is saved as an MP4 file. On https they can be kept inside the app for offline watching.</p>') +
+          '<p class="dim small">They download one at a time. You can keep watching meanwhile; Downloads shows how far along they are.</p>',
+        actions: [{ label: 'Cancel' }, { label: 'Download', primary: true, fn: function (d) {
+          var w = V.$('[data-which]', d).value, q = +V.$('[data-q]', d).value, f = V.$('[data-file]', d);
+          var pick = w === 'all' ? eps : w === 'new' ? unwatched : eps.filter(function (e) { return 's' + e.s === w; });
+          startMany(pick.slice().sort(function (a, b) { return (a.s - b.s) || (a.e - b.e); }), { quality: q, asFile: !stored || (f && f.checked) });
+        } }],
+      });
+    }, function (e) { V.toast('Couldn’t get the episodes: ' + e.message, { error: true }); });
   }
 
   function chooser(it) {
@@ -260,7 +308,7 @@ V.downloads = (function () {
     if (p && p.w && r && r.status === 'done') remove(k, true);
   });
 
-  return { start: start, remove: remove, play: play, load: load, list: function () { return Array.from(items.values()).sort(function (a, b) { return b.at - a.at; }); }, canStore: canStore, retry: function (k) { var r = items.get(k); if (r) { r.status = 'queued'; r.bytes = 0; r.viaServer = false; save(r); queue.push(r); pump(); } } };
+  return { start: start, startMany: startMany, chooseSeries: chooseSeries, remove: remove, play: play, load: load, list: function () { return Array.from(items.values()).sort(function (a, b) { return b.at - a.at; }); }, canStore: canStore, retry: function (k) { var r = items.get(k); if (r) { r.status = 'queued'; r.bytes = 0; r.viaServer = false; save(r); queue.push(r); pump(); } } };
 })();
 
 V.route('downloads', function (view) {
@@ -275,7 +323,7 @@ V.route('downloads', function (view) {
           (r.status === 'downloading' ? (r.progress !== undefined && r.direct && !r.size ? '<span class="bar"><i style="width:' + Math.round(r.progress * 100) + '%"></i></span>' : '<span class="bar"><i style="width:' + (r.size ? pct * 100 : 30) + '%"' + (r.size ? '' : ' class="indet"') + '></i></span>') : '') + '</div>' +
           (r.status === 'done' ? '<button class="btn sm primary" data-d="play">' + V.icon('play') + ' Play</button>' : r.status === 'failed' ? '<button class="btn sm" data-d="retry">Retry</button>' : '') +
           '<button class="icon-btn" data-d="del" aria-label="Delete download">' + V.icon('trash') + '</button></li>';
-      }).join('') + '</ul>' : V.empty('No downloads', 'Use ' + V.icon('download', 'tiny') + ' on a movie or episode to watch it without a connection.')) +
+      }).join('') + '</ul>' : V.empty('No downloads', 'Use ' + V.icon('download', 'tiny') + ' on a film, an episode or a series (a season, or all of it) to watch it without a connection.')) +
       '<label class="check"><input type="checkbox" data-auto' + (V.pref('autoDeleteWatched') ? ' checked' : '') + '><span>Delete downloads automatically once watched</span></label>';
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { var u = V.$('[data-usage]', view); if (u) u.textContent = V.fmtSize(e.usage || 0) + ' used of ' + V.fmtSize(e.quota || 0) + ' available'; });
     var auto = V.$('[data-auto]', view);

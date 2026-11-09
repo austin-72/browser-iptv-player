@@ -154,7 +154,14 @@ test('Subtitles from every source: free ones first, OpenSubtitles kept back', as
     m.state.subs.gestdownDown = false;
     await assert.rejects(subs.get('zz:1'), /Bad subtitle/);
     await assert.rejects(subs.get('pn:0:0:abc'), /Bad subtitle/);
-    await assert.rejects(subs.get('sd:0:0:../../etc/passwd'), /Bad subtitle/);
+    await assert.rejects(subs.get('sd:0:0:../../etc/passwd'), /isn’t one this player can fetch/);
+    // SubDL's file given as a whole address on its own site, or a path with spaces and brackets: fetched (both were
+    // "Bad subtitle"). Another site: refused. Only styled .ass subtitles in the zip: shown as plain ones.
+    assert.match(fs.readFileSync(subs.file(await subs.get(`sd:0:0:${m.subdlDlBase}/subtitle/film-en.zip`)), 'utf8'), /-->/);
+    assert.match(fs.readFileSync(subs.file(await subs.get('sd:0:0:/subtitle/Odd Name (2019) [x264].zip')), 'utf8'), /Odd name/);
+    await assert.rejects(subs.get('sd:0:0:https://elsewhere.example/subtitle/x.zip'), /isn’t one this player can fetch/);
+    const styled = fs.readFileSync(subs.file(await subs.get('sd:1:1:/subtitle/styled.zip')), 'utf8');
+    assert.match(styled, /00:00:01\.000 --> 00:00:03\.000\nStyled line/);
   } finally {
     for (const k in saved) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     m.close();
