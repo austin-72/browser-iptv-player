@@ -25,12 +25,11 @@
 .card.art-in.art-c { animation-name: artRock3; }
 .card.art-in .card-art img { animation: artFade .35s ease-out both; }
 /* Leaning with the row (hung from the top, so the bottom trails), and back with a small overshoot: the nod. */
-.row-scroll.swaying .card { transform: rotate(var(--sway, 0deg)); transform-origin: 50% 0; transition: transform .55s cubic-bezier(.34, 1.7, .5, 1); }
-.row-scroll.swaying .card.art-in { transition: none; }
+/* (The swing itself: motion.js — a small animation on each poster on screen, run by the graphics chip.) */
+.row-scroll .card.swg { transform-origin: 50% 0; }
 /* Lite (TVs and games consoles: html.lite, web/js/settings.js applyLook) and Reduce motion: none of it. */
 .reduce-motion .card.art-in, .lite .card.art-in, .reduce-motion .card.art-in .card-art img, .lite .card.art-in .card-art img { animation: none; }
-.reduce-motion .row-scroll.swaying .card, .lite .row-scroll.swaying .card { transform: none; transition: none; }
-@media (prefers-reduced-motion: reduce) { .card.art-in, .card.art-in .card-art img { animation: none; } .row-scroll.swaying .card { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .card.art-in, .card.art-in .card-art img { animation: none; } }
 
 /* The moving background (web/js/motion.js): soft glows drifting slowly behind the pages. Only transforms move, in
    sizes of the glow itself (%: a size in vw/vh had the page work out every frame itself, and repaint, instead of the
@@ -79,3 +78,8 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
 .trl-vid { background-size: cover; background-position: center; }
 .trl-up .i { transform: rotate(90deg); }
 .trl-down .i { transform: rotate(-90deg); }
+
+/* The end of a film: "You might like" — a picture that won't load becomes the title on the card's own colour, as on
+   the posters elsewhere (endcard.js). */
+.ve-card .ve-p { position: relative; background: var(--tint, rgba(255,255,255,.08)); }
+.ve-card .ve-p .art { position: relative; }

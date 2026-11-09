@@ -46,6 +46,23 @@ V.moodItems = function (id) {
   });
   return V.shuffle(out.filter(function (it) { return !V.inList('hidden', it.k); }), V.hash(id + new Date().toDateString()));
 };
+/** n items picked at random (the same ones for the same seed) from several lists, without copying them: ok() filters. */
+V.sample = function (lists, n, seed, ok) {
+  var total = 0, i;
+  for (i = 0; i < lists.length; i++) total += (lists[i] || []).length;
+  var out = [], seen = {}, s = parseInt(String(seed || Math.random()).replace(/\D/g, '').slice(0, 9) || '7', 10) || 7;
+  var at = function (j) { for (var q = 0; q < lists.length; q++) { var l = lists[q] || []; if (j < l.length) return l[j]; j -= l.length; } return null; };
+  for (var tries = 0; out.length < n && tries < n * 40 && total; tries++) {
+    s = (s * 9301 + 49297) % 233280;
+    var j = Math.floor((s / 233280) * total) + (tries % 7) * 104729 % total; // (a step that reaches past the generator's 233280 values)
+    j %= total;
+    if (seen[j]) continue;
+    seen[j] = 1;
+    var x = at(j);
+    if (ok(x)) out.push(x);
+  }
+  return out;
+};
 V.shuffle = function (arr, seed) {
   var a = arr.slice();
   var s = parseInt(String(seed || Math.random()).replace(/\D/g, '').slice(0, 9) || '7', 10) || 7;
@@ -99,7 +116,13 @@ V.route('home', function (view) {
   var rows = V.$('.rows', view);
   var add = function (o) { var r = V.row(o); if (r) rows.appendChild(r); };
   var builders = {
-    continue: function () { add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: V.continueWatching().map(function (c) { return { it: c.it, next: c.next, play: true }; }), cardOpts: { shape: 'wide', showName: true }, play: true }); },
+    continue: function () {
+      var cw = V.continueWatching();
+      // (Light catalogue: these are the likeliest to be played next — their stream addresses fetched now, not after Play.)
+      var need = cw.map(function (c) { return c.it; }).filter(function (x) { return x && x.lz && !x.u; }).slice(0, 40).map(function (x) { return x.k; });
+      if (need.length && V.fetchAddresses) V.fetchAddresses(need).catch(function () {});
+      add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: cw.map(function (c) { return { it: c.it, next: c.next, play: true }; }), cardOpts: { shape: 'wide', showName: true }, play: true });
+    },
     list: function () { add({ id: 'list', title: 'My List', items: V.myListOrdered ? V.myListOrdered().filter(notHidden) : keysToItems(S.data.list), more: '#/mine' }); },
     neweps: function () {
       var ne = S.data.newEps || {};
@@ -154,8 +177,10 @@ V.route('home', function (view) {
     sharedlists: function () { V.sharedLists().forEach(function (l) { add({ id: 'shared:' + l.id, title: l.name + ' · shared list', items: l.items.map(function (x) { return V.entry(x.k); }).filter(Boolean), more: '#/mine' }); }); },
     random: function () {
       if (!hasVod) return;
-      var pool = S.movies.concat(S.shows).filter(function (x) { return x.i && notHidden(x) && !V.progressOf(x.k); });
-      add({ id: 'random', title: 'Something different', items: V.shuffle(pool, V.hash(new Date().toDateString() + S.profile.id)).slice(0, 24), track: true });
+      // (24 picked straight from the lists — the same ones all day for this profile — instead of sorting all of them
+      // into a random order first: on a big catalogue that was a quarter of a second of every visit to Home.)
+      var ok = function (x) { return x && x.i && notHidden(x) && !V.progressOf(x.k); };
+      add({ id: 'random', title: 'Something different', items: V.sample([S.movies, S.shows], 24, V.hash(new Date().toDateString() + S.profile.id), ok), track: true });
     },
   };
   order.forEach(function (id) { if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } else if (!hid.has(id) && V.homeRowBuilder) { try { V.homeRowBuilder(id, add); } catch (e) { console.error(e); } } }); // (rows from lists: homelists.js)

@@ -113,11 +113,37 @@
     focusFirst(b);
   };
 
+  // A film's "You might like" pictures: fetched in its last two minutes, so they're there the moment it ends (they
+  // used to start loading only then — on a slow connection or TV the card came up with empty boxes), loaded straight
+  // away rather than when "near the screen" (some TV browsers never looked again at a box that had been hidden), and a
+  // picture that won't load tries the other source, then shows the title.
+  var likeOf = { k: '', list: [] };
+  var likeFor = function (it) {
+    if (likeOf.k !== it.k) likeOf = { k: it.k, list: V.similar ? V.similar(it, 12) : [] };
+    return likeOf.list;
+  };
+  var pic = function (x) {
+    var alt = x.i2 && x.i2 !== x.i ? ' data-alt="' + V.esc(x.i2) + '"' : '';
+    return '<div class="art">' + (x.i || x.i2 ? '<img src="' + V.esc(x.i || x.i2) + '" alt="" decoding="async" referrerpolicy="no-referrer" data-fallback="' + V.esc(V.initials(x.n)) + '" data-title="' + V.esc(x.n) + '"' + (x.i ? alt : '') + '>' : '<span class="card-tt big">' + V.esc(x.n) + '</span>') + '</div>';
+  };
+  var fetched = {};
+  V.on('player-started', function (p) {
+    var v = p && p.video;
+    if (!v || v._likeHooked) return;
+    v._likeHooked = true;
+    v.addEventListener('timeupdate', function () {
+      var it = V.watch.it, d = V.player && V.player.duration;
+      if (!it || it.t !== 'movie' || !d || !isFinite(d) || d - V.player.position > 120 || fetched[it.k]) return;
+      fetched[it.k] = 1;
+      likeFor(it).forEach(function (x) { if (x.i) { var im = new Image(); im.referrerPolicy = 'no-referrer'; im.src = x.i; } });
+    });
+  });
+
   /** A film ended: the next film of its series, then others like it. */
   V.showMovieEnd = function (it) {
     var b = box();
     if (!b) return;
-    var like = V.similar ? V.similar(it, 12) : [];
+    var like = likeFor(it);
     var draw = function (seriesNext, colName) {
       var items = (seriesNext ? [seriesNext] : []).concat(like.filter(function (x) { return !seriesNext || x.k !== seriesNext.k; })).slice(0, 12);
       // (Drawn again when the film's series arrives: a TV viewer already moving along the row keeps their place.)
@@ -125,7 +151,7 @@
       b.innerHTML = '<div class="ve-box wide"><div class="ve-top"><span class="dim small">“' + V.esc(it.n) + '” finished</span><span class="sp"></span><button class="pbtn" data-ve="x" aria-label="Close">' + V.icon('x') + '</button></div>' +
         (seriesNext ? '<div class="ve-next"><div class="ve-art poster">' + art(seriesNext) + '</div><div class="ve-info"><div class="dim small">Next in ' + V.esc(colName || 'the series') + '</div><div class="ve-t">' + V.esc(seriesNext.n) + '</div>' + (seriesNext.plot ? '<p class="ve-plot">' + V.esc(seriesNext.plot) + '</p>' : '') + (seriesNext.y ? '<div class="dim small">' + seriesNext.y + '</div>' : '') + '</div></div>' : '') +
         (items.length > (seriesNext ? 1 : 0) ? '<div class="dim small ve-h">' + (seriesNext ? 'More like this' : 'You might like') + '</div><div class="ve-row">' + items.filter(function (x) { return !seriesNext || x.k !== seriesNext.k; }).map(function (x) {
-          return '<button class="ve-card" data-k="' + V.esc(x.k) + '"><span class="ve-p">' + V.art(x.i, x.n, 'art') + '</span><span class="ve-n truncate">' + V.esc(x.n) + '</span><span class="dim small">' + (x.y || '') + '</span></button>';
+          return '<button class="ve-card" data-k="' + V.esc(x.k) + '"><span class="ve-p" style="--tint:' + V.tint(x.n) + '">' + pic(x) + '</span><span class="ve-n truncate">' + V.esc(x.n) + '</span><span class="dim small">' + (x.y || '') + '</span></button>';
         }).join('') + '</div>' : '') +
         '<div class="ve-acts">' + (seriesNext ? '<button class="btn primary" data-ve="play" data-k="' + V.esc(seriesNext.k) + '" data-ve-first>' + V.icon('play') + ' Play “' + V.esc(seriesNext.n) + '”</button>' : '') +
         '<button class="btn" data-ve="again"' + (seriesNext ? '' : ' data-ve-first') + '>' + V.icon('restart') + ' Watch again</button><button class="btn" data-ve="close">Close</button></div></div>';

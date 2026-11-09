@@ -602,6 +602,22 @@ function item(ctx, k) {
   if (overrides.hasLocks && overrides.isLocked(it, (x) => catalog.get(x)) && !overrides.allowed(ctx)) throw new HttpError(423, p.kids ? 'This is locked.' : 'This is locked. Enter the parental PIN to watch it.');
   return it;
 }
+/**
+ * item(), for the player's own calls: an episode the server doesn't know right now is read again from its series
+ * first. (Episodes are read from the provider when their series is opened — after a restart, a device still playing
+ * one would otherwise get "That isn't available" for every way of playing it.) sk: its series, as the device has it.
+ */
+const epReads = new Map(); // series key → the read in progress (several calls at once read it once)
+async function itemAsync(ctx, k, sk) {
+  if (!catalog.get(k) && sk && typeof sk === 'string' && !k.startsWith('rec:')) {
+    const show = catalog.get(sk);
+    if (show && show.t === 'show' && catalog.visible(requireProfile(ctx), show.k)) {
+      if (!epReads.has(show.k)) epReads.set(show.k, catalog.episodes(show.k).catch(() => null).finally(() => epReads.delete(show.k)));
+      await epReads.get(show.k);
+    }
+  }
+  return item(ctx, k);
+}
 // (Integrations add their own flags: subtitles — see lib/routes-p5.js.)
 let p5Public = () => ({});
 let p8Public = () => ({}); // (event channels: lib/routes-p8.js)
@@ -1208,7 +1224,7 @@ function relayable(it, url) {
 }
 route('POST', '/api/play/relay', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
-  const it = item(ctx, String(b.k || ''));
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
   const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, b.url || '');
   if (!src || src.local) throw new HttpError(400, 'Nothing to relay');
   if (b.url && !relayable(it, b.url)) throw new HttpError(403, 'That address doesn’t belong to this channel');
@@ -1217,12 +1233,21 @@ route('POST', '/api/play/relay', async (req, res, p, q, ctx) => {
   const out = { url: proxy.sign(src.input, hdr) };
   if (b.check) await proxy.check(src.input, hdr);
   if (b.sniff) Object.assign(out, await proxy.sniff(src.input, hdr));
+  // (A TV's own player: signed in the same answer, as for /api/play/session.)
+  if (b.sign === true && requireProfile(ctx) && /^\/api\/proxy\b/.test(out.url)) out.signed = castSign(out.url, 24);
   return out;
 });
 // How can this viewer's browser get the stream straight from the provider? (see lib/reach.js)
 route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
-  const it = item(ctx, String(b.k || ''));
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
+  return reachOf(req, it, b);
+});
+/**
+ * How this device can reach a copy of a title itself: /api/play/reach, and — for the copy it puts first — in the same
+ * answer as /api/play/sources (one trip to the server fewer before the video is asked for).
+ */
+async function reachOf(req, it, b) {
   if (b.url && !relayable(it, b.url)) throw new HttpError(403, 'That address doesn’t belong to this channel');
   const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, b.url || '', { raw: true });
   if (!src || src.local || !isUrl(src.input)) throw new HttpError(400, 'Not a web address');
@@ -1258,7 +1283,7 @@ route('POST', '/api/play/reach', async (req, res, p, q, ctx) => {
     if (cx) out.codecs = cx;
   }
   return out;
-});
+}
 /** Which list a copy of an item comes from. */
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
 /**
@@ -1515,7 +1540,7 @@ function playScore(url, cx, caps) {
 route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
-  const it = item(ctx, String(b.k || ''));
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
   const https = /^https:/i.test(String(b.origin || ''));
   const use = listUsage();
   const out = [];
@@ -1577,7 +1602,14 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   // About to start on an account whose films the relay shares: it hears about the new viewer now, not in a few seconds.
   if (!allBusy && out.some((x) => !x.busy && (use.get(x.list) || []).some((c) => c.relayShared))) relayFinished.poke(true);
   if (allBusy && out.length) concurrency.turnedAway(ctx.sess.id + '|' + it.k, out.map((x) => x.list)); // (Statistics: turned away)
-  return { sources: order, allBusy, directAddress: settings().directAddress || '' };
+  // (b.reach: the device also wants to know how it can reach the copy that goes first — saves asking separately.)
+  let first = null;
+  if (b.reach && typeof b.reach === 'object' && order.length && !allBusy && !order[0].bump.length && it.t !== 'catchup') {
+    const alt = order[0].alt;
+    const info = await reachOf(req, it, { alt, origin: b.origin, ua: b.reach.ua, mixedOk: b.mixedOk }).catch(() => null);
+    if (info) first = { alt, info };
+  }
+  return { sources: order, allBusy, directAddress: settings().directAddress || '', reach: first };
 });
 /**
  * Smart failover (Admin → Playback): which copies of a title work right now, tried all at once instead of one after
@@ -1591,7 +1623,7 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   if (settings().smartFailover === false) return { order: [] };
   const b = await readJSON(req);
-  const it = item(ctx, String(b.k || ''));
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
   const skip = new Set((Array.isArray(b.exclude) ? b.exclude : []).map(Number));
   // (current: the copy this device is trying right now — looked at too when its account has room for one more.)
   const current = Number.isInteger(b.current) ? b.current : null;
@@ -1673,38 +1705,78 @@ route('GET', '/api/direct-helper.zip', (req, res) => {
 route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
-  const it = item(ctx, String(b.k || ''));
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
   if (b.url && !relayable(it, b.url)) throw new HttpError(403, 'That address doesn’t belong to this channel');
   const src = inputOf(it, Number.isInteger(b.alt) ? b.alt : -1, b.url || '');
   if (!src) throw new HttpError(404, 'File not found');
   const isProto = /^(rtmpt?e?s?|rtsps?|udp|rtp|srt|mmsh?|mmst):\/\//i.test(src.input);
   if (!src.local && !isUrl(src.input) && !isProto) throw new HttpError(400, 'This kind of address can’t be played');
+  const alt = Number.isInteger(b.alt) ? b.alt : -1;
   const wasCached = media.probeCached(src.input, src.headers);
-  const pr = await media.probe(src.input, { headers: src.headers, timeout: isProto ? 20000 : 15000 });
-  if (!pr && (isProto || src.local)) throw new HttpError(502, 'The server couldn’t open that stream.');
-  // One-connection accounts: let the provider free the slot the look-inside used before the real connection.
-  if (!wasCached && !src.local && oneConnection(it, Number.isInteger(b.alt) ? b.alt : -1)) await new Promise((ok) => setTimeout(ok, 1500));
   // (A film or episode is finite even when the look inside timed out: then its listed length stands in.)
   const film = it.t === 'movie' || it.t === 'episode' || b.live === false;
-  const finite = (film || !!(pr && pr.duration > 0)) && b.live !== true;
-  const duration = finite ? (pr && pr.duration > 0 ? pr.duration : Number(it.d) || 0) : 0;
-  const live = !finite;
   const codecs = Array.isArray(b.codecs) ? b.codecs.map(String) : ['h264'];
   const height = clampInt(b.height, 0, 2160, 0);
-  const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs) || !!(height && pr && pr.height && pr.height > height);
-  // (b.audioOnly: the viewer chose "sound only" for a live channel — the player's listening mode.)
-  const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio' || b.audioOnly === true;
-  const seek = finite ? Math.max(0, Number(b.seek) || 0) : 0;
-  // The viewer's preferred audio language picks the track, unless they chose one.
-  let audioTrack = clampInt(b.audio, 0, 64, 0);
-  if (b.audio === undefined && b.audioLang && pr && pr.audio && pr.audio.length > 1) {
-    const want = String(b.audioLang).slice(0, 2).toLowerCase();
-    const hit = pr.audio.find((a) => String(a.lang || '').toLowerCase().startsWith(want) || (L.code && L.code(a.lang) === want));
-    if (hit) audioTrack = hit.i;
+  // How to convert it, from the look inside (ffprobe: codecs, length, audio tracks).
+  const decide = (pr) => {
+    const finite = (film || !!(pr && pr.duration > 0)) && b.live !== true;
+    const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs) || !!(height && pr && pr.height && pr.height > height);
+    // (b.audioOnly: the viewer chose "sound only" for a live channel — the player's listening mode.)
+    const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio' || b.audioOnly === true;
+    // The viewer's preferred audio language picks the track, unless they chose one.
+    let audioTrack = clampInt(b.audio, 0, 64, 0);
+    if (b.audio === undefined && b.audioLang && pr && pr.audio && pr.audio.length > 1) {
+      const want = String(b.audioLang).slice(0, 2).toLowerCase();
+      const hit = pr.audio.find((a) => String(a.lang || '').toLowerCase().startsWith(want) || (L.code && L.code(a.lang) === want));
+      if (hit) audioTrack = hit.i;
+    }
+    return { finite, live: !finite, transcode, audioOnly, audioTrack, seek: finite ? Math.max(0, Number(b.seek) || 0) : 0, duration: finite ? (pr && pr.duration > 0 ? pr.duration : Number(it.d) || 0) : 0 };
+  };
+  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
+  // Quicker: when the format is already known (the provider's details for a film or episode; a live channel is almost
+  // always H.264) and the account has room for two connections, the conversion starts straight away with the look
+  // inside alongside, instead of one after the other — a few seconds sooner. If the look finds it needs something
+  // else (another audio language, converting the picture), the conversion starts again that way.
+  let guess = null;
+  if (!wasCached && !src.local && !isProto && settings().quickStart !== false && (!height || b.mode === 'transcode')) {
+    const lid = srcList(it, alt);
+    const lim = connLimit(it, alt);
+    const others = (listUsage().get(lid) || []).filter((c) => !(c.relayShared ? (c.viewers || []).every((v) => v.id === ctx.conn) : c.id === ctx.conn)).length;
+    if (lim === 0 || others + 2 <= lim) {
+      const cx = film && b.mode !== 'transcode' ? await copyCodecs(it, alt).catch(() => null) : null;
+      if (b.mode === 'transcode' || !film || (cx && cx.v)) {
+        guess = decide(cx && cx.v ? { vcodec: cx.v, pixfmt: cx.pix || '', acodec: cx.a || 'aac', duration: 0 } : null);
+        if (!film && b.live !== false) { guess.live = true; guess.finite = false; guess.seek = 0; guess.duration = 0; }
+      }
+    }
   }
-  const s = await media.startSession({ input: src.input, headers: src.headers, live, seek, video: transcode ? 'h264' : 'copy', audioOnly, audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
+  let pr, d, s;
+  if (guess) {
+    const [pp, sp] = await Promise.allSettled([media.probe(src.input, { headers: src.headers, timeout: 15000 }), start(guess)]);
+    pr = pp.status === 'fulfilled' ? pp.value : null;
+    if (sp.status === 'rejected') throw sp.reason;
+    s = sp.value;
+    d = decide(pr);
+    if (!pr) d = guess; // (the look inside didn't answer: what's running stays)
+    else if (d.transcode !== guess.transcode || d.audioOnly !== guess.audioOnly || d.audioTrack !== guess.audioTrack || d.live !== guess.live) {
+      log(`Session ${s.id}: the stream needs ${d.transcode !== guess.transcode ? (d.transcode ? 'converting' : 'no converting') : d.live !== guess.live ? 'playing as a film' : 'another audio track'} — starting again`);
+      media.stopSession(s.id);
+      s = await start(d);
+    }
+  } else {
+    pr = await media.probe(src.input, { headers: src.headers, timeout: isProto ? 20000 : 15000 });
+    if (!pr && (isProto || src.local)) throw new HttpError(502, 'The server couldn’t open that stream.');
+    // One-connection accounts: let the provider free the slot the look-inside used before the real connection.
+    if (!wasCached && !src.local && oneConnection(it, alt)) await new Promise((ok) => setTimeout(ok, 1500));
+    d = decide(pr);
+    s = await start(d);
+  }
+  const { audioTrack, duration, transcode } = d;
+  // A TV's own player fetches it without this browser's sign-in (web/js/player.js signMedia): signed here, which saves
+  // asking for it separately.
+  const signed = b.sign === true ? castSign(`/api/session/${s.id}/index.m3u8`, 24) : '';
   return {
-    url: `/api/session/${s.id}/index.m3u8`, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
+    url: `/api/session/${s.id}/index.m3u8`, signed, quick: !!guess, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text || x.pic) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
@@ -1812,10 +1884,13 @@ route('GET', '/api/frame/:k', async (req, res, p, q, ctx) => {
   const it = item(ctx, p.k);
   if (it.t === 'live') throw new HttpError(400, 'Not for live channels');
   if (oneConnection(it)) throw new HttpError(409, 'The provider allows only one connection at a time.');
-  const src = inputOf(it);
+  // (shot=1: the player's screenshot of a stream it can't copy itself — one played straight from the provider, which
+  // the browser won't let the page read: full size, at that very moment, from the copy playing.)
+  const shot = q.get('shot') === '1';
+  const src = inputOf(it, shot ? clampInt(q.get('alt'), -1, 99, -1) : -1);
   if (!src) throw new HttpError(404, 'Not found');
-  const t = Math.round((Number(q.get('t')) || 0) / 10) * 10;
-  const file = await media.frame(src.input, t, { headers: src.headers, width: clampInt(q.get('w'), 120, 640, 240) });
+  const t = shot ? Math.round((Number(q.get('t')) || 0) * 10) / 10 : Math.round((Number(q.get('t')) || 0) / 10) * 10;
+  const file = await media.frame(src.input, t, { headers: src.headers, width: clampInt(q.get('w'), 120, 640, 240), png: shot });
   serveFile(req, res, file, { cache: 'private, max-age=604800' });
 });
 route('GET', '/api/download/:k', async (req, res, p, q, ctx) => {
@@ -2217,7 +2292,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.

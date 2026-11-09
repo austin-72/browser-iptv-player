@@ -55,12 +55,35 @@
     if (rows.length > 40) rows.shift();
     return o;
   };
+  // Which posters swing: the ones on screen (and one either side) — worked out from the row's position and a poster's
+  // width, measured once per row. Each swings with its own small animation (Web Animations: run by the graphics chip,
+  // with nothing for the page to work out on each frame — a CSS transition on every poster in a long row made
+  // scrolling stutter, even on a fast computer). Browsers without them: no swing.
+  var canAnim = !!(window.Element && Element.prototype.animate);
+  var EASE = 'cubic-bezier(.34, 1.7, .5, 1)';
+  var swing = function (card, to) {
+    var from = card._sw || 0;
+    if (from === to || card.classList.contains('art-in')) return;
+    card._sw = to;
+    if (card._swA) { try { card._swA.cancel(); } catch (e) {} }
+    if (!card.classList.contains('swg')) card.classList.add('swg');
+    try { card._swA = card.animate([{ transform: 'rotate(' + from + 'deg)' }, { transform: 'rotate(' + to + 'deg)' }], { duration: 550, easing: EASE, fill: 'forwards' }); } catch (e) { card._swA = null; }
+  };
+  var rest = function (card) { if (card._swA) { try { card._swA.cancel(); } catch (e) {} card._swA = null; } card._sw = 0; card.classList.remove('swg'); };
+  var mark = function (o) {
+    var sc = o.sc, kids = sc.children;
+    if (!kids.length || !canAnim) return;
+    if (!o.w) { var f = kids[0], cs = getComputedStyle(sc); o.w = f.offsetWidth + (parseFloat(cs.columnGap) || parseFloat(cs.gap) || 0) || 1; o.vw = sc.clientWidth; }
+    var a = Math.max(0, Math.floor(sc.scrollLeft / o.w) - 1), z = Math.min(kids.length - 1, Math.ceil((sc.scrollLeft + o.vw) / o.w) + 1);
+    if (o.a !== undefined) for (var i = o.a; i <= o.z; i++) if ((i < a || i > z) && kids[i]) rest(kids[i]);
+    for (var j = a; j <= z; j++) if (kids[j]) swing(kids[j], o.lean);
+    o.a = a; o.z = z;
+  };
   var apply = function (o) {
     o.frame = false;
     if (o.want === o.lean) return;
     o.lean = o.want;
-    if (o.lean) o.sc.classList.add('swaying');
-    o.sc.style.setProperty('--sway', o.lean.toFixed(1) + 'deg');
+    mark(o);
   };
   var setLean = function (o, deg) {
     if (deg && Math.abs(deg - o.want) < 0.4) return;
@@ -79,6 +102,7 @@
     var deg = Math.max(-MAX, Math.min(MAX, -v * 1.1));
     deg = Math.abs(deg) < 0.5 ? 0 : (Math.abs(deg) < 1.8 ? 1.3 : MAX) * (deg < 0 ? -1 : 1);
     setLean(o, deg);
+    if (o.lean && o.a !== undefined) mark(o); // (posters coming on screen join in)
     if (Math.abs(deg) > Math.abs(o.peak || 0)) o.peak = deg;
     clearTimeout(o.idle); clearTimeout(o.settle);
     // Stopped: a small swing past upright (the nod), then still.
@@ -88,7 +112,7 @@
       setLean(o, Math.abs(nod) >= 0.3 ? Math.round(nod * 10) / 10 : 0);
       o.settle = setTimeout(function () {
         setLean(o, 0);
-        o.settle = setTimeout(function () { if (!o.lean) o.sc.classList.remove('swaying'); }, 700);
+        o.settle = setTimeout(function () { if (!o.lean && o.a !== undefined) { for (var i = o.a; i <= o.z; i++) if (o.sc.children[i]) rest(o.sc.children[i]); o.a = o.z = undefined; } }, 700);
       }, 220);
     }, 90);
   }, true);

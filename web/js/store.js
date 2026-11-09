@@ -397,12 +397,16 @@ V.loadEpisodes = function (show) {
   if (show._eps) return Promise.resolve(show._eps);
   var local = S.epsByShow.get(show.k) || [];
   if (!show.x && local.length) { show._eps = local; return Promise.resolve(local); }
-  return V.api('/api/show/' + encodeURIComponent(show.k) + '/episodes').then(function (eps) {
+  // (Asked for once at a time: playing an episode, its page and the player's buttons all want them at once.)
+  if (show._epsP) return show._epsP;
+  show._epsP = V.api('/api/show/' + encodeURIComponent(show.k) + '/episodes').then(function (eps) {
+    show._epsP = null;
     eps.forEach(function (e) { if (!S.byKey.has(e.k)) S.extra.set(e.k, e); });
     if (V.search) V.search.changed();
     show._eps = eps.map(function (e) { return V.entry(e.k) || e; });
     return show._eps;
-  });
+  }, function (e) { show._epsP = null; throw e; });
+  return show._epsP;
 };
 
 /**

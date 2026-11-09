@@ -251,7 +251,9 @@
     if (r && r.status && r.status < 500) return; // (the server said no — a message the viewer saw, not a bug)
     // The in-browser converter tidying up after a conversion that was stopped or failed (its error was already
     // handled — the player moved on to another way of playing): a knock-on effect, not a fault of its own.
-    if (r && /ERRORED writable stream|already canceled/i.test(String(r.message || '')) && /vendor\/mediabunny/.test(String(r.stack || ''))) { crumb('log', 'mediabunny: ' + r.message); return; }
+    // (Safari words it "Cannot close a writable stream that is closed or errored"; a read the converter still had going
+    // when it was stopped — the provider saying 503, busy — ends the same way.)
+    if (r && /writable stream|already canceled|^Error fetching |aborted/i.test(String(r.message || '')) && /vendor\/mediabunny/.test(String(r.stack || ''))) { crumb('log', 'mediabunny: ' + scrub(String(r.message))); return; }
     report('rejection', r instanceof Error ? r : { message: (r && r.message) || (typeof r === 'string' ? r : (function () { try { return JSON.stringify(r); } catch (x) { return String(r); } })()), stack: r && r.stack });
   });
   // The page froze (nothing ran for a long time while it was on screen): usually a slow loop on a slow device.
@@ -272,7 +274,9 @@
   setInterval(function () {
     var now = Date.now(), gap = now - tick, from = tick;
     tick = now;
-    if (gap <= 8000 || gap > 10 * 60e3 || document.visibilityState !== 'visible' || now - hiddenAt <= gap + 2000 || now - visibleAt <= gap + 2000 || now - suspendedAt <= gap + 2000) return;
+    // (Over 2 minutes: asleep, not frozen — nobody sits through that without reloading, and an iPhone's home-screen app
+    // goes on saying it's on screen while the phone has put it to sleep.)
+    if (gap <= 8000 || gap > 120e3 || document.visibilityState !== 'visible' || now - hiddenAt <= gap + 2000 || now - visibleAt <= gap + 2000 || now - suspendedAt <= gap + 2000) return;
     // Something else ran during the "freeze" (a server call finished, a click was noted…): the page wasn't stuck,
     // only this timer was held back.
     // (Only after the moment this 1-second timer should have run: whatever started the freeze — the tap, a server

@@ -13,16 +13,21 @@ V.play = function (it, opts) {
   // A 24/7 channel from My channels: plays whatever is on it now (see mychannels.js).
   if (V.mychPlay && /^mych:/.test(it.u || '') && !opts.mych) return V.mychPlay(it, opts);
   V.watch.mych = opts.mych || null;
+  // An episode: its series' episodes are asked for straight away, alongside starting it, so "Next episode" knows where
+  // to go from the start (they took a second or two — longer on a PlayStation — after the video had begun).
+  if (it.t === 'episode') { var sh0 = V.showOf(it); if (sh0 && !sh0._eps) V.loadEpisodes(sh0).catch(function () {}); }
   // From the light catalogue (TVs, consoles): the stream address is fetched now.
+  // (The player comes up at once with its spinner — on a PlayStation, Play used to look as if nothing had happened.)
+  if (it.lz && !it.u && !opts._addr && !opts.mini) {
+    V.$('#player-layer').hidden = false; document.body.classList.add('watching');
+    if (V.player && V.player._msg) V.player._msg({ spin: true, title: it.n });
+    return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true })); }, function (e) { V.closePlayer(); V.fail(e); });
+  }
   if (it.lz && !it.u && !opts._addr) return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true })); }, V.fail);
   if (it.t === 'show') return V.loadEpisodes(it).then(function (eps) { var r = V.resumePoint(it, eps); if (r.ep) V.play(r.ep, Object.assign({}, opts, { startAt: r.pos })); else V.toast('No episodes found', { error: true }); }).catch(V.fail);
-  // Episodes fetched on demand (Xtream) live only in the server's memory: after a server restart, have it fetch
-  // the show's episodes again before playing (once per show per page load).
-  if (it.t === 'episode' && it.sk && S.extra && S.extra.has(it.k) && !opts._checked && !(V._epsOk || (V._epsOk = {}))[it.sk]) {
-    return V.api('/api/item/' + encodeURIComponent(it.k)).catch(function (e) {
-      if (e.status === 404) return V.api('/api/show/' + encodeURIComponent(it.sk) + '/episodes');
-    }).then(function () { V._epsOk[it.sk] = 1; V.play(it, Object.assign({}, opts, { _checked: true })); }, function () { V.play(it, Object.assign({}, opts, { _checked: true })); });
-  }
+  // (Episodes fetched on demand live only in the server's memory; after a server restart it reads the series again
+  // itself when the player asks for one — the series goes along with the player's calls: core.js, server.js itemAsync.
+  // This used to be a separate check before every first episode of a series.)
   var p = V.progressOf(it.k);
   var startAt = opts.startAt;
   if (startAt === undefined) startAt = p && !p.w && p.p > 20 && (it.t === 'movie' || it.t === 'episode') ? Math.max(0, p.p - 5) : 0;
@@ -39,7 +44,9 @@ V.play = function (it, opts) {
   V.player.load(it, { startAt: startAt, share: pc && pc.share && it.t !== 'catchup' ? pc.id : undefined });
   V.watch.upnextDismissed = false;
   V.watch.skipped = {};
-  V.$('[data-a=next]', V.player.host).hidden = !V.upNext(it);
+  // (An episode whose series' episodes are still on their way: the button's there already — see p.onNext.)
+  var shw = it.t === 'episode' ? V.showOf(it) : null;
+  V.$('[data-a=next]', V.player.host).hidden = !V.upNext(it) && !(shw && !shw._eps);
   V.$('[data-a=episodes]', V.player.host).hidden = it.t !== 'episode';
   V.$('[data-a=channels]', V.player.host).hidden = !(it.t === 'live' || it.t === 'radio' || it.t === 'catchup');
   V.$('[data-a=bookmark]', V.player.host).hidden = !(it.t === 'movie' || it.t === 'episode');
@@ -248,7 +255,20 @@ V.initWatch = function () {
   var p = V.player = new V.Player(V.$('#player-host'));
   p.onEnded = V.onEnded;
   p.onTick = V.watchTick;
-  p.onNext = function () { var nx = V.upNext(V.watch.it); if (nx) V.playUpNext(nx); };
+  p.onNext = function () {
+    var cur = V.watch.it, nx = V.upNext(cur);
+    if (nx) return V.playUpNext(nx);
+    // (Pressed before the series' episodes have arrived: once they're here.)
+    var show = cur && cur.t === 'episode' ? V.showOf(cur) : null;
+    if (!show || show._eps) return p.osd('This is the last episode', 1500);
+    p.osd('Finding the next episode…', 0);
+    V.loadEpisodes(show).then(function () {
+      if (V.watch.it !== cur) return;
+      p.osd('');
+      var n2 = V.upNext(cur);
+      if (n2) V.playUpNext(n2); else { p.osd('This is the last episode', 1500); var b = V.$('[data-a=next]', p.host); if (b) b.hidden = true; }
+    }, function () { p.osd('Couldn’t get the episodes just now', 2000); });
+  };
   p.onTap = function () { V.showLiveCard(); };
   p.onSwipe = function (dir) { var it = V.watch.it; if (it && (it.t === 'live' || it.t === 'radio')) V.zap(dir === 'up' ? 1 : -1); };
   p.onCatchupSeek = function (ce, t) { V.playCatchup(V.entry(ce.catchupOf), ce.prog, t); };

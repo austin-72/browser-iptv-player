@@ -112,7 +112,7 @@
     if (ac.state === 'suspended' && ac.resume) ac.resume();
   }
 
-  var NAMES = { clearDialogue: 'Clear dialogue', nightMode: 'Night mode' };
+  var NAMES = { clearDialogue: 'Clear dialogue', nightMode: 'Night mode', boost: 'Volume boost' };
   PP.setSoundFx = function (k, on) {
     var p = this;
     if (on && why(p)) return relay(p, k);
@@ -144,7 +144,10 @@
     var w = p._fxPending;
     if (!w) return;
     p._fxPending = null;
-    if (w.it === p.it && p.attempt && p.attempt.via === 'relay' && !why(p)) { V.setPref(w.k, true); p.osd(NAMES[w.k] + ' on', 1200); }
+    if (w.it === p.it && p.attempt && p.attempt.via === 'relay' && !why(p)) {
+      if (w.k === 'boost') { p.setBoost(p._fxBoostX || 1.5, true); p.osd('Volume boost ' + Math.round((p._fxBoostX || 1.5) * 100) + '%', 1200); return; }
+      V.setPref(w.k, true); p.osd(NAMES[w.k] + ' on', 1200);
+    }
   });
 
   var applyNow = function () { var p = V.player; if (p && p.started) p.applySoundFx(); };
@@ -165,6 +168,8 @@
     };
     main.splice(at2, 0, item('clearDialogue', 'Clear dialogue'), item('nightMode', 'Night mode'));
   };
+  // (Volume boost, for a stream the page can't read: through the relay the same way — player.js setBoost.)
+  V.fxRelay = function (p, k) { if (!supported || !why(p)) return false; relay(p, k); return true; };
   V.soundFx = { supported: supported, why: why, build: build, set: function (fx, d, n) { set(fx, !!d, !!n); }, DIALOGUE: DIALOGUE, NIGHT: NIGHT };
 
   var prevExtras = V.playerMenuExtras;

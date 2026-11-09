@@ -24,6 +24,8 @@ V.route('title', function (view, r) {
   if (!it) { view.innerHTML = V.empty('Not found', 'It may have been removed from the lists.', '<div class="btn-row empty-acts"><a class="btn" href="#/search">Search</a><a class="btn" href="#/home">Home</a></div>'); return; }
   if (it.t === 'episode') it = V.showOf(it) || it;
   var isShow = it.t === 'show';
+  // (Light catalogue: a film's stream address fetched while its page is read, so Play doesn't wait for it.)
+  if (!isShow && it.lz && !it.u && V.fetchAddresses) V.fetchAddresses([it.k]).catch(function () {});
   var p = V.progressOf(it.k);
   view.innerHTML = '<article class="title-page">' +
     '<div class="tp-hero" style="--tint:' + V.tint(it.n) + '"><div class="tp-bg">' + (it.bd || it.i ? '<img src="' + V.esc(it.bd || it.i) + '" alt="" referrerpolicy="no-referrer"' + (it.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +

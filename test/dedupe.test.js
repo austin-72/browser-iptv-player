@@ -64,3 +64,22 @@ test('a series on two providers lists the seasons both have once, and the extra 
   const eps = await c.episodes(bl.k);
   assert.deepStrictEqual(eps.map((e) => `S${e.s}E${e.e} ${e.u} +${(e.alts || []).length}`), ['S1E1 http://a/1/1.mp4 +1', 'S1E2 http://a/1/2.mp4 +1', 'S2E1 http://b/2/1.mp4 +0']);
 });
+
+test('a series on several lists: once one copy has answered, a slow provider holds the episodes back 2.5 s at most', async () => {
+  const ep = (s, e, h) => ({ season: s, episode: e, title: `S${s}E${e}`, url: `http://${h}/${s}/${e}.mp4`, id: `${h}${s}${e}` });
+  const c = catalog([
+    { id: 'A', items: [show('Slow Tide', 1, { year: 2024, tmdb: '1' })] },
+    { id: 'B', items: [show('Slow Tide', 2, { year: 2024, tmdb: '1' })] },
+  ]);
+  let slowDone = false;
+  c.lists.xtSeries = (lid) => (lid === 'A'
+    ? new Promise((ok) => setTimeout(() => { slowDone = true; ok({ info: {}, episodes: [ep(1, 1, 'a'), ep(1, 2, 'a')] }); }, 5000))
+    : Promise.resolve({ info: {}, episodes: [ep(1, 1, 'b')] }));
+  const st = c.items.find((i) => i.n === 'Slow Tide');
+  const t0 = Date.now();
+  const eps = await c.episodes(st.k);
+  const ms = Date.now() - t0;
+  assert.ok(ms >= 2400 && ms < 4000, `answered after ${ms} ms`);
+  assert.strictEqual(slowDone, false);
+  assert.deepStrictEqual(eps.map((e) => `S${e.s}E${e.e} ${e.u}`), ['S1E1 http://b/1/1.mp4'], 'what the copy that answered has');
+});

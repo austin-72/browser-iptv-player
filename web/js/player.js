@@ -169,10 +169,10 @@ PP.load = function (it, opts) {
   this._triedDirect = false;
   this._failedWith = null;
   this._loadAt = opts.startAt || 0; // (where this load starts: a backup stream tried after it fails starts there too)
-  if (!opts.quiet) { this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; }
+  if (!opts.quiet) { this._downWaits = 0; this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (!opts.quiet) this._picRetried = this._picConverted = false;
-  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; }
+  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; this._fmt = {}; }
   // Smart failover: a copy that's slow to start (6 s) — the others are looked at meanwhile, so if it fails the next
   // one is a copy that works right now.
   clearTimeout(this._raceT);
@@ -189,7 +189,9 @@ PP.load = function (it, opts) {
       });
     }, 6000);
   }
-  else if (opts.alt !== undefined) this.alt = opts.alt;
+  // (A copy chosen — Source in the settings, a backup tried, a reload: that one. This was an "else" of the line above, so
+  // with quick switching on — the default — choosing a backup in Source did nothing.)
+  if (opts.alt !== undefined) this.alt = opts.alt;
   this._teardown();
   this.it = it;
   this.started = false;
@@ -227,6 +229,14 @@ PP.load = function (it, opts) {
       self._afterStart();
     }, function (e) {
       if (token !== self.token) return;
+      // The server can't be reached (restarting after an update, or the connection dropped): wait for it and try this
+      // same way again — the other ways and copies all go through it too, and would only fail the same way.
+      if ((e.down || e.offline) && (self._downWaits = (self._downWaits || 0) + 1) <= 30) {
+        if (V.crumb) V.crumb('player', 'server unreachable (' + e.message + '): waiting');
+        self._teardownMedia();
+        self._msg({ spin: true, title: 'Waiting for the server…', sub: 'It’s restarting or can’t be reached just now. This carries on by itself.' });
+        return new Promise(function (ok) { setTimeout(ok, 3000); }).then(function () { if (token === self.token) return next(i); });
+      }
       errs.push(e);
       // What each way of playing it said (for error reports).
       var log = self._attemptLog || (self._attemptLog = []);
@@ -243,6 +253,8 @@ PP.load = function (it, opts) {
       // (Smart failover: the server found this copy's provider not answering and another copy working — the other
       // ways of playing this one would only time out too.)
       if (i < plan.length - 1 && !/decode|format|codec/i.test(e.message) && self._raceSaysSwitch(self._raced)) { if (opts.onFail) { self._teardownMedia(); return opts.onFail(e); } return self._failed(e); }
+      // The server doesn't have it (taken off the lists, or hidden for this profile): no other way or copy will either.
+      if (e.status === 404 && /isn’t available/.test(e.message)) { self._altsLeft = []; plan = plan.slice(0, i + 1); }
       if (i < plan.length - 1) self._msg({ spin: true, title: plan[i + 1].via === 'relay' ? 'Connecting through the server…' : plan[i + 1].via === 'session' ? 'Converting on the server…' : plan[i + 1].via === 'browser' ? 'Converting in this browser…' : 'Trying another way…' });
       return next(i + 1);
     });
@@ -273,7 +285,12 @@ PP.load = function (it, opts) {
 PP._sources = function (it, token, opts) {
   var self = this;
   return (location.protocol === 'https:' && /^http:/i.test(it.u || '') && !V.relayOn() ? V.mixedOk(it.u) : Promise.resolve(false)).then(function (mok) {
-    return V.api('/api/play/sources', { body: { k: it.k, origin: location.origin, caps: V._caps || (V._caps = V.playCaps()), mixedOk: mok || undefined } });
+    self._preReach = null;
+    return V.api('/api/play/sources', { body: { k: it.k, origin: location.origin, caps: V._caps || (V._caps = V.playCaps()), mixedOk: mok || undefined, reach: { ua: navigator.userAgent } } }).then(function (r) {
+      // (How this device can reach the copy that goes first came in the same answer: _planNow uses it instead of asking.)
+      if (r && r.reach && r.reach.info) self._preReach = { k: it.k, alt: r.reach.alt, info: r.reach.info, mok: !!mok, token: token };
+      return r;
+    });
   }).then(function (r) { return self._useSources(r, it, token, opts); }, function () { return true; });
 };
 PP._useSources = function (r, it, token, opts) {
@@ -336,6 +353,9 @@ PP._useSources = function (r, it, token, opts) {
   this._connLimit = first.limit || 0;
   this._busyAlts = srcs.filter(function (x, i) { return x.busy || (i && x.bump && x.bump.length); }).map(function (x) { return x.alt; });
   this._altsLeft = srcs.slice(1).map(function (x) { return x.alt; });
+  // (How well this device can play each copy straight from its provider — 3: only through the server.)
+  var fmt = this._fmt = {};
+  srcs.forEach(function (x) { if (typeof x.fmt === 'number') fmt[x.alt] = x.fmt; });
   // An http-only provider on an https page: browsers block it, so the stream would have to go through the server.
   // With a direct (http) address set up, this device can switch to it and play straight from the provider.
   if (first.mixed && !first.proxy && r.directAddress && location.protocol === 'https:' && S.settings.directSwitch !== 'off' && !opts.relayOk) {
@@ -380,7 +400,10 @@ PP._directCopy = function (it, force, plan) {
   if (force || direct(plan) || !this._altsLeft || !this._altsLeft.length || it.t === 'catchup') return Promise.resolve(plan);
   var orig = { alt: this.alt, info: this.reachInfo, mok: this._mixedOk, vod: this.vod };
   var busy = this._busyAlts || [];
-  var cands = this._altsLeft.filter(function (x) { return busy.indexOf(x) < 0; }).slice(0, 3); // (not one someone here is already using)
+  // (Not one someone here is already using, nor one the server already found this device can only play through it:
+  // each look takes a second or two, which on a PlayStation — where most films can only play that way — added up.)
+  var fmt = this._fmt || {};
+  var cands = this._altsLeft.filter(function (x) { return busy.indexOf(x) < 0 && !(fmt[x] >= 3); }).slice(0, 3);
   var token = this.token;
   var at = function (i) {
     // (Another title started meanwhile: leave its alt, reach info and live/VOD state alone.)
@@ -445,7 +468,10 @@ PP._planNow = function (it, force) {
   if (tok !== self.token) return [];
   if (mok) mixed = false;
   self._mixedOk = mok;
-  return V.api('/api/play/reach', { body: { k: key, alt: self.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } }).then(null, function () { return null; }).then(function (info) {
+  var pre = self._preReach;
+  self._preReach = null; // (once: a reload or another copy asks again)
+  var known = pre && pre.token === tok && pre.k === key && pre.alt === self.alt && pre.mok === !!mok && it.t !== 'catchup' ? Promise.resolve(pre.info) : null;
+  return (known || V.api('/api/play/reach', { body: { k: key, alt: self.alt, url: it.t === 'catchup' ? url : undefined, origin: location.origin, ua: navigator.userAgent, mixedOk: mok || undefined } })).then(null, function () { return null; }).then(function (info) {
     if (tok !== self.token) return [];
     if (!info) return fallback();
     // (A server from before it knew about this still says "blocked": go by what the browser said.)
@@ -697,7 +723,8 @@ PP._attach = function (a, token, startAt, over) {
   var go = { kind: a.kind, url: a.url };
   var prep = Promise.resolve(go);
   if (a.via === 'relay') {
-    prep = V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, sniff: go.kind === '?' } }).then(function (r) {
+    prep = V.api('/api/play/relay', { body: { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, sniff: go.kind === '?', sign: V.signMedia() || undefined } }).then(function (r) {
+      if (r.signed) { r.url = location.origin + r.signed; return r; }
       return V.mediaUrl(r.url).then(function (u) { r.url = u; return r; });
     }).then(function (r) {
       if (gone()) return null;
@@ -719,6 +746,7 @@ PP._attach = function (a, token, startAt, over) {
   } else if (a.via === 'session') {
     var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: src || undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
     if (a.audioOnly) body.audioOnly = true;
+    if (V.signMedia()) body.sign = true; // (signed in the same answer: server.js)
     prep = V.api('/api/play/session', { body: body }).then(function (s) {
       // (Too late: end it, or it keeps converting — and holding a provider connection — with nobody watching.)
       if (gone()) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
@@ -738,6 +766,7 @@ PP._attach = function (a, token, startAt, over) {
       }
       clearInterval(self._pinger); // (never two keep-alives at once)
       self._pinger = setInterval(function () { V.api('/api/session/' + sid + '/ping', { method: 'POST' }).catch(function () {}); }, 15000);
+      if (s.signed) { go.url = location.origin + s.signed; return go; }
       return V.mediaUrl(go.url).then(function (u) { go.url = u; return go; });
     });
   } else if (go.url && /^\/api\/local\//.test(go.url)) {
@@ -1641,6 +1670,8 @@ PP.setBoost = function (x, quietly) {
   if (x !== 1 && !V.canBoost()) { if (!quietly) V.toast('Volume boost isn’t available on this device.', { error: true }); return; }
   var a = this.attempt;
   var safe = !a || (V.audioReadable ? V.audioReadable(this, a, true) : a.via !== 'direct' || a.kind !== 'native');
+  // (A stream the page can't read: played through the server's relay, then boosted — as Clear dialogue does: soundfx.js.)
+  if (x !== 1 && !safe && !quietly && V.fxRelay) { this._fxBoostX = x; if (V.fxRelay(this, 'boost')) return; }
   if (x !== 1 && !safe) { if (!quietly) V.toast('Volume boost isn’t possible for this stream. Reload it through the server to use it.', { error: true }); return; }
   this.boost = x;
   if (x === 1 && !this._audioSrc) return;
@@ -1685,7 +1716,17 @@ PP.screenshot = function () {
     ctx.drawImage(v, 0, 0);
     var name = ((this.it ? this.it.n : 'screenshot').replace(/[\\/:*?"<>|]+/g, ' ').trim()) + ' ' + new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-') + '.png';
     c.toBlob(function (b) { if (!b) return V.toast('Screenshots aren’t possible for this stream', { error: true }); V.download(name, b); }, 'image/png');
-  } catch (e) { V.toast('This stream doesn’t allow screenshots.', { error: true }); }
+  } catch (e) {
+    // A stream played straight from the provider: the browser won't let the page copy its picture, but the server can
+    // take the same moment from the same copy (films and episodes).
+    var it = this.it;
+    if (!(S.settings.ffmpeg && this.vod && it && (it.t === 'movie' || it.t === 'episode'))) return V.toast('This stream doesn’t allow screenshots.', { error: true });
+    var at = this.position, nm = ((it.n || 'screenshot').replace(/[\\/:*?"<>|]+/g, ' ').trim()) + ' ' + new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-') + '.png';
+    V.toast('Taking the screenshot…', { ms: 2500 });
+    fetch('/api/frame/' + encodeURIComponent(it.k) + '?shot=1&t=' + at.toFixed(1) + '&alt=' + this.alt, { credentials: 'same-origin', headers: { 'X-App': '1' } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status === 409 ? 'one' : 'no'); return r.blob(); })
+      .then(function (b) { V.download(nm, b); }, function (er) { V.toast(er.message === 'one' ? 'Screenshots of this stream need a second connection, and the provider allows only one.' : 'Couldn’t take a screenshot of this stream.', { error: true }); });
+  }
 };
 
 PP.osd = function (html, ms, cls) {
@@ -1919,8 +1960,10 @@ PP._menuPages = function (kind) {
   if (V.canBoost()) main.push({ label: 'Volume boost', value: this.boost === 1 ? 'Off' : Math.round(this.boost * 100) + '%', page: 'boost' });
   pages.boost = [1, 1.5, 2, 3].map(function (x) { return { label: x === 1 ? 'Off' : Math.round(x * 100) + '%', on: self.boost === x, fn: function () { self.setBoost(x); } }; });
   var left = V.sleepLeft();
-  main.push({ label: 'Sleep timer', value: left ? Math.ceil(left / 60000) + ' min left' : 'Off', page: 'sleep' });
-  pages.sleep = [0, 15, 30, 45, 60, 90, 120].map(function (m) { return { label: m ? m + ' minutes' : 'Off', on: m === 0 ? !left : false, fn: function () { V.setSleep(m); } }; }).concat(this.vod ? [{ label: 'End of this video', fn: function () { V.setSleep(-1); } }] : []);
+  // ("End of this video" isn't a time: V._sleepAt -1.)
+  var atEnd = V._sleepAt === -1;
+  main.push({ label: 'Sleep timer', value: atEnd ? 'End of video' : left ? Math.ceil(left / 60000) + ' min left' : 'Off', page: 'sleep' });
+  pages.sleep = [0, 15, 30, 45, 60, 90, 120].map(function (m) { return { label: m ? m + ' minutes' : 'Off', on: m === 0 ? !left : false, fn: function () { V.setSleep(m); } }; }).concat(this.vod || atEnd ? [{ label: 'End of this video', on: atEnd, fn: function () { V.setSleep(-1); } }] : []);
   if (this.it && this.it.a && this.it.a.length) {
     main.push({ label: 'Source', value: this.alt >= 0 ? 'Backup ' + (this.alt + 1) : 'Main', page: 'alts' });
     pages.alts = [{ label: 'Main', on: this.alt < 0, fn: function () { self.load(self.it, { alt: -1, startAt: self.vod ? self.position : 0 }); } }].concat(this.it.a.map(function (x, i) { var host = ''; try { host = new URL(x.u).host; } catch (e) {} return { label: 'Backup ' + (i + 1) + (host ? ' · ' + host : ''), on: self.alt === i, fn: function () { self.load(self.it, { alt: i, startAt: self.vod ? self.position : 0 }); } }; }));

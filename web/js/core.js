@@ -161,6 +161,9 @@ V.api = function (path, opts) {
   var h = { 'X-App': '1' };
   if (S.conn) h['X-Conn'] = S.conn;
   var body = opts.body;
+  // (Playing an episode: its series goes along, so a server that has just restarted — and doesn't know the episode
+  // until its series is read again — can read it: server.js itemAsync.)
+  if (body && typeof body === 'object' && body.k && body.sk === undefined && /^\/api\/play\//.test(path) && V.entry) { var ent = V.entry(body.k); if (ent && ent.sk) body.sk = ent.sk; }
   if (body !== undefined && !(body instanceof Blob) && !(body instanceof ArrayBuffer) && typeof body !== 'string') { h['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
   return fetch(path, { method: opts.method || (body !== undefined ? 'POST' : 'GET'), headers: Object.assign(h, opts.headers || {}), body: body, keepalive: !!opts.keepalive, credentials: 'same-origin', signal: opts.signal })
     .catch(function (e) { if (e && e.name === 'AbortError') throw e; throw offline(e); }) // (a cancelled request stays a cancel, which V.fail says nothing about)
@@ -173,6 +176,11 @@ V.api = function (path, opts) {
         try { j = t ? JSON.parse(t) : null; } catch (e) {}
         // The server is starting up (a big catalogue still being put together): it didn't do anything with this
         // request, so ask again in a few seconds — for up to about four minutes — instead of showing an error.
+        // (The same while the server restarts — an update being applied: a few seconds, so asked again every 2 s for up to
+        // about two minutes. lib/front.js answers for it meanwhile.)
+        if (r.status === 503 && j && j.restarting && !opts.noWait && (opts._tries || 0) < 60) {
+          return new Promise(function (ok) { setTimeout(ok, 2000); }).then(function () { return V.api(path, Object.assign({}, opts, { _tries: (opts._tries || 0) + 1 })); });
+        }
         if (r.status === 503 && j && j.starting && (opts._tries || 0) < 48) {
           if (V.loadMsg && V.$('#loading') && !V.$('#loading').hidden) V.loadMsg('The server is starting up — getting the channels and films ready…');
           return new Promise(function (ok) { setTimeout(ok, 5000); }).then(function () { return V.api(path, Object.assign({}, opts, { _tries: (opts._tries || 0) + 1 })); });
@@ -180,7 +188,7 @@ V.api = function (path, opts) {
         if (!r.ok) {
           // (No message from the app: a proxy in front of it — Cloudflare — answered instead. Say what that means.)
           var plain = { 502: 'The server couldn’t be reached just now (or it’s restarting). Try again in a moment.', 503: 'The server is busy or restarting. Try again in a moment.', 504: 'The server took too long to answer. Try again in a moment.', 520: 'The server gave an unexpected answer. Try again in a moment.', 521: 'The server is down or restarting. Try again in a moment.', 522: 'The server took too long to answer. Try again in a moment.', 523: 'The server can’t be reached just now.', 524: 'The server took too long to answer (more than 100 seconds). It may still be working on it — check again in a minute.' }[r.status];
-          var err = new Error((j && j.error) || plain || ('Server error ' + r.status)); err.status = r.status; throw err;
+          var err = new Error((j && j.error) || plain || ('Server error ' + r.status)); err.status = r.status; if (!j && plain && r.status !== 504 && r.status !== 524) err.down = true; throw err;
         }
         return j;
       });

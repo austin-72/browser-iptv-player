@@ -254,7 +254,8 @@
     var b = V.$('[data-a=next]', p.host);
     if (!b) return;
     var nx = V.upNext(it);
-    b.hidden = !nx;
+    var sh = it.t === 'episode' && V.showOf ? V.showOf(it) : null;
+    b.hidden = !nx && !(sh && !sh._eps); // (episodes still on their way: watch.js p.onNext)
     var label = nx && nx.queued ? 'Play next in your queue: ' + titleOf(nx) : 'Next episode';
     b.setAttribute('aria-label', label);
     b.title = label;
