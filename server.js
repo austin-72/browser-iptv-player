@@ -1876,6 +1876,8 @@ route('GET', '/api/session/:sid/:file', async (req, res, p) => {
   }
   serveFile(req, res, file, { type: 'video/mp2t', cache: 'max-age=3600', headers: req.cast ? { 'Access-Control-Allow-Origin': '*' } : {} });
 }, 'site');
+// (The player's check of the connection between a device and here, when a video keeps buffering.)
+route('GET', '/api/ping', () => ({ t: Date.now() }), 'site');
 route('POST', '/api/session/:sid/ping', (req, res, p) => ({ alive: !!media.touch(p.sid) }), 'site');
 route('DELETE', '/api/session/:sid', (req, res, p) => { media.stopSession(p.sid); return { ok: true }; }, 'site');
 route('GET', '/api/proxy', (req, res, p, q) => proxy.handle(req, res, q, req.cast), 'site');

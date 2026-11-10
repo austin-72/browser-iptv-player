@@ -88,12 +88,14 @@ V.route('home', function (view) {
   var heroIt = resumeIt || V.entry(recs.hero) || (cw0 || {}).it;
   if (heroIt && heroIt.t === 'episode') heroIt = V.showOf(heroIt) || heroIt;
   if (resumeIt && !(heroIt.t === 'movie' || heroIt.t === 'show')) { resumeIt = null; heroIt = V.entry(recs.hero); }
+
   var resumeMeta = function () {
     var pr = V.progressOf(resumeIt.k), left = pr && pr.d && !pr.w ? Math.max(1, Math.round((pr.d - pr.p) / 60)) : 0;
     return [resumeIt.t === 'episode' ? V.epLabel(resumeIt) + (resumeIt.et ? ' · ' + resumeIt.et : '') : heroIt.y, resumeNext ? 'Next episode' : left ? left + ' min left' : ''].filter(Boolean);
   };
   if (!heroIt && hasVod) { var pool = S.movies.concat(S.shows).filter(function (x) { return x.i; }); heroIt = pool[Math.floor(Math.random() * Math.min(pool.length, 200))]; }
   var html = '';
+  if ((S.data.home.hidden || []).indexOf('hero') >= 0) { heroIt = null; resumeIt = null; } // (Customise → "The big banner at the top": off)
   if (heroIt && (heroIt.t === 'movie' || heroIt.t === 'show')) {
     html += '<section class="hero" style="--tint:' + V.tint(heroIt.n) + '"><div class="hero-bg">' + (heroIt.bd || heroIt.i ? '<img src="' + V.esc(heroIt.bd || heroIt.i) + '" alt="" referrerpolicy="no-referrer"' + (heroIt.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
       '<div class="hero-body"><div class="hero-kicker">' + (resumeIt ? 'Continue watching' : V.esc(heroIt.t === 'show' ? 'Series' : 'Movie') + (recs.hero === heroIt.k ? ' · Picked for you' : '')) + '</div><h2 class="hero-t">' + V.esc(heroIt.n) + '</h2>' +
@@ -371,7 +373,7 @@ V.customizeHome = function () {
   ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupList(t).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.label) + ' (' + g.items.length + ')</option>'); }); });
   V.dialog({
     title: 'Customise your home page', wide: true,
-    body: '<p class="dim">Choose which rows you see. Until you move one, the page orders them itself — by the time of day, this device, and the rows you use; move any with the arrows and they stay in your order (Reset goes back). Recommendations share one “For you” row, and favourite and recent channels one “Your channels” row.</p><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
+    body: '<p class="dim">Choose which rows you see. Until you move one, the page orders them itself — by the time of day, this device, and the rows you use; move any with the arrows and they stay in your order (Reset goes back). Recommendations share one “For you” row, and favourite and recent channels one “Your channels” row.</p><label class="check"><input type="checkbox" data-show="hero"' + (hidden.has('hero') ? '' : ' checked') + '><span>The big banner at the top (what to resume, or a pick for you)</span></label><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
       '<div class="inline"><select class="input" data-pick><option value="">Choose a category…</option>' + groupOpts.join('') + '</select><button class="btn" data-pin>Pin</button></div>',
     actions: [{ label: 'Reset', fn: function () { S.data.home = { order: [], hidden: [], pinned: [] }; V.saveHome(); V.router.refresh(); } }, { label: 'Save', primary: true, fn: function () { S.data.home = { order: moved || V.homeManual() ? order : [], hidden: Array.from(hidden), pinned: pinned }; V.saveHome(); V.router.refresh(); } }],
     onOpen: function (d) {

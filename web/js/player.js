@@ -1626,6 +1626,52 @@ PP._stepHint = function () {
   if (secs > 25) return 'This provider is very slow right now. It keeps trying, then moves on to another way of playing it.';
   return 'Some providers take a while to start a stream. It keeps trying.';
 };
+/**
+ * It's buffering — and whose fault is it? A viewer can't tell the provider's server from their own Wi-Fi from the app,
+ * and ends up restarting things that were fine. When it has waited 5 seconds, or keeps stopping (the third time in
+ * three minutes), the player finds out — is this device online, how quickly does the server here answer — and says
+ * which it is, with the way out when there is one (another copy). Jumping about in the video doesn't count.
+ */
+PP._stalled = function () {
+  var self = this, v = this.video, tk = this.token, now = Date.now();
+  clearTimeout(this._whyT);
+  if (v.seeking || (this._seekAt && now - this._seekAt < 8000) || !this.it) return;
+  if (this._stallsFor !== tk) { this._stallsFor = tk; this._stalls = []; this._whyAt = 0; }
+  this._stalls = this._stalls.filter(function (t) { return now - t < 180e3; });
+  this._stalls.push(now);
+  var often = this._stalls.length >= 3;
+  this._whyT = setTimeout(function () {
+    if (tk !== self.token || !self._stallAt || v.paused || v.seeking) return;
+    self._why().then(function (w) {
+      if (tk !== self.token || !self._stallAt || v.paused) return;
+      self._whyAt = Date.now();
+      if (V.crumb) V.crumb('player', 'buffering: ' + w.who + (often ? ' (keeps stopping)' : ''));
+      var acts = [];
+      if (w.who !== 'device' && self._altsLeft && self._altsLeft.length && self.it.t !== 'catchup') acts.push({ label: 'Try another copy', primary: true, fn: function () { self._failed(new Error('This copy kept stopping.')); } });
+      self._msg({ spin: true, title: often ? 'It keeps stopping' : 'Waiting for more of the video', sub: w.text, actions: acts });
+    });
+  }, often ? 1500 : 5000);
+};
+/** Where the hold-up is: { who: 'device' | 'provider' | 'source', text }. */
+PP._why = function () {
+  var a = this.attempt || {}, viaServer = a.via === 'session' || a.via === 'relay' || a.via === 'party';
+  if (navigator.onLine === false) return Promise.resolve({ who: 'device', text: 'This device is offline. It carries on by itself when the connection is back.' });
+  var t0 = Date.now(), done = false;
+  return new Promise(function (resolve) {
+    var end = function (ok) {
+      if (done) return;
+      done = true;
+      var ms = Date.now() - t0;
+      if (!ok || ms > 2500) return resolve({ who: 'device', text: 'The connection between this device and the server is ' + (ok ? 'slow' : 'not getting through') + ' right now — the Wi‑Fi or internet here, not the channel.' });
+      resolve(viaServer
+        ? { who: 'source', text: 'Your connection is fine (the server answered in ' + ms + ' ms). The provider is sending this slowly, or the server is busy converting it.' }
+        : { who: 'provider', text: 'Your connection is fine (the server answered in ' + ms + ' ms). The provider is sending this slowly — nothing on this device needs restarting.' });
+    };
+    setTimeout(function () { end(false); }, 4000);
+    try { fetch('/api/ping?t=' + t0, { cache: 'no-store', credentials: 'same-origin' }).then(function (r) { end(r.ok); }, function () { end(false); }); } catch (e) { end(false); }
+  });
+};
+
 PP._msg = function (m) {
   var box = V.$('.vp-msg', this.host);
   box.removeAttribute('data-step');
@@ -1723,6 +1769,7 @@ Object.defineProperty(PP, 'liveWindow', { configurable: true, get: function () {
 } });
 
 PP.seek = function (t, fromRemote) {
+  this._seekAt = Date.now(); // (waiting after a jump isn't "it keeps stopping": _stalled)
   if (!this.started) return;
   var v = this.video;
   if (!this.vod) { var w = this.liveWindow; if (w) { v.currentTime = V.clamp(t, w.start, w.end - 2); this._userBehind = w.end - v.currentTime > 15; } return; }
@@ -2451,8 +2498,8 @@ PP._bindVideo = function (v) {
   v.addEventListener('volumechange', function () { self._volUi(); });
   v.addEventListener('play', function () { V.$('[data-a=play]', h).innerHTML = V.icon('pause'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Pause'); self.el.classList.remove('paused'); self._wakeLock(true); });
   v.addEventListener('pause', function () { V.$('[data-a=play]', h).innerHTML = V.icon('play'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Play'); self.el.classList.add('paused'); self._saveProgress(); self._wake(true); });
-  v.addEventListener('playing', function () { if (self.started) self._msg(null); self._stallAt = 0; });
-  v.addEventListener('waiting', function () { if (self.started) { self._msg({ spin: true }); self._stallAt = Date.now(); } });
+  v.addEventListener('playing', function () { if (self.started) self._msg(null); self._stallAt = 0; clearTimeout(self._whyT); });
+  v.addEventListener('waiting', function () { if (self.started) { self._msg({ spin: true }); self._stallAt = Date.now(); self._stalled(); } });
   // (Starting: the first of the video has arrived — the last step before the picture.)
   v.addEventListener('loadedmetadata', function () { var b = V.$('.vp-msg', self.host); if (!self.started && self._stepTitle && b && b.hasAttribute('data-step')) self._step(self._stepTitle, 'The video is arriving, starting…'); });
   v.addEventListener('timeupdate', function () {
