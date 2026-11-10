@@ -56,7 +56,7 @@
   };
   D.stop = function (r) { return V.api('/api/dvr/' + r.id + '/stop', { method: 'POST' }).then(function () { V.toast('Stopped. The recording is being saved.'); return D.load(); }).catch(V.fail); };
   /** A finished recording, played like the server's own files. */
-  D.itemOf = function (r) { return { k: 'rec:' + r.id, t: 'movie', n: r.t, u: 'local:dvr:' + r.id, g: 'Recordings', i: (V.entry(r.k) || {}).logo || '' }; };
+  D.itemOf = function (r) { return { k: 'rec:' + r.id, t: 'movie', n: r.t, u: 'local:dvr:' + r.id, g: 'Recordings', i: (V.entry(r.k) || {}).i || '' }; };
   D.play = function (r) { V.play(D.itemOf(r)); };
 
   // ------------------------------------------------------------ on programmes
@@ -96,7 +96,7 @@
   var stateText = { scheduled: 'Coming up', waiting: 'Waiting for a free connection', recording: 'Recording', saving: 'Saving…', done: '', failed: 'Didn’t work' };
   function row(r) {
     var c = V.entry(r.k);
-    var logo = c && c.logo ? '<img class="dvr-logo" src="' + V.esc(c.logo) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<span class="dvr-logo dvr-ph">' + V.icon('tv') + '</span>';
+    var logo = c && c.i ? '<img class="dvr-logo" src="' + V.esc(V.imgSrc ? V.imgSrc(c.i) : c.i) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<span class="dvr-logo dvr-ph">' + V.icon('tv') + '</span>';
     var meta = [r.ch || (c && c.n) || '', when(r)];
     if (r.state === 'done') { if (r.size) meta.push(V.fmtSize(r.size)); if (r.drops) meta.push('the stream dropped ' + V.plural(r.drops, 'time')); }
     if (r.who) meta.unshift(r.who);

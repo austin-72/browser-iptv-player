@@ -60,7 +60,7 @@ V.route('messages', function (view, r) {
         if (m.item) {
           var it = V.entry(m.item.k);
           item = '<div class="msg-item">' + V.art(m.item.i, m.item.n, 'art') + '<div><b>' + V.esc(m.item.n) + '</b>' + (m.item.pos ? '<span class="dim"> · from ' + V.fmtDur(m.item.pos) + '</span>' : '') +
-            '<div class="mi-acts">' + (m.party ? '<button class="btn sm primary" data-join="' + m.party + '">' + V.icon('party') + ' Join the party</button>' : it ? '<button class="btn sm primary" data-play="' + V.esc(it.k) + '" data-pos="' + (m.item.pos || 0) + '">' + V.icon('play') + ' Play</button><a class="btn sm" href="' + V.hrefOf(it) + '">Details</a>' : '<span class="dim">Not available on your profile</span>') + '</div></div></div>';
+            '<div class="mi-acts">' + (m.party ? '<button class="btn sm primary" data-join="' + V.esc(m.party) + '">' + V.icon('party') + ' Join the party</button>' : it ? '<button class="btn sm primary" data-play="' + V.esc(it.k) + '" data-pos="' + (m.item.pos || 0) + '">' + V.icon('play') + ' Play</button><a class="btn sm" href="' + V.hrefOf(it) + '">Details</a>' : '<span class="dim">Not available on your profile</span>') + '</div></div></div>';
         }
         var reacts = Object.keys(m.reacts || {}).map(function (e) { var who = m.reacts[e]; return '<button class="react' + (who.indexOf(S.profile.id) >= 0 ? ' on' : '') + '" data-react="' + e + '" data-id="' + m.id + '">' + e + ' ' + who.length + '</button>'; }).join('');
         return sep + '<div class="msg' + (mine ? ' mine' : '') + '" data-id="' + m.id + '">' + (!mine && other.all ? V.avatar(p ? p.avatar : 0, 'xs') : '') + '<div class="bubble">' + (!mine && other.all ? '<div class="who">' + V.esc(p ? p.name : '') + '</div>' : '') + item + (m.text ? '<div class="txt">' + V.esc(m.text).replace(/\n/g, '<br>') + '</div>' : '') +
@@ -91,7 +91,7 @@ V.route('messages', function (view, r) {
     ];
     var prev = V.pageCleanup;
     V.pageCleanup = function () { offs.forEach(function (f) { f(); }); if (prev) prev(); };
-    if (!V.device.touch) ta.focus();
+    if (!V.device.touch && !V.tvMode) ta.focus(); // (on a TV this opened the on-screen keyboard on entering a conversation)
   }
 });
 

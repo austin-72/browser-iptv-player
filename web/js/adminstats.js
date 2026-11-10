@@ -99,6 +99,7 @@
           pct(stt.n - (stt.s5 || 0), stt.n) + ' started within 5 seconds; ' + (stt.s15 || 0).toLocaleString() + ' took over 15 seconds' + (stt.s30 ? ', ' + stt.s30.toLocaleString() + ' over 30' : '') + '.</p>' +
           (slowHosts.length ? '<div class="tbl-wrap"><table class="st-table"><thead><tr><th>Provider</th><th class="r">Plays</th><th class="r">Average start</th><th class="r">Over 15 s</th></tr></thead><tbody>' +
             slowHosts.map(function (h) { return '<tr><td>' + V.esc(h.name) + '</td><td class="r num">' + h.starts.toLocaleString() + '</td><td class="r num">' + secOf(h.startMs, h.starts) + '</td><td class="r num">' + (h.slow || 0).toLocaleString() + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') +
+          (stt.cn ? '<p>Where a converted start’s time goes (average of ' + stt.cn.toLocaleString() + '): <b>' + secOf(stt.c_pre || 0, stt.cn) + '</b> before the server is asked (finding the copy, trying to play it directly) · <b>' + secOf(stt.c_look || 0, stt.cn) + '</b> the server looking inside the file · <b>' + secOf(stt.c_conv || 0, stt.cn) + '</b> getting the conversion going · <b>' + secOf(stt.c_net || 0, stt.cn) + '</b> the answer travelling back · <b>' + secOf(stt.c_play || 0, stt.cn) + '</b> the device loading and showing the first picture.</p>' : '') +
           '<p class="dim small">Slow starts are also in Admin → Error reports (as “Slow to start”), with what each step took.</p></section>';
       }
 

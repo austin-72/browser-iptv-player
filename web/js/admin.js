@@ -137,7 +137,8 @@ V.adminTabs.lists = function (body, A) {
     var b = e.target.closest('button');
     if (!b) return;
     if (b.hasAttribute('data-ct')) { V.connTestDialog(l).then(reload); return; }
-    if (b.hasAttribute('data-ref')) { b.disabled = true; V.api('/api/admin/lists/' + id + '/refresh', { method: 'POST' }).then(function (r) { V.toast(r && r.running ? 'Still refreshing in the background — this list shows the result when it’s done' : 'Refreshed', { ms: r && r.running ? 6000 : 3000 }); reload(); }).catch(function (x) { V.fail(x); reload(); }); }
+    if (b.hasAttribute('data-ref')) { b.disabled = true; V.api('/api/admin/lists/' + id + '/refresh', { method: 'POST' }).then(function (r) { var bad = r && !r.running && r.status && r.status.ok === false; // (it used to say "Refreshed" for a refresh that failed)
+      V.toast(r && r.running ? 'Still refreshing in the background — this list shows the result when it’s done' : bad ? 'Couldn’t refresh: ' + (r.status.error || 'unknown error') + ' — the saved copy is still used.' : 'Refreshed', { ms: r && r.running ? 6000 : bad ? 9000 : 3000, error: !!bad }); reload(); }).catch(function (x) { V.fail(x); reload(); }); }
     else if (b.hasAttribute('data-del')) V.confirm('Remove “' + l.name + '”? Its channels and videos disappear for everyone.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/lists/' + id).then(reload).catch(V.fail); });
     else if (b.hasAttribute('data-edit')) V.editListDialog(l).then(function (ok) { if (ok) reload(); });
     else if (b.hasAttribute('data-up') || b.hasAttribute('data-down')) {
@@ -354,7 +355,7 @@ V.adminTabs.guides = function (body, A) {
     if (!li) return;
     var rb = e.target.closest('[data-ref]');
     if (rb) { rb.disabled = true; V.toast('Refreshing…'); V.api('/api/admin/guides/' + li.dataset.id + '/refresh', { method: 'POST' }).then(function () { V.router.refresh(); }).catch(function (x) { rb.disabled = false; V.fail(x); }); }
-    if (e.target.closest('[data-del]')) V.del('/api/admin/guides/' + li.dataset.id).then(function () { V.router.refresh(); }).catch(V.fail);
+    if (e.target.closest('[data-del]')) V.confirm('Remove this TV guide? Channels that get their listings from it will show none until another guide covers them.', { ok: 'Remove', danger: true }).then(function (yes) { if (yes) V.del('/api/admin/guides/' + li.dataset.id).then(function () { V.router.refresh(); }).catch(V.fail); });
   };
 };
 

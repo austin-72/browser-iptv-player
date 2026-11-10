@@ -57,7 +57,13 @@
         if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch (e) {} }
       },
     };
+    // (Handed over at once, not when the first data is in: a try that was given up on meanwhile — its 8 seconds ran
+    // out — could not be stopped, and went on to put itself on the video over whatever was playing by then, with its
+    // connections to the provider still open.)
+    var dead = function () { return stopped || !!(opts.gone && opts.gone()); };
+    if (opts.onCtl) opts.onCtl(ctl);
     return load().then(function (M) {
+      if (dead()) throw new Error('stopped');
       input = new M.Input({ source: new M.UrlSource(url, { parallelism: opts.parallel || 2, getRetryDelay: function (n, err) { return n < 2 && !(err instanceof TypeError) ? 1 + n : null; } }), formats: M.ALL_FORMATS });
       return Promise.all([input.computeDuration(), input.getPrimaryVideoTrack(), input.getPrimaryAudioTrack(), input.getAudioTracks()]).then(function (r) {
         var dur = r[0], vt = r[1], at = r[2], all = r[3] || [];
@@ -87,6 +93,7 @@
             else if (aDec && aEnc) { audioOpt = { codec: aEnc, numberOfChannels: 2 }; info.audioWay = 'convert'; }
             else throw new Error('This file’s sound (' + at.codec + ') can’t be decoded in a browser.');
           }
+          if (dead()) { ctl.stop(); throw new Error('stopped'); }
           var v = video;
           var MS = MSE();
           ms = new MS();
@@ -99,6 +106,7 @@
             v.src = objUrl;
           }
           return new Promise(function (res) { ms.addEventListener('sourceopen', res, { once: true }); }).then(function () {
+            if (dead()) { ctl.stop(); throw new Error('stopped'); }
             var firstData = null;
             var gotFirst = new Promise(function (res) { firstData = res; });
             var idle = function () { return new Promise(function (res) { if (!sb.updating) return res(); sb.addEventListener('updateend', function () { res(); }, { once: true }); }); };

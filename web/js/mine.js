@@ -72,7 +72,7 @@ V.route('mine', function (view, r) {
         var b;
         if (e.target.closest('[data-new]')) V.prompt('Name the shared list', { placeholder: 'Movie night', max: 60 }).then(function (n) { if (n) V.api('/api/lists', { body: { name: n } }).then(function () { V.router.refresh(); }).catch(V.fail); });
         else if ((b = e.target.closest('[data-l-del]'))) V.confirm('Delete this shared list for everyone?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/lists/' + encodeURIComponent(b.dataset.lDel)).then(function () { V.router.refresh(); }).catch(V.fail); });
-        else if ((b = e.target.closest('[data-l-ren]'))) V.prompt('Rename', { max: 60 }).then(function (n) { if (n) V.put('/api/lists/' + encodeURIComponent(b.dataset.lRen), { name: n }).then(function () { V.router.refresh(); }).catch(V.fail); });
+        else if ((b = e.target.closest('[data-l-ren]'))) V.prompt('Rename', { max: 60, value: ((b.closest('section') && V.$('h2', b.closest('section'))) || {}).textContent || '' }).then(function (n) { if (n) V.put('/api/lists/' + encodeURIComponent(b.dataset.lRen), { name: n }).then(function () { V.router.refresh(); }).catch(V.fail); });
       };
     }).catch(function (e) { body.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
   } else if (tab === 'history') {

@@ -226,6 +226,34 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Quicker to start:** when the provider has said what a film or episode is (or for a live channel), a server conversion starts straight away, with the look inside the stream running at the same time instead of first — a few seconds sooner. This briefly uses two connections, so it only happens when the account has room for two; if the look finds something else is needed (converting the picture, another audio language), the conversion starts again that way. Admin → Playback → *Start conversions quickly* turns it off. Live conversions come in 2-second pieces instead of 4, and a TV's or phone's own player waits for about three before it starts. On a PlayStation, copies the server already knows can only play through it aren't each checked first, and the signed address comes in the same answer.
 - **Fewer steps before the video:** the copy order and how this device reaches the copy that goes first come in one answer. The separate check before an episode is gone too, since the server reads a series again itself when it needs to. On a TV or PlayStation (light catalogue), the stream addresses of a film whose page is open, and of everything in Continue watching, are fetched ahead, and the player comes up at once while an address is fetched.
 - **Continue watching opens the page:** a film or episode in *Continue watching* opens its page, whose main button says *Resume* (for a series, *Resume S1:E3*, or the next episode), instead of starting at once.
+- **The whole project, read again (seven reviews of the older code):**
+  - *Keeps your data:* a data file that can't be read for a moment (a shared Windows folder saying "busy") is tried
+    again and never replaced by an empty one; a restart that catches a list or guide mid-refresh no longer puts it on
+    hold for 6–48 hours; restoring a backup always restarts (it could carry on and never save again) and checks the
+    file whole first; a wrong file uploaded over a playlist no longer replaces it.
+  - *Can't be held up or got round:* a crafted error report, a broken guide file or a gzip bomb can't freeze the
+    server; the parental PIN and profile PINs lock for longer each time and count guesses across devices and
+    profiles; an unlock is for the profile that entered the PIN; with a kids profile in the house only the admin adds
+    profiles, and a kids profile can't delete itself; "don't remember my PIN" now ends 30 minutes after the profile was
+    last used; a message between profiles can't carry code; a provider's ids can't name files outside the cache.
+  - *Player:* a film that stops well before its end is picked up where it stopped instead of being marked watched and
+    followed by the next episode; a browser-side conversion that was given up on is really stopped (it could later
+    take over the video and kept its connections); a live channel frozen without saying so reconnects after 20
+    seconds; "started muted" by the browser isn't remembered as your choice; an audio-only station isn't converted
+    for having no picture; the screen may sleep when paused or finished; trailers stop when the film starts; the
+    next-episode countdown waits while the page is hidden; speed keys only on films and episodes.
+  - *TVs and older browsers:* arrow keys work on "Who's watching?" and the PIN pad; focused rows no longer snap under
+    the top bar on Tizen/webOS up to 4; adding a profile, broad searches, menus closing on an outside press,
+    reminders and pause/resume no longer fail on browsers missing newer features; reminders fire once.
+  - *Relay and proxy (relay version 7 — Admin → Network → Update the relay):* the provider's connection is closed when
+    the server stops reading through the relay; playlists asked for the way ffmpeg asks are rewritten; a ".m3u8"
+    that is really the video isn't read as a playlist; addresses written as IPv4-inside-IPv6 are treated as the
+    private addresses they are; HEAD on a proxied stream answers instead of downloading it.
+  - *Admin:* a failed refresh says so (it said "Refreshed"); renaming a list doesn't download it again; a proxy's host
+    can be changed with its password left masked; the User-Agent is checked; removing a guide, deleting a report and
+    making a new app password ask first; Statistics shows where a converted start's time goes.
+  - *Lighter on big catalogues:* recommendations aren't worked out again after every guide refresh; Home's list rows
+    no longer count every matched title per row; episodes of a removed list are dropped from memory.
 - **Access, tightened:** a signed stream link opens exactly what it was made for (one conversion session, one proxy
   address, one portal item — it used to cover everything under `/api/proxy`) and only reads; no link is made for a bare
   prefix; a portal (Stalker) item or a media-folder file asked for by a browser needs a profile that may watch it; a

@@ -257,7 +257,7 @@ V.toggleReminder = function (c, p) {
   if (on) S.data.reminders = S.data.reminders.filter(function (r) { return !(r.k === c.k && r.s === p.s); });
   else {
     S.data.reminders.push({ k: c.k, s: p.s, e: p.e, t: p.t });
-    if (window.Notification && Notification.permission === 'default') Notification.requestPermission().catch(function () {});
+    if (window.Notification && Notification.permission === 'default') { try { var np = Notification.requestPermission(function () {}); if (np && np.catch) np.catch(function () {}); } catch (e0) {} } // (older browsers: a callback, no promise)
     V.toast('I’ll remind you when “' + p.t + '” starts');
   }
   V.api('/api/reminders', { body: on ? { remove: { k: c.k, s: p.s } } : { add: { k: c.k, s: p.s, e: p.e, t: p.t } } }).catch(V.fail);
@@ -274,9 +274,13 @@ V.toggleReminder = function (c, p) {
 V.checkReminders = function () {
   if (!S.data) return;
   var now = Date.now();
-  var due = S.data.reminders.filter(function (r) { return r.s - now < 60e3 && !r.done; });
+  // (Remembered here, not on the reminder: the reminders are replaced whenever another device of this profile changes
+  // anything, and a reminder that had fired then fired again — or switched channel again — until the programme ended.)
+  var fired = V._remFired || (V._remFired = {});
+  var due = S.data.reminders.filter(function (r) { return r.s - now < 60e3 && !r.done && !fired[r.k + '|' + r.s]; });
   due.forEach(function (r) {
     r.done = true;
+    fired[r.k + '|' + r.s] = r.e || now;
     var c = V.entry(r.k);
     if (!c) return;
     var msg = '“' + r.t + '” is starting on ' + c.n;
@@ -284,6 +288,7 @@ V.checkReminders = function () {
     else V.toast(msg, { action: { label: 'Watch', fn: function () { V.play(c); } }, ms: 20000 });
     try { if (window.Notification && Notification.permission === 'granted' && document.hidden) new Notification(msg); } catch (e) {}
   });
+  Object.keys(fired).forEach(function (fk) { if (fired[fk] < now - 3600e3) delete fired[fk]; });
   var keep = S.data.reminders.filter(function (r) { return r.e > now; });
   // Finished ones just drop off here; the server tidies its own copy (never send a whole list from an old copy).
   if (keep.length !== S.data.reminders.length) S.data.reminders = keep;

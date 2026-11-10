@@ -270,7 +270,7 @@ V.search = (function () {
     var hidden = S.data && S.data.hidden && S.data.hidden.length ? new Set(S.data.hidden) : null;
     for (var h = 0; h < out.length; h++) { var e2 = out[h]; if (hidden && hidden.has(e2.it.k)) e2.s -= 30; if (prog[e2.it.k]) e2.s += 3; }
     // Lots of matches: only the best few hundred need sorting properly.
-    if (out.length > lim * 3 && typeof Float64Array !== 'undefined') {
+    if (out.length > lim * 3 && typeof Float64Array !== 'undefined' && Float64Array.prototype.sort) {
       var fa = new Float64Array(out.length);
       for (var q2 = 0; q2 < out.length; q2++) fa[q2] = -out[q2].s;
       fa.sort();

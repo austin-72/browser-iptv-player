@@ -114,7 +114,7 @@ V.route('settings', function (view) {
     }
     else if (a === 'substyle') V.subtitleStyleDialog();
     else if (a === 'devname') { var n = V.$('[data-devname]', view).value.trim(); if (n) { V.ls.set('deviceName', n); V.device.name = n; V.rt.connect(); V.toast('Device name saved'); } else { V.toast('Type a name for this device first', { error: true }); V.$('[data-devname]', view).focus(); } }
-    else if (a === 'notif') Notification.requestPermission().then(function () { V.router.refresh(); });
+    else if (a === 'notif') { var done = function () { V.router.refresh(); }; try { var rp = Notification.requestPermission(done); if (rp && rp.then) rp.then(done, done); } catch (e1) { done(); } }
     else if (a === 'install' && V.installPrompt) { V.installPrompt.prompt(); V.installPrompt = null; }
     else if (a === 'keys') V.shortcutsHelp();
     else if (a === 'pair') V.pairDialog();

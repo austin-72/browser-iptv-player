@@ -58,7 +58,7 @@
         if (e.target.closest('[data-copy]')) V.copy(is.text, 'Report copied');
         var st = e.target.closest('[data-status]');
         if (st) V.put('/api/admin/errors/' + id, { status: st.dataset.status }).then(function () { V.toast(st.dataset.status === 'fixed' ? 'Marked fixed — it reopens if it happens again on a newer version' : 'Reopened'); draw(page); }).catch(V.fail);
-        if (e.target.closest('[data-del]')) V.del('/api/admin/errors/' + id).then(function () { draw(page); }).catch(V.fail);
+        if (e.target.closest('[data-del]')) V.confirm('Delete this report? Its details can’t be brought back.', { ok: 'Delete', danger: true }).then(function (yes) { if (yes) V.del('/api/admin/errors/' + id).then(function () { draw(page); }).catch(V.fail); });
       };
     }).catch(function (e) { box.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; });
   };

@@ -363,7 +363,10 @@ V.menu = function (anchor, items, o) {
   return m;
 };
 V.closeMenus = function () { V.$$('.popmenu').forEach(function (m) { var a = m._anchor; m.remove(); if (a && document.activeElement === document.body) a.focus(); }); };
-document.addEventListener('pointerdown', function (e) { if (!e.target.closest('.popmenu')) V.closeMenus(); }, true);
+// (Without Pointer Events — iPhones before iOS 13, older TVs — a press outside is a mousedown or a touchstart.)
+(window.PointerEvent ? ['pointerdown'] : ['mousedown', 'touchstart']).forEach(function (ev) {
+  document.addEventListener(ev, function (e) { if (!(e.target && e.target.closest && e.target.closest('.popmenu'))) V.closeMenus(); }, true);
+});
 // (Escape closes only the menu, not the dialog it was opened from as well.)
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && V.$('.popmenu')) { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); else e.stopPropagation(); V.closeMenus(); } }, true);
 

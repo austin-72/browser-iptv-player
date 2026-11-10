@@ -77,7 +77,7 @@ V.pinPad = function (p, error) {
         else if (k === 'ok') { if (inp.value.length >= 4) finish(inp.value); return; }
         else if (inp.value.length < 8) inp.value += k;
         draw();
-        if (!V.device.touch) inp.focus();
+        if (!V.device.touch && !V.tvMode && !V.device.tv) inp.focus(); // (on a TV the focus stays on the key just pressed: the hidden box can't be left with the arrows)
       });
     },
   });
@@ -135,8 +135,9 @@ V.profileForm = function (host, o) {
   if (cancel) cancel.onclick = function () { if (o.onCancel) o.onCancel(); };
   f.onsubmit = function (e) {
     e.preventDefault();
-    var fd = new FormData(f);
-    var body = { name: fd.get('name'), avatar: avatar, pin: fd.get('pin') || '', kids: !!fd.get('kids'), interests: fd.getAll('interest'), langs: V.$$('.lang-pick input:checked', host).map(function (x) { return x.value; }) };
+    // (Read from the form's own fields: FormData can't be read on older TVs, and adding a profile — the first one too — failed there.)
+    var fld = function (n) { return V.$('[name=' + n + ']', f); };
+    var body = { name: (fld('name') || {}).value || '', avatar: avatar, pin: (fld('pin') || {}).value || '', kids: !!V.$('[name=kids]:checked', f), interests: V.$$('[name=interest]:checked', f).map(function (x) { return x.value; }), langs: V.$$('.lang-pick input:checked', host).map(function (x) { return x.value; }) };
     var btn = V.$('.btn.primary', f);
     btn.disabled = true;
     V.api('/api/profiles', { body: body }).then(function (p) {

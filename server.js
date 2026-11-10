@@ -447,7 +447,9 @@ function inputOf(it, alt = -1, overrideUrl = '', { raw = false } = {}) {
 /** The stream relay's address for one provider address, for this server's own use (kept for a day; good for a week). */
 const relayMemo = new Map();
 function relayWrapped(u, h, whole) {
-  const key = u + '\n' + JSON.stringify(h) + '\n' + ((settings().relay || {}).url || '') + (whole ? '\nw' + whole.k + '|' + whole.alt : '');
+  // (The relay's secret and the proxy are part of what's remembered: after either changed, the old address answered 403 — or went the old way — for a day.)
+  const rs = settings().relay || {};
+  const key = u + '\n' + JSON.stringify(h) + '\n' + (rs.url || '') + '\n' + crypto.createHash('sha1').update(String(rs.secret || rs.key || '') + '|' + String(settings().proxy || '')).digest('hex').slice(0, 12) + (whole ? '\nw' + whole.k + '|' + whole.alt : '');
   const m = relayMemo.get(key);
   if (m && Date.now() - m.at < 86400e3) return m.url;
   const url = relayOf.wrap(u, h, { ttl: 7 * 86400, ...(whole || {}) });
@@ -752,6 +754,7 @@ route('DELETE', '/api/me', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const { pin } = await readObj(req);
   if (prof.admin) throw new HttpError(400, 'The admin profile can’t be removed. Make someone else the admin first.');
+  if (prof.kids) throw new HttpError(403, 'A kids profile is removed by the admin (Admin → Profiles).');
   if (!accounts.checkPin(prof.id, pin, ctx.sess)) throw new HttpError(403, 'Wrong PIN.');
   accounts.remove(prof.id); userdata.remove(prof.id); social.forgetProfile(prof.id);
   dropStaleConns(); // (its other devices' live connections)
@@ -1756,7 +1759,7 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   if (it && sms > 0) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), sms, false);
   // (Played straight from the provider: how long it took is the provider's doing. A converted start isn't counted.)
   if (it && sms > 0 && !b.failed && /^(native|direct|helper)$/.test(String(b.route || ''))) noteSpeed(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Math.min(sms, 120000), true);
-  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type, startMs: b.ms }) };
+  return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type, startMs: b.ms, phases: b.ph && typeof b.ph === 'object' ? b.ph : null }) };
 });
 route('POST', '/api/stats/watch', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -1868,18 +1871,24 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
       }
     }
   }
+  // (t: where the time went — the look inside, getting the conversion going — for Admin → Statistics → Time to start.)
   let pr, d, s;
+  const t0 = Date.now(), t = { look: 0, conv: 0 };
   if (guess) {
     // (The conversion is what the viewer waits for: once it's ready, the look inside gets 5 more seconds, not 15.)
     const look = media.probe(src.input, { headers: src.headers, timeout: 15000 }).catch(() => null);
     s = await start(guess);
+    t.conv = Date.now() - t0;
     pr = await Promise.race([look, new Promise((ok) => setTimeout(() => ok(null), 5000))]);
+    t.look = Date.now() - t0 - t.conv;
     d = decide(pr);
     if (!pr) d = guess; // (the look inside didn't answer: what's running stays)
     else if (d.transcode !== guess.transcode || d.audioOnly !== guess.audioOnly || d.audioTrack !== guess.audioTrack || d.live !== guess.live) {
       log(`Session ${s.id}: the stream needs ${d.transcode !== guess.transcode ? (d.transcode ? 'converting' : 'no converting') : d.live !== guess.live ? 'playing as a film' : 'another audio track'} — starting again`);
       media.stopSession(s.id);
+      const t1 = Date.now();
       s = await start(d);
+      t.conv += Date.now() - t1;
     }
   } else {
     pr = await media.probe(src.input, { headers: src.headers, timeout: isProto ? 20000 : 15000 });
@@ -1887,14 +1896,16 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     // One-connection accounts: let the provider free the slot the look-inside used before the real connection.
     if (!wasCached && !src.local && oneConnection(it, alt)) await new Promise((ok) => setTimeout(ok, 1500));
     d = decide(pr);
+    t.look = Date.now() - t0;
     s = await start(d);
+    t.conv = Date.now() - t0 - t.look;
   }
   const { audioTrack, duration, transcode } = d;
   // A TV's own player fetches it without this browser's sign-in (web/js/player.js signMedia): signed here, which saves
   // asking for it separately.
   const signed = b.sign === true ? castSign(`/api/session/${s.id}/index.m3u8`, 24) : '';
   return {
-    url: `/api/session/${s.id}/index.m3u8`, signed, quick: !!guess, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
+    url: `/api/session/${s.id}/index.m3u8`, signed, quick: !!guess, t, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text || x.pic) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
@@ -2464,7 +2475,12 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
   const s = settings();
   const num = (k, min, max) => { if (k in b) s[k] = clampInt(b[k], min, max, s[k]); };
-  if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
+  // (Plain printable characters only: a curly quote or a line break pasted in made every request to a provider fail.)
+  if (typeof b.userAgent === 'string') {
+    const ua = b.userAgent.trim();
+    if (ua && !/^[\x20-\x7e]{1,300}$/.test(ua)) throw new HttpError(400, 'The player name sent to providers (User-Agent) can only have plain letters, digits and punctuation — check for curly quotes or line breaks.');
+    s.userAgent = ua || DEFAULT_SETTINGS.userAgent;
+  }
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
   for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
@@ -2494,7 +2510,8 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
       const old = (s.proxies || []).find((y) => y.id === x.id);
       let url = String(x.url || '').trim();
       // The form shows passwords masked: keep the saved one.
-      if (old && /:•+@/.test(url)) url = old.url;
+      // (Only the password: the rest is what was typed — changing the host with the password left masked used to keep the old address and say "Saved".)
+      if (old && /:•+@/.test(url)) url = unmaskProxy(url, old.url);
       if (url && !/^(https?|socks5h?|socks):\/\/[^\s]+$/i.test(url)) throw new HttpError(400, `“${url}” isn’t a proxy address (http://host:port or socks5://user:password@host:port).`);
       return { id: String(x.id || crypto.randomBytes(4).toString('hex')).slice(0, 20), name: String(x.name || '').trim().slice(0, 40) || 'Proxy', url, video: !!x.video };
     }).filter((x) => x.url);
@@ -2596,7 +2613,7 @@ route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
   let url = String(b.url || '').trim();
   const saved = (settings().proxies || []).find((x) => x.id === b.id);
-  if (saved && /:•+@/.test(url)) url = saved.url;
+  if (saved && /:•+@/.test(url)) url = unmaskProxy(url, saved.url);
   try { return await testProxy(url); } catch (e) { return { ok: false, error: (e.cause && e.cause.message) || e.message }; }
 });
 /** Settings as the admin page sees them (secrets masked). */
@@ -2629,6 +2646,12 @@ route('GET', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { require
 route('DELETE', '/api/admin/lists/:id/conntest', (req, res, p, q, ctx) => { requireAdmin(ctx); return connTest.stop(p.id); });
 // A big list can take minutes (download, read, rebuild the catalogue): wait up to 45 s, then answer "still going"
 // (a page behind Cloudflare gives up after 100 s with "Server error 524"). The list's row shows when it's done.
+/** A proxy address typed with its password shown masked (•••): the saved password put back, everything else as typed. */
+function unmaskProxy(typed, saved) {
+  let pw = '';
+  try { pw = new URL(saved).password; } catch {}
+  return pw ? typed.replace(/:•+@/, ':' + pw + '@') : saved;
+}
 route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
   const job = lists.refresh(p.id);
@@ -3036,11 +3059,16 @@ route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
   if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name');
   const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(BACKUPS, p.name))).toString('utf8'));
   restoreFiles(data);
-  res.on('finish', () => { log(`Restored ${p.name} — restarting.`); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); });
+  const bye = () => { log(`Restored ${p.name} — restarting.`); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); };
+  // (When the answer has gone out — or after 5 seconds if it never does: the files are already replaced, and a server that carried on would never save again.)
+  res.once('finish', bye); setTimeout(bye, 5000).unref();
   return { ok: true, restart: true };
 });
 function restoreFiles(data) {
-  if (!data || data.app !== 'browser-iptv-player' || !data.files) throw new HttpError(400, 'That isn’t a backup file from this app.');
+  if (!data || data.app !== 'browser-iptv-player' || !data.files || typeof data.files !== 'object') throw new HttpError(400, 'That isn’t a backup file from this app.');
+  // (Checked whole before anything is written: a file that's wrong part-way through used to leave half the old data
+  // and half the new.)
+  for (const [rel, b64] of Object.entries(data.files)) if (typeof rel !== 'string' || typeof b64 !== 'string') throw new HttpError(400, 'That backup file is damaged — nothing was changed.');
   // (The saved catalogue was made from what's being replaced: built again from the restored lists and settings.)
   try { fs.unlinkSync(SNAP_FILE); } catch {}
   for (const [rel, b64] of Object.entries(data.files)) {
@@ -3084,6 +3112,7 @@ function restartWhenIdle(reason) {
     clearInterval(tick);
     hub.toAll('restarting', {});
     frontLink.tellFrontStopping(); // (new visitors get "Back in a moment" from now on, not a server about to go)
+    lists.stopping();
     JsonFile.flushAll();
     setTimeout(() => process.exit(0), 800);
   }, 5000);
@@ -3147,7 +3176,9 @@ route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
   let data;
   try { let buf = await readBody(req, 2 * 1024 * 1024 * 1024); if (buf[0] === 0x1f) buf = zlib.gunzipSync(buf); data = JSON.parse(buf.toString('utf8')); } catch { throw new HttpError(400, 'That isn’t a backup file from this app.'); }
   restoreFiles(data);
-  res.on('finish', () => { log('Backup restored — restarting.'); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); });
+  const bye = () => { log('Backup restored — restarting.'); frontLink.tellFrontStopping(); media.stopAll(); setTimeout(() => process.exit(0), 500); };
+  // (When the answer has gone out — or after 5 seconds if it never does: the files are already replaced, and a server that carried on would never save again.)
+  res.once('finish', bye); setTimeout(bye, 5000).unref();
   return { ok: true, restart: true };
 });
 
@@ -3176,7 +3207,7 @@ otherAppConns = () => [...p4.outputs.active].filter(([, a]) => a.kind === 'hdhr'
 // Subtitles found online, the live viewing dashboard, the speed test, API keys and webhooks.
 const p5 = require('./lib/routes-p5')({
   route, requireProfile, requireAdmin, readJSON, D, lists, accounts, userdata, hub, tmdb, item, clientIp, listUsage, srcList, connLimit, accountAlerts, COMMANDS,
-  catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }), log,
+  catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }), log, overrides,
 });
 p5Public = p5.publicFlags;
 
@@ -3345,6 +3376,15 @@ async function handle(req, res) {
     if (ctx.sess && ctx.sess.profileId) ctx.profile = accounts.profile(ctx.sess.profileId);
     // The profile's PIN was changed since this device entered it: choose the profile again (with the new PIN).
     if (ctx.profile && !accounts.pinCurrent(ctx.sess, ctx.profile)) ctx.profile = null;
+    // "Remember on this device" off: the PIN holds for 30 minutes of not using the profile, counted from its last
+    // use here — it used to hold for as long as the page stayed signed in, admin's profile included.
+    if (ctx.profile && ctx.profile.pin && ctx.profile.pin.hash) {
+      const v = ctx.sess.pinOk && ctx.sess.pinOk[ctx.profile.id];
+      if (v && typeof v === 'object' && v.until - v.at <= 31 * 60e3) {
+        if (Date.now() > v.until) { ctx.profile = null; ctx.sess.profileId = null; accounts.store.save(); }
+        else if (v.until - Date.now() < 25 * 60e3) { v.at = Date.now(); v.until = v.at + 30 * 60e3; accounts.store.save(); }
+      }
+    }
     // A guest watches, and what it does stays on its device's visit (in memory): nothing that would be kept or reach
     // anyone else — recordings, wishlists, messages, watch parties, followed series, its own profile, the admin's pages.
     if (ctx.profile && ctx.profile.guest && req.method !== 'GET' && req.method !== 'HEAD' && GUEST_DENY.test(pathname)) throw new HttpError(403, 'Guests can’t do that — choose your own profile for it.');
@@ -3430,6 +3470,7 @@ function shutdown() {
   log('Shutting down…');
   frontLink.tellFrontStopping();
   media.stopAll();
+  lists.stopping(); // (a refresh under way isn't a crash: without this the list waited 6–48 hours after every restart that caught one)
   JsonFile.flushAll();
   setTimeout(() => process.exit(0), 300);
 }

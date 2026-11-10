@@ -601,7 +601,7 @@ test('relay 5: films of one account share its connections (everyone kept ahead),
     assert.ok(ra.got >= SIZE / 60 * 8 && rb.got >= SIZE / 60 * 6, `both kept playing (${(ra.got / MB).toFixed(1)} MB and ${(rb.got / MB).toFixed(1)} MB)`);
     assert.ok(ra.longest < 2500 && rb.longest < 2500, `no long waits (${ra.longest} ms, ${rb.longest} ms)`);
     let d = await downloads();
-    assert.strictEqual(d.version, '6');
+    assert.strictEqual(d.version, '7');
     assert.strictEqual(d.accounts.acc1.budget, 1);
     assert.ok(!d.strain.some((e) => e.a === 'acc1'), 'it kept up: ' + JSON.stringify(d.strain));
 

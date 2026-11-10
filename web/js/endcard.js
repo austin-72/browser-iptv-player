@@ -91,6 +91,7 @@
       var off = !autoplay() || o.noAuto || V.watch.mini || V.watch.side || V.watch.it !== it || b.hidden;
       if (off) { c.textContent = queued ? 'Play next' : 'Next episode'; if (V.watch.it !== it || b.hidden) { clearInterval(timer); timer = null; } return; }
       c.textContent = (queued ? 'Play next' : 'Next episode') + ' in ' + left + ' s';
+      if (document.hidden) return; // (nobody's looking: the countdown waits)
       if (left-- <= 0) { clearInterval(timer); timer = null; V.autoNext ? V.autoNext(nx) : V.playUpNext(nx); }
     };
     clearInterval(timer);

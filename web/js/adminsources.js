@@ -130,7 +130,8 @@ V.adminTabs.outputs = function (body, A) {
     // (The list is redrawn once the password dialog closes, with focus back on this row.)
     var made = function (r) { return showPw(r).then(function () { pending = focusOf(b) || { pid: pid, attr: 'data-login' }; return load(); }); };
     var send = function (req) { b.disabled = true; req().then(made).catch(function (err) { if (b.isConnected) b.disabled = false; V.fail(err); }); };
-    if (b.hasAttribute('data-login')) send(function () { return V.api(path, { body: {} }); });
+    // (A new password for a login that exists stops the apps using the old one: asked first.)
+    if (b.hasAttribute('data-login')) { if (/New password/.test(b.textContent)) V.confirm('Make a new password for this login? Apps signed in with the current one stop working until they’re given the new one.', { ok: 'New password' }).then(function (yes) { if (yes) send(function () { return V.api(path, { body: {} }); }); }); else send(function () { return V.api(path, { body: {} }); }); }
     else if (b.hasAttribute('data-setpw')) V.prompt('New password for this login (6 characters or more)', { type: 'text' }).then(function (pw) { if (pw) send(function () { return V.api(path, { body: { password: pw } }); }); });
     else if (b.hasAttribute('data-nologin')) V.confirm('Remove this login? Apps signed in with it stop working.', { ok: 'Remove', danger: true }).then(function (ok) { if (ok) { pending = { pid: pid, attr: 'data-login' }; V.del(path).then(function () { V.toast('Login removed'); return load(); }).catch(function (err) { pending = null; V.fail(err); }); } });
   };

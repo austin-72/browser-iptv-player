@@ -177,5 +177,30 @@
       } });
     } catch (e) {}
   }
+  // video.play() gives nothing back on Chrome before 50: `.catch` on it threw (pause/resume, back to live, multiview).
+  try {
+    var mp = window.HTMLMediaElement && HTMLMediaElement.prototype, op = mp && mp.play;
+    if (op && !op._wrapped) {
+      mp.play = function () { var r = op.apply(this, arguments); return r && r.then ? r : (window.Promise ? Promise.resolve() : r); };
+      mp.play._wrapped = true;
+    }
+  } catch (e) {}
+  // scrollIntoView({ block: 'nearest' … }): browsers that don't know the options (Chrome before 61 — Tizen up to 4,
+  // webOS up to 4) read them as "align to the top", so every arrow press snapped the row under the top bar. There:
+  // nothing when it's already in view, otherwise aligned to the edge it's nearest.
+  try {
+    if (!('scrollBehavior' in document.documentElement.style) && window.Element && Element.prototype.scrollIntoView) {
+      var osv = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (o) {
+        if (!o || typeof o !== 'object') return osv.apply(this, arguments);
+        var r = this.getBoundingClientRect(), h = window.innerHeight || document.documentElement.clientHeight, w = window.innerWidth || document.documentElement.clientWidth;
+        if (o.block === 'center') { window.scrollBy(0, r.top + r.height / 2 - h / 2); return; }
+        if (r.top >= 70 && r.bottom <= h && r.left >= 0 && r.right <= w) return;
+        if (r.left < 0 || r.right > w) osv.call(this, r.top < 70);
+        else if (r.top < 70) window.scrollBy(0, r.top - 80);
+        else window.scrollBy(0, r.bottom - h + 16);
+      };
+    }
+  } catch (e) {}
   // requestAnimationFrame / performance.now are old enough everywhere; CSS.escape is used by nothing.
 })();

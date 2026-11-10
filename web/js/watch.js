@@ -41,10 +41,16 @@ setInterval(function () {
 }, 15000);
 
 V.play = function (it, opts) {
-  V._clickAt = Date.now(); // ("Time to start": counted from here — player.js _statStart)
-  if (it && it.k) V.ls.session('playedHere', it.k);
-  if (V.homePlayed) V.homePlayed(it); // (Home orders its rows by what's watched at this time of day: home.js)
   opts = opts || {};
+  // (_addr: the second half of one Play — the address of a film from the light catalogue has arrived. Counted once,
+  // timed from the press, and dropped if something else was played, or the player closed, in between.)
+  if (opts._addr) { if (opts._seq !== V._playSeq) return; }
+  else {
+    V._playSeq = (V._playSeq || 0) + 1;
+    V._clickAt = Date.now(); // ("Time to start": counted from here — player.js _statStart)
+    if (it && it.k) V.ls.session('playedHere', it.k);
+    if (V.homePlayed) V.homePlayed(it); // (Home orders its rows by what's watched at this time of day: home.js)
+  }
   if (!it) return;
   // "Play on the TV" mode (Remote): send it there instead.
   if (V.playOnTarget && V.playOnTarget(it, opts)) return;
@@ -59,9 +65,10 @@ V.play = function (it, opts) {
   if (it.lz && !it.u && !opts._addr && !opts.mini) {
     V.$('#player-layer').hidden = false; document.body.classList.add('watching');
     if (V.player && V.player._msg) V.player._msg({ spin: true, title: it.n });
-    return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true })); }, function (e) { V.closePlayer(); V.fail(e); });
+    var seq1 = V._playSeq;
+    return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true, _seq: seq1 })); }, function (e) { if (seq1 !== V._playSeq) return; V.closePlayer(); V.fail(e); });
   }
-  if (it.lz && !it.u && !opts._addr) return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true })); }, V.fail);
+  if (it.lz && !it.u && !opts._addr) { var seq2 = V._playSeq; return V.fetchAddresses([it.k]).then(function () { V.play(it, Object.assign({}, opts, { _addr: true, _seq: seq2 })); }, V.fail); }
   if (it.t === 'show') return V.loadEpisodes(it).then(function (eps) { var r = V.resumePoint(it, eps); if (r.ep) V.play(r.ep, Object.assign({}, opts, { startAt: r.pos })); else V.toast('No episodes found', { error: true }); }).catch(V.fail);
   // (Episodes fetched on demand live only in the server's memory; after a server restart it reads the series again
   // itself when the player asks for one — the series goes along with the player's calls: core.js, server.js itemAsync.
@@ -97,14 +104,23 @@ V.play = function (it, opts) {
   V.emit('playing', it);
 };
 
+/** Out of full screen, whichever way this browser spells it (Safari before 16.4 and older TVs: webkit…): closing the
+    player there used to leave a blank full screen. */
+V.leaveFullscreen = function () {
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) { var p = document.exitFullscreen(); if (p && p.catch) p.catch(function () {}); }
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+  } catch (e) {}
+};
 V.closePlayer = function () {
+  V._playSeq = (V._playSeq || 0) + 1; // (a Play still waiting for its address is off)
   if (V.party && V.party.current) V.party.leave();
   V.player.stop();
   V.$('#player-layer').hidden = true;
   document.body.classList.remove('watching', 'mini-playing');
   V.watch.it = null;
   V.rt.presence(null);
-  if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+  V.leaveFullscreen();
   document.title = (S.settings.brand || {}).name || document.title;
   V.emit('stopped');
   if (V.router) V.router.refresh();
@@ -116,7 +132,7 @@ V.setMini = function (on) {
   layer.classList.toggle('mini', !!on);
   document.body.classList.toggle('mini-playing', !!on && !layer.hidden);
   document.body.classList.toggle('watching', !on && !layer.hidden);
-  if (on && document.fullscreenElement) document.exitFullscreen().catch(function () {});
+  if (on) V.leaveFullscreen();
   if (!on) setTimeout(function () { V.player.el.focus(); }, 30);
 };
 
@@ -362,7 +378,7 @@ V.initWatch = function () {
     if (k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461) {
       if (!V.$('.vp-menu', p.host).hidden) p._menuBack(); // (in a setting's choices: back to the settings first)
       else if (V.watch.side) V.closeSide();
-      else if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.fullscreenElement || document.webkitFullscreenElement) V.leaveFullscreen();
       else V.setMini(true);
     } else if (/^\d$/.test(k) && live) {
       numBuf = (numBuf + k).slice(-4);
@@ -386,8 +402,8 @@ V.initWatch = function () {
     else if (k === 'l' || k === 'MediaFastForward') p.skip(V.skipLen('fwd'));
     else if (k === ',') p.step(-1);
     else if (k === '.') p.step(1);
-    else if (k === '<') p.setRate(Math.max(0.25, Math.round((p.video.playbackRate - 0.25) * 4) / 4));
-    else if (k === '>') p.setRate(Math.min(3, Math.round((p.video.playbackRate + 0.25) * 4) / 4));
+    else if (k === '<' && p.vod) p.setRate(Math.max(0.25, Math.round((p.video.playbackRate - 0.25) * 4) / 4));
+    else if (k === '>' && p.vod) p.setRate(Math.min(3, Math.round((p.video.playbackRate + 0.25) * 4) / 4));
     else if (k === 'ArrowLeft') p.skip(e.shiftKey ? -60 : -V.skipLen('back'));
     else if (k === 'ArrowRight') p.skip(e.shiftKey ? 60 : V.skipLen('fwd'));
     else if ((k === 'ArrowUp' || k === 'ChannelUp' || k === 'PageUp') && live) V.zap(-1);

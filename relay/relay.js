@@ -35,7 +35,7 @@ const os = require('os');
 const pathMod = require('path');
 const vm = require('vm');
 
-const VERSION = '6';
+const VERSION = '7';
 const SECRET = process.env.RELAY_SECRET || '';
 const PORT = Number(process.env.PORT) || 8090;
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 0;
@@ -83,7 +83,10 @@ function isPrivate(ip) {
     return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
   }
   const x = ip.toLowerCase();
-  return x === '::1' || x === '::' || x.startsWith('fc') || x.startsWith('fd') || x.startsWith('fe80') || (x.startsWith('::ffff:') && isPrivate(x.slice(7)));
+  // (An IPv4 address written inside an IPv6 one — "::ffff:7f00:1" is 127.0.0.1, "64:ff9b::…" the same through NAT64 — is judged as that IPv4 address.)
+  const m4 = /^(?:::ffff:|64:ff9b::)(?:(\d+\.\d+\.\d+\.\d+)|([0-9a-f]{1,4}):([0-9a-f]{1,4}))$/.exec(x);
+  if (m4) return isPrivate(m4[1] || [parseInt(m4[2], 16) >> 8, parseInt(m4[2], 16) & 255, parseInt(m4[3], 16) >> 8, parseInt(m4[3], 16) & 255].join('.'));
+  return x === '::1' || x === '::' || x.startsWith('fc') || x.startsWith('fd') || /^fe[89ab]/.test(x) || x.startsWith('::ffff:') || x.startsWith('64:ff9b:');
 }
 async function publicHost(host) {
   if (ALLOW_PRIVATE) return true;
@@ -258,7 +261,8 @@ async function relay(req, res, o) {
   const ct = up.headers['content-type'] || '';
   const headersOut = () => { const h = { 'Cache-Control': up.headers['cache-control'] || 'no-store' }; for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) if (up.headers[k]) h[k] = up.headers[k]; return h; };
   // Playlists: read (they're small), rewrite, send. Recognised by type, name, or their first bytes.
-  const maybe = up.statusCode < 400 && req.method !== 'HEAD' && !req.headers.range && !/^(video|audio|image)\//i.test(ct);
+  // ("bytes=0-" is the whole thing: ffmpeg asks for playlists that way, and they went back unrewritten.)
+  const maybe = up.statusCode < 400 && req.method !== 'HEAD' && (!req.headers.range || /^bytes=0-$/i.test(String(req.headers.range).trim())) && !/^(video|audio|image)\//i.test(ct);
   if (maybe) {
     const first = await new Promise((ok) => {
       const done = (c) => { up.off('data', done); up.off('end', end); up.off('close', end); up.off('error', end); up.pause(); ok(c || null); };
@@ -267,14 +271,17 @@ async function relay(req, res, o) {
     });
     if (res.destroyed) { up.destroy(); return; }
     if (!first && up.destroyed && !up.complete) { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('The provider hung up'); }
-    const looks = /mpegurl/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl) || (first && /^\s*(\ufeff)?#EXTM3U/.test(first.slice(0, 64).toString('utf8')));
+    // (By its first bytes above all: an address ending .m3u8 that sends the video itself — it starts with a transport
+    // stream's 0x47 — was read as a playlist until it was "too big".)
+    const startsM3u = !!first && /^\s*(\ufeff)?#EXTM3U/.test(first.slice(0, 64).toString('utf8'));
+    const looks = startsM3u || ((/mpegurl/i.test(ct) || /\.m3u8?(\?|$)/i.test(up.finalUrl)) && !(first && first[0] === 0x47));
     if (looks) {
       const chunks = first ? [first] : []; let size = first ? first.length : 0;
       up.resume();
       for await (const c of up) { size += c.length; if (size > MAX_PLAYLIST) { up.destroy(); res.writeHead(502); return res.end('Playlist too big'); } chunks.push(c); }
       const text = Buffer.concat(chunks).toString('utf8');
       const out = Buffer.from(isPlaylist(up, up.finalUrl, text.slice(0, 200)) ? rewrite(text, up.finalUrl, o) : text);
-      res.writeHead(up.statusCode, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Content-Length': out.length, 'Cache-Control': 'no-store' });
+      res.writeHead(up.statusCode === 206 ? 200 : up.statusCode, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Content-Length': out.length, 'Cache-Control': 'no-store' });
       return res.end(out);
     }
     res.writeHead(up.statusCode, headersOut());
@@ -853,10 +860,11 @@ async function update(req, res) {
   setTimeout(() => process.exit(0), 300);
 }
 
+const sameSig = (a, b) => { a = Buffer.from(String(a || '')); b = Buffer.from(String(b || '')); return a.length === b.length && crypto.timingSafeEqual(a, b); };
 const signedQuery = (req, what) => {
   const q = new URL(req.url, 'http://x').searchParams;
   const t = q.get('t') || '';
-  return /^\d+$/.test(t) && Math.abs(Date.now() / 1000 - Number(t)) < 300 && q.get('s') === sigOf(what + ':' + t);
+  return /^\d+$/.test(t) && Math.abs(Date.now() / 1000 - Number(t)) < 300 && sameSig(q.get('s'), sigOf(what + ':' + t));
 };
 
 const server = http.createServer(async (req, res) => {
@@ -924,8 +932,11 @@ function startProxy() {
     if (!(await publicHost(u.hostname))) { res.writeHead(403); return res.end('Only public internet addresses'); }
     const h = { ...req.headers };
     delete h['proxy-authorization']; delete h['proxy-connection'];
-    const up = (u.protocol === 'https:' ? https : http).request(u, { method: req.method, headers: h }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+    const up = (u.protocol === 'https:' ? https : http).request(u, { method: req.method, headers: h }, (r) => { res.writeHead(r.statusCode, r.headers); r.on('error', () => res.destroy()); r.pipe(res); });
     up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    // (The server stopped fetching — a film abandoned, a channel changed: the provider's connection goes too. It used
+    // to stay open, holding one of the account's connections.)
+    res.on('close', () => up.destroy());
     req.pipe(up);
   });
   px.on('connect', async (req, sock, head) => {

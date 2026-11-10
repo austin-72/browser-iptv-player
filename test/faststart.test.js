@@ -128,6 +128,13 @@ test('quick start, and episodes read again after a restart', { timeout: 90000, s
     now = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
     assert.strictEqual(now[0], other, 'started quickly since: no longer held back ' + JSON.stringify(now));
 
+    // A converted start says where its time went, and Admin's statistics add it up.
+    await api('POST', '/api/stats/play', { k: two.k, alt: now[0], route: 'convert', reason: 'format', ms: 7000, ph: { pre: 500, look: 2000, conv: 3000, net: 100, play: 1400, junk: 9e9 } });
+    const sum = (await api('GET', '/api/admin/stats?days=1')).body;
+    const stt = (sum.total || sum).start || {};
+    assert.strictEqual(stt.cn, 1, JSON.stringify(stt));
+    assert.deepStrictEqual([stt.c_pre, stt.c_look, stt.c_conv, stt.c_net, stt.c_play], [500, 2000, 3000, 100, 1400]);
+
     // A head start: the look inside is done when the title's page opens (once; then it's kept), within the account's
     // connections, and only for something this profile can see.
     const w1 = (await api('POST', '/api/play/warm', { k: two.k, alt: now[0] })).body;

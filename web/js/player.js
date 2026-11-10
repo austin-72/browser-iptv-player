@@ -169,7 +169,7 @@ PP.load = function (it, opts) {
   this._triedDirect = false;
   this._failedWith = null;
   this._loadAt = opts.startAt || 0; // (where this load starts: a backup stream tried after it fails starts there too)
-  if (!opts.quiet) { this._downWaits = 0; this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; this._clickAt = V._clickAt && Date.now() - V._clickAt < 120000 ? V._clickAt : Date.now(); V._clickAt = 0; this._startTimed = false; }
+  if (!opts.quiet) { this._downWaits = 0; this._earlyEnds = 0; this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; this._clickAt = V._clickAt && Date.now() - V._clickAt < 120000 ? V._clickAt : Date.now(); V._clickAt = 0; this._startTimed = false; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (!opts.quiet) this._picRetried = this._picConverted = false;
   if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; this._fmt = {}; this._raceDone = false; this._racing = null; this._connLimit = 0; this._copyAt = Date.now(); }
@@ -811,12 +811,16 @@ PP._attach = function (a, token, startAt, over) {
     // (Started early — while the way before this one was still trying: _warmSession — and that's this one: used.)
     var w = this._warmS, body = this._sessionBody(a, startAt);
     this._warmS = null;
+    var askedAt = w && w.key === JSON.stringify(body) ? w.at || Date.now() : Date.now();
     var asked = w && w.key === JSON.stringify(body) ? w.p : V.api('/api/play/session', { body: body });
     if (w && asked !== w.p) w.p.then(function (s0) { V.api('/api/session/' + s0.sessionId, { method: 'DELETE' }).catch(function () {}); }, function () {});
     prep = asked.then(function (s) {
       // (Too late: end it, or it keeps converting — and holding a provider connection — with nobody watching.)
       if (gone()) { V.api('/api/session/' + s.sessionId, { method: 'DELETE' }).catch(function () {}); return null; }
       self.sessionId = s.sessionId;
+      // (Where a converted start's time goes, for Admin → Statistics: see _statStart.)
+      var tt = s.t || {}, round = Date.now() - askedAt;
+      self._ph = { at: Date.now(), pre: Math.max(0, askedAt - (self._clickAt || askedAt)), look: tt.look || 0, conv: tt.conv || 0, net: Math.max(0, round - (tt.look || 0) - (tt.conv || 0)) };
       if (self.audioTrack === undefined && s.audioTrack !== undefined) self.audioTrack = s.audioTrack;
       self.sessionInfo = s;
       self.offset = s.offset || 0;
@@ -861,7 +865,7 @@ PP._warmSession = function (a, startAt) {
   if (!shared && this._connLimit && this._connLimit < 2) return;
   var body = this._sessionBody(a, startAt);
   if (V.crumb) V.crumb('player', 'getting the server’s conversion ready meanwhile (' + a.mode + ')');
-  this._warmS = { key: JSON.stringify(body), p: V.api('/api/play/session', { body: body }) };
+  this._warmS = { key: JSON.stringify(body), at: Date.now(), p: V.api('/api/play/session', { body: body }) };
   this._warmS.p.catch(function () {});
 };
 PP._dropWarm = function () {
@@ -895,8 +899,11 @@ PP._attachMedia = function (a, token, startAt, kind, url, gone) {
       parallel: lim && lim <= 2 ? 1 : 2,
       audioTrack: this.audioTrack === undefined || this.audioTrack === null ? -1 : this.audioTrack,
       lang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '',
-      onError: function (e) { if (token === self.token) self._fatal(new Error('The conversion in this browser stopped (' + (e && e.message || e) + ').')); },
+      onError: function (e) { if (token === self.token && !gone()) self._fatal(new Error('The conversion in this browser stopped (' + (e && e.message || e) + ').')); },
+      gone: gone,
+      onCtl: function (c) { self._mbPending = c; },
     }).then(function (ctl) {
+      if (self._mbPending === ctl) self._mbPending = null;
       if (gone()) { ctl.stop(); return; }
       self.mb = ctl;
       if (ctl.audioTrack >= 0) self.audioTrack = ctl.audioTrack;
@@ -917,13 +924,14 @@ PP._attachMedia = function (a, token, startAt, kind, url, gone) {
 PP._seekOnMeta = function (rel) {
   var self = this, v = this.video;
   this._dropSeekOnMeta();
-  var f = function () { self._metaSeek = null; v.currentTime = rel; };
+  // (Taken off by hand: older TVs ignore "once", and every later video on this player then jumped to this position.)
+  var f = function () { v.removeEventListener('loadedmetadata', f, false); self._metaSeek = null; v.currentTime = rel; };
   this._metaSeek = { v: v, f: f };
-  v.addEventListener('loadedmetadata', f, { once: true });
+  v.addEventListener('loadedmetadata', f, false);
 };
 PP._dropSeekOnMeta = function () {
   var m = this._metaSeek;
-  if (m) { m.v.removeEventListener('loadedmetadata', m.f); this._metaSeek = null; }
+  if (m) { m.v.removeEventListener('loadedmetadata', m.f, false); this._metaSeek = null; }
 };
 PP._attachHls = function (a, token, url, rel, bufGoal) {
   var v = this.video;
@@ -1079,6 +1087,7 @@ PP._play = function () {
   if (!p || !p.then) return; // older browsers: play() returns nothing
   p.catch(function (e) {
     if (e.name !== 'NotAllowedError') return;
+    self._autoMuted = true; // (the browser's doing, not the viewer's choice: not remembered for next time)
     v.muted = true;
     self._volUi();
     var p2 = v.play();
@@ -1324,7 +1333,8 @@ PP._watchPicture = function () {
     // (Only while it really plays: paused, seeking, buffering or in sound-only mode isn't the picture's fault.)
     // (Nor in a hidden tab: browsers stop drawing the picture there to save power.)
     if (v.paused || v.seeking || v.readyState < 3 || moved < 1 || self._aoActive || document.hidden || v.webkitCurrentPlaybackTargetIsWireless) { black = still = none = 0; lastFrames = null; return; }
-    if (!v.videoWidth) none += STEP; else none = 0;
+    // (No picture counts against it only when there should be one: a station with sound only, in the channel list as a channel, was converted and restarted for nothing.)
+    if (!v.videoWidth && !((self.hls || self.mts || self.shaka) && self._hasVideoTrack(self.attempt) === false)) none += STEP; else none = 0;
     var changed = false;
     if (v.videoWidth && g && readable) {
       try {
@@ -1519,7 +1529,9 @@ PP._statStart = function () {
   // Time to start: from pressing Play to this first picture (once per title — not a reconnect or a switch later on).
   var ms = !this._startTimed && this._clickAt ? Date.now() - this._clickAt : 0;
   this._startTimed = true;
-  V.api('/api/stats/play', { body: { k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host, cu: it.t === 'catchup' ? 1 : undefined, ms: ms || undefined, cms: ms && this._copyAt && this._copyAt > this._clickAt ? Date.now() - this._copyAt : undefined } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
+  var ph = ms && route === 'convert' && a.via === 'session' && this._ph ? { pre: this._ph.pre, look: this._ph.look, conv: this._ph.conv, net: this._ph.net, play: Math.max(0, Date.now() - this._ph.at) } : undefined;
+  this._ph = null;
+  V.api('/api/stats/play', { body: { ph: ph, k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host, cu: it.t === 'catchup' ? 1 : undefined, ms: ms || undefined, cms: ms && this._copyAt && this._copyAt > this._clickAt ? Date.now() - this._copyAt : undefined } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
   // Over 15 seconds: an error report ("Slow to start") with what each step took, to see where the time went.
   if (ms > 15000 && V.reportError) {
     V.reportError('slow', { message: 'Slow to start (' + (MODE_LABEL[a.via + ':' + (a.kind === '?' ? 'native' : a.kind || a.mode)] || route) + ')' }, {
@@ -1714,6 +1726,7 @@ PP._teardownMedia = function () {
   this._dropSeekOnMeta();
   if (this.sessionId) { V.api('/api/session/' + this.sessionId, { method: 'DELETE', keepalive: true }).catch(function () {}); this.sessionId = null; }
   if (this.mb) { this.mb.stop(); this.mb = null; }
+  if (this._mbPending) { this._mbPending.stop(); this._mbPending = null; } // (one still getting ready: stopped too)
   var v = this.video;
   try { v.pause(); } catch (e) {}
   V.$$('track', v).forEach(function (t) { t.remove(); });
@@ -1855,6 +1868,7 @@ PP.togglePlay = function () {
 };
 PP.toggleMute = function (force) {
   var v = this.video;
+  this._autoMuted = false;
   v.muted = force === undefined ? !v.muted : force;
   if (!v.muted && v.volume === 0) v.volume = 0.5;
   this._volUi();
@@ -2408,7 +2422,8 @@ PP._volUi = function () {
   var vol = V.$('.vol', this.host);
   if (vol) { vol.value = v.muted ? 0 : v.volume; vol.style.setProperty('--p', (v.muted ? 0 : v.volume) * 100 + '%'); }
   V.$('[data-a=mute]', this.host).innerHTML = V.icon(v.muted || v.volume === 0 ? 'mute' : 'vol');
-  V.ls.set('volume', v.volume); V.ls.set('muted', v.muted);
+  V.ls.set('volume', v.volume);
+  if (!this._autoMuted) V.ls.set('muted', v.muted);
 };
 
 PP._drawMarks = function () {
@@ -2509,7 +2524,7 @@ PP._bindVideo = function (v) {
   v.addEventListener('playing', function () { if (v !== self.video) return; if (v.webkitCurrentPlaybackTargetIsWireless) self._toAirplay(); else if (self._apPick) setTimeout(function () { self._apReady(); }, 300); });
   v.addEventListener('volumechange', function () { self._volUi(); });
   v.addEventListener('play', function () { V.$('[data-a=play]', h).innerHTML = V.icon('pause'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Pause'); self.el.classList.remove('paused'); self._wakeLock(true); });
-  v.addEventListener('pause', function () { V.$('[data-a=play]', h).innerHTML = V.icon('play'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Play'); self.el.classList.add('paused'); self._saveProgress(); self._wake(true); });
+  v.addEventListener('pause', function () { V.$('[data-a=play]', h).innerHTML = V.icon('play'); V.$('[data-a=play]', h).setAttribute('aria-label', 'Play'); self.el.classList.add('paused'); self._saveProgress(); self._wake(true); self._wakeLock(false); });
   v.addEventListener('playing', function () { if (self.started) self._msg(null); self._stallAt = 0; clearTimeout(self._whyT); });
   v.addEventListener('waiting', function () { if (self.started) { self._msg({ spin: true }); self._stallAt = Date.now(); self._stalled(); } });
   // (Starting: the first of the video has arrived — the last step before the picture.)
@@ -2523,7 +2538,14 @@ PP._bindVideo = function (v) {
   v.addEventListener('ratechange', function () { self._menuRefresh(); });
   v.addEventListener('ended', function () {
     if (!self.started) return;
-    if (self.vod) { self._saveProgress(true); if (self.onEnded) self.onEnded(self); }
+    // (An end well before the end — the conversion or the provider dropped it part-way — isn't the film finishing:
+    // it was marked watched, its place lost, and the next episode started. It's picked up where it stopped instead.)
+    var dEnd = self.duration, pEnd = self.position;
+    if (self.vod && dEnd && isFinite(dEnd) && dEnd - pEnd > Math.max(30, dEnd * 0.05) && (self._earlyEnds = (self._earlyEnds || 0) + 1) <= 3) {
+      if (V.crumb) V.crumb('player', 'ended early at ' + Math.round(pEnd) + ' of ' + Math.round(dEnd) + ' s');
+      return self._fatal(new Error('The video stopped before its end.'));
+    }
+    if (self.vod) { self._saveProgress(true); self._wakeLock(false); if (self.onEnded) self.onEnded(self); } // (it's over: the screen may sleep again)
     else self._fatal(new Error('The stream ended.'));
   });
   v.addEventListener('error', function () { if (self.started && !self._failNow && self.video === v) self._fatal(V.techErr(self._mediaErr(), self._mediaDetail())); });
@@ -2573,6 +2595,13 @@ PP._bind = function () {
     if (self.vod && !self.video.paused && Date.now() - (self._lastSave || 0) > 10000) { self._lastSave = Date.now(); self._saveProgress(); }
     // Stall watchdog: stuck buffering for 15 s → reconnect.
     if (self._stallAt && !self.video.paused && Date.now() - self._stallAt > 15000) { self._stallAt = 0; self._fatal(new Error('The stream stopped.')); }
+    // A live channel that froze without saying so (no "waiting" from the browser — some TVs, some streams): the
+    // position hasn't moved for 20 seconds while it's meant to be playing → reconnect, as for a stall.
+    var vv = self.video;
+    if (self.started && !self.vod && self.it && !vv.paused && !vv.seeking && !vv.ended && !self._stallAt && !document.hidden && !vv.webkitCurrentPlaybackTargetIsWireless && !self._blocked) {
+      if (self._progCT !== vv.currentTime || self._progTok !== self.token) { self._progCT = vv.currentTime; self._progTok = self.token; self._progAt = Date.now(); }
+      else if (Date.now() - self._progAt > 20000) { self._progAt = Date.now(); if (V.crumb) V.crumb('player', 'frozen without a stall: reconnecting'); self._fatal(new Error('The stream stopped.')); }
+    } else self._progAt = Date.now();
   }, 1000);
   window.addEventListener('online', function () { if (self.it && self.started && (self.video.readyState < 3 || self._stallAt)) self._fatal(new Error('Network came back')); });
   var fsChange = function () { var fs = (document.fullscreenElement || document.webkitFullscreenElement) === self.el; self.el.classList.toggle('fs', fs); V.$('[data-a=fs]', h).innerHTML = V.icon(fs ? 'fsx' : 'fs'); };

@@ -111,7 +111,7 @@
       var f = found[cur];
       if (!f) return;
       var a = b.dataset.a;
-      if (a === 'play') { if (f.it.t === 'show') V.router.go('#/title/' + encodeURIComponent(f.it.k)); else V.play(f.it); }
+      if (a === 'play') { if (f.it.t === 'show') V.router.go('#/title/' + encodeURIComponent(f.it.k)); else { vid.innerHTML = ''; V.play(f.it); } } // (the trailer stops: it used to carry on, with its sound, under the film)
       else if (a === 'list') V.toggle('list', f.it.k).then(function () { show(); });
       else if (a === 'sound') { muted = !muted; try { V.ls.set('trl.sound', muted ? '0' : '1'); } catch (x) {} show(); }
     });
