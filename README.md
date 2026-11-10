@@ -188,14 +188,15 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 
 ### Profiles and the household
 
-![Admin → Profiles with a Priority viewer switch on each profile](docs/screenshots/admin-profiles.jpg)
+![Admin → Profiles: each profile is a row that opens to what it can watch, its screen time and its PIN](docs/screenshots/admin-profiles.jpg)
 
 - Unlimited profiles with 142 original profile pictures, or upload a photo. Each device remembers its profile.
 - **Optional PINs,** remembered on a device for 6 months or for 30 minutes, with a lockout after wrong guesses (on the device that guessed, and everywhere after many guesses across devices).
 - **Kids profiles and age limits** (five levels, read from US, UK and EU ratings). Profiles can also be limited by type (live, films, series, radio) and category. Adult content is hidden unless allowed.
 - Each profile keeps its own history, My List, favourites, ratings, hidden titles, home layout, theme, subtitle style and languages.
 - **Busy providers:** if someone is already using the provider's connection, it says who's watching what and offers *Take over*. Titles on several providers play from the one with a free connection.
-- **Priority viewers:** mark profiles as *Priority* in Admin → Profiles. When a provider has no free connection, a priority viewer automatically takes one from someone on a standard profile, and that person's screen says who needed it. Standard profiles can't take a connection from a priority viewer.
+- **Admin → Profiles at a glance:** every profile is one row that says who it is and what it's limited to (*Kids' titles only · Age limit: Teens · Screen time: school days 1 h*). A row opens to that profile's settings in sections: what it can watch, screen time, priority, then its PIN and the account buttons. A change that isn't saved yet is marked *Not saved* on the row, and a profile that asked for more time opens by itself. What goes for everyone (who may add profiles, the Guest) is in its own section underneath.
+- **Priority viewers:** open a profile in Admin → Profiles and tick *Priority viewer*. When a provider has no free connection, a priority viewer automatically takes one from someone on a standard profile, and that person's screen says who needed it. Standard profiles can't take a connection from a priority viewer.
 - **Guest:** turn on *Offer a Guest* in Admin → Profiles and visitors get a Guest button on “Who’s watching?” (no PIN). Each visit is its own and kept in memory only. Nothing a guest watches, likes or adds to My List is saved, it's forgotten when they leave, and it never shows up in anyone's recommendations or “also watched”. Guests can't record, message, start watch parties or change profiles and settings. You can limit guests to kids' titles or an age rating, or allow adult (18+) groups for them.
 - **Together:** messages with titles and reactions, shared watchlists, and **watch parties** that keep play, pause and seek in sync, with chat and emoji reactions. A party **shares one provider connection**: the server fetches the stream once for everyone in it.
 - **Your channel lists:** each profile can put its favourites in its own order, make its own lists ("Football", "Kids' channels"), and choose which list Live TV and the guide open on.

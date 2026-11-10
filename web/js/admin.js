@@ -359,53 +359,110 @@ V.adminTabs.guides = function (body, A) {
   };
 };
 
+// Admin → Profiles. Everyone on one screen as a short row (who they are, what they're limited to); a row opens
+// to that profile's settings, in sections: what they can watch, screen time (web/js/screentime.js puts it in
+// its slot), connections, then the PIN and the account. What goes for the whole household is below the list.
+var PROF_CERTS = [['', 'No limit'], ['0', 'Little kids (G, TV-Y)'], ['1', 'Kids (PG, TV-PG)'], ['2', 'Teens (PG-13, TV-14)'], ['3', 'Mature (R, TV-MA)']];
+var PROF_TYPES = [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']];
+var profOpen = {}; // (the rows that are open: kept while the page is drawn again)
+/** A profile's limits in a line, for its row. */
+function profLimits(p, A) {
+  if (p.admin) return 'No limits (the admin sees everything)';
+  var r = p.restrictions || {}, bits = [];
+  if (p.kids) bits.push('Kids’ titles and channels only');
+  var c = PROF_CERTS.filter(function (x) { return x[0] !== '' && x[0] === String(r.maxCert); })[0];
+  if (c) bits.push('Age limit: ' + c[1].replace(/\s*\(.*$/, ''));
+  if (r.types && r.types.length && r.types.length < PROF_TYPES.length) bits.push('Only ' + PROF_TYPES.filter(function (t) { return r.types.indexOf(t[0]) >= 0; }).map(function (t) { return t[1]; }).join(', '));
+  if (r.adult && !p.kids && !A.settings.noAdult) bits.push('Adult (18+) allowed');
+  var nb = (r.blockedGroups || []).length;
+  if (nb) bits.push(nb + (nb === 1 ? ' blocked category' : ' blocked categories'));
+  return bits.join(' · ') || 'No limits';
+}
+function profChips(p) {
+  return (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri">Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '');
+}
 V.adminTabs.profiles = function (body, A) {
-  var certs = [['', 'No limit'], ['0', 'Little kids (G, TV-Y)'], ['1', 'Kids (PG, TV-PG)'], ['2', 'Teens (PG-13, TV-14)'], ['3', 'Mature (R, TV-MA)']];
-  body.innerHTML = '<p class="dim small">Priority viewers come first when too many people are watching: if a provider has no free connection, a priority viewer’s player takes one from someone on a standard profile, and standard viewers can’t take one from them.</p><div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><label class="check"><input type="checkbox" data-aop' + (A.settings.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles</span></label></div>' +
+  var s = A.settings;
+  var hasKids = A.profiles.some(function (p) { return p.kids; });
+  var opts = function (list, cur) { return list.map(function (c) { return '<option value="' + c[0] + '"' + (String(cur === undefined || cur === null ? '' : cur) === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join(''); };
+  var card = function (p) {
+    var r = p.restrictions || {};
+    return '<li data-id="' + p.id + '"><details class="ap"' + (profOpen[p.id] ? ' open' : '') + '>' +
+      '<summary class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div class="ap-who"><div class="ap-n"><b>' + V.esc(p.name) + '</b><span data-chips>' + profChips(p) + '</span><span class="chip sm warn" data-dirty hidden>Not saved</span></div>' +
+        '<div class="ap-lim small"><span data-lim>' + V.esc(profLimits(p, A)) + '</span><span data-st-sum></span></div>' +
+        '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? V.esc(p.langs.map(function (c) { return V.langName(c); }).join(', ')) || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div>' +
+        '<span class="ap-x" aria-hidden="true"></span></summary>' +
+      '<div class="ap-body">' +
+        (p.admin ? '' : '<section class="ap-sec ap-limits"><h4>What they can watch</h4>' +
+          '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile <small class="dim">— only kids’ titles and channels</small></span></label>' +
+          '<div class="grid2"><label class="field"><span>Age limit</span><select class="input" data-r="maxCert">' + opts(PROF_CERTS, r.maxCert) + '</select></label>' +
+          '<div class="field"><span>Can watch</span><div class="chips">' + PROF_TYPES.map(function (t) { var on = !r.types || !r.types.length || r.types.indexOf(t[0]) >= 0; return '<label class="chip-check"><input type="checkbox" data-type="' + t[0] + '"' + (on ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') + '</div></div></div>' +
+          '<label class="check"><input type="checkbox" data-r="adult"' + (r.adult && !p.kids ? ' checked' : '') + (p.kids ? ' disabled' : '') + '><span>Allow adult (18+) groups' + (s.noAdult ? ' <small class="dim">— off for everyone (Languages & content → Adult content)</small>' : ' <small class="dim">— not for a kids profile</small>') + '</span></label>' +
+          '<label class="field"><span>Blocked categories (one per line)</span><textarea class="input" rows="2" data-r="blockedGroups">' + V.esc((r.blockedGroups || []).join('\n')) + '</textarea></label></section>') +
+        '<div data-st-slot></div>' +
+        '<section class="ap-sec"><h4>When every connection is in use</h4><label class="check ap-pri"><input type="checkbox" data-pri' + (p.priority ? ' checked' : '') + '><span>Priority viewer <small class="dim">— takes a connection from someone on a standard profile; standard viewers can’t take one from them. Saved straight away.</small></span></label></section>' +
+        '<div class="ap-foot">' + (p.admin ? '<span></span>' : '<div class="btn-row"><button class="btn sm primary" data-save>Save changes</button></div>') +
+          '<div class="btn-row ap-acct"><button class="btn sm" data-pin>' + (p.hasPin ? 'Change PIN' : 'Set a PIN') + '</button>' + (p.admin ? '' : '<button class="btn sm" data-make>Make admin</button><button class="btn sm danger" data-del>Delete profile</button>') + '</div></div>' +
+      '</div></details></li>';
+  };
+  body.innerHTML = '<div class="page-tools ap-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><span class="dim small">' + A.profiles.length + (A.profiles.length === 1 ? ' profile' : ' profiles') + '. Open one to change what it can watch, its screen time or its PIN.</span></div>' +
+    '<ul class="adm-profiles">' + A.profiles.map(card).join('') + '</ul>' +
+    '<section class="card-sec adm-house"><h2>For the whole household</h2>' +
+    '<label class="check"><input type="checkbox" data-aop' + (s.adminOnlyProfiles || hasKids ? ' checked' : '') + (hasKids ? ' disabled' : '') + '><span>Only the admin can add profiles' + (hasKids ? ' <small class="dim">— always, while there’s a kids profile</small>' : '') + '</span></label>' +
     // A Guest on "Who's watching?" (web/js/guest.js): nothing it watches is kept or shown to anyone else.
-    '<section class="card-sec adm-guest"><h3>Guest</h3><label class="check"><input type="checkbox" data-guest="guestProfile"' + (A.settings.guestProfile ? ' checked' : '') + '><span>Offer a Guest on “Who’s watching?” <small class="dim">— for visitors: no PIN, nothing they watch, like or add to My List is saved (it’s forgotten when they leave), and none of it goes into anyone’s recommendations or “also watched”. Guests can’t record, message, start watch parties or change anything here.</small></span></label>' +
-    '<div class="grid2"><div><label class="check"><input type="checkbox" data-guest="guestKids"' + (A.settings.guestKids ? ' checked' : '') + '><span>Kids’ titles and channels only</span></label>' +
-    '<label class="check"><input type="checkbox" data-guest="guestAdult"' + (A.settings.guestAdult ? ' checked' : '') + '><span>Allow adult (18+) groups <small class="dim">— not with kids’ titles only' + (A.settings.noAdult ? '; off for everyone now (Languages & content → Adult content)' : '') + '</small></span></label></div>' +
-    '<label class="field"><span>Age limit for guests</span><select class="input" data-guest="guestMaxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(A.settings.guestMaxCert || '') === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label></div></section>' +
-    '<ul class="adm-profiles">' + A.profiles.map(function (p) {
-      var r = p.restrictions || {};
-      return '<li data-id="' + p.id + '"><div class="ap-h">' + V.avatar(p.avatar, 'lg') + '<div><b>' + V.esc(p.name) + '</b>' + (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri" data-prichip>Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '') +
-        '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? V.esc(p.langs.map(function (c) { return V.langName(c); }).join(', ')) || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div></div>' +
-        (p.admin ? '' : '<div class="ap-limits grid2"><label class="field"><span>Age limit</span><select class="input" data-r="maxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(r.maxCert) === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label>' +
-          '<div class="field"><span>Can watch</span><div class="chips">' + [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']].map(function (t) { var on = !r.types || !r.types.length || r.types.indexOf(t[0]) >= 0; return '<label class="chip-check"><input type="checkbox" data-type="' + t[0] + '"' + (on ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') + '</div></div>' +
-          '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile (only kids’ titles and channels)</span></label><label class="check"><input type="checkbox" data-r="adult"' + (r.adult ? ' checked' : '') + '><span>Allow adult (18+) groups' + (A.settings.noAdult ? ' <small class="dim">— off for everyone (Languages & content → Adult content)</small>' : '') + '</span></label>' +
-          '<label class="field wide"><span>Blocked categories (one per line)</span><textarea class="input" rows="2" data-r="blockedGroups">' + V.esc((r.blockedGroups || []).join('\n')) + '</textarea></label></div>') +
-        '<label class="check ap-pri"><input type="checkbox" data-pri' + (p.priority ? ' checked' : '') + '><span>Priority viewer <small class="dim">— when every connection to a provider is in use, this profile takes one from someone on a standard profile</small></span></label>' +
-        '<div class="btn-row">' + (p.admin ? '' : '<button class="btn sm primary" data-save>Save limits</button>') + '<button class="btn sm" data-pin>' + (p.hasPin ? 'Reset PIN' : 'Set a PIN') + '</button>' + (p.admin ? '' : '<button class="btn sm" data-make>Make admin</button><button class="btn sm danger" data-del>Delete</button>') + '</div></li>';
-    }).join('') + '</ul>';
+    '<h3>Guest</h3><label class="check"><input type="checkbox" data-guest="guestProfile"' + (s.guestProfile ? ' checked' : '') + '><span>Offer a Guest on “Who’s watching?” <small class="dim">— for visitors: no PIN, nothing they watch, like or add to My List is saved (it’s forgotten when they leave), and none of it goes into anyone’s recommendations or “also watched”. Guests can’t record, message, start watch parties or change anything here.</small></span></label>' +
+    '<div class="adm-guest"' + (s.guestProfile ? '' : ' hidden') + '><div class="grid2"><div><label class="check"><input type="checkbox" data-guest="guestKids"' + (s.guestKids ? ' checked' : '') + '><span>Kids’ titles and channels only</span></label>' +
+    '<label class="check"><input type="checkbox" data-guest="guestAdult"' + (s.guestAdult ? ' checked' : '') + '><span>Allow adult (18+) groups <small class="dim">— not with kids’ titles only' + (s.noAdult ? '; off for everyone now (Languages & content → Adult content)' : '') + '</small></span></label></div>' +
+    '<label class="field"><span>Age limit for guests</span><select class="input" data-guest="guestMaxCert">' + opts(PROF_CERTS, s.guestMaxCert || '') + '</select></label></div></div></section>';
+  var byId = function (id) { return A.profiles.filter(function (x) { return x.id === id; })[0]; };
+  var dirty = function (li, on) { var d = V.$('[data-dirty]', li); if (d) d.hidden = !on; li.classList.toggle('dirty', !!on); };
+  // (Which rows are open, for when the page is drawn again after a PIN or a deletion.)
+  body.addEventListener('toggle', function (e) { var li = e.target.classList && e.target.classList.contains('ap') && e.target.closest('[data-id]'); if (li) profOpen[li.dataset.id] = e.target.open; }, true);
+  body.addEventListener('input', function (e) { var li = e.target.closest('.ap-limits, .st-box') && e.target.closest('[data-id]'); if (li) dirty(li, true); });
   body.onchange = function (e) {
-    if (e.target.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: e.target.checked });
-    else if (e.target.hasAttribute('data-guest')) { var gp = {}; gp[e.target.dataset.guest] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; V.adminSave(gp).then(function (s) { if (s) Object.assign(A.settings, gp); }).catch(function () {}); }
-    else if (e.target.hasAttribute('data-pri')) {
+    var t = e.target, li = t.closest('[data-id]');
+    if (t.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: t.checked }).catch(function () { t.checked = !t.checked; });
+    else if (t.hasAttribute('data-guest')) {
+      var gp = {};
+      gp[t.dataset.guest] = t.type === 'checkbox' ? t.checked : t.value;
+      if (t.dataset.guest === 'guestProfile') V.$('.adm-guest', body).hidden = !t.checked;
+      V.adminSave(gp).then(function (ns) { if (ns) Object.assign(A.settings, gp); }).catch(function () {});
+    } else if (t.hasAttribute('data-pri')) {
       // Saved straight away (it isn't one of the limits).
-      var li = e.target.closest('[data-id]'), on = e.target.checked, p = A.profiles.filter(function (x) { return x.id === li.dataset.id; })[0];
+      var on = t.checked, p = byId(li.dataset.id);
       V.put('/api/admin/profiles/' + li.dataset.id, { priority: on }).then(function () {
-        if (p) p.priority = on;
-        var chip = V.$('[data-prichip]', li);
-        if (on && !chip) V.$('.ap-h b', li).insertAdjacentHTML('afterend', ' <span class="chip sm pri" data-prichip>Priority</span>');
-        else if (!on && chip) chip.remove();
+        if (p) { p.priority = on; V.$('[data-chips]', li).innerHTML = profChips(p); }
         V.toast(on ? (p ? p.name : 'They') + ' now has priority' : (p ? p.name : 'They') + ' is a standard viewer again');
-      }).catch(function (err) { e.target.checked = !on; V.fail(err); });
+      }).catch(function (err) { t.checked = !on; V.fail(err); });
+    } else if (li && t.closest('.ap-limits, .st-box')) {
+      // (A kids profile never gets the adult groups.)
+      if (t.getAttribute('data-r') === 'kids') { var ad = V.$('[data-r=adult]', li); ad.disabled = t.checked; if (t.checked) ad.checked = false; }
+      dirty(li, true);
     }
   };
   body.onclick = function (e) {
     if (e.target.closest('[data-add]')) { S.boot.firstRun = false; return V.addProfileDialog(); }
     var li = e.target.closest('[data-id]');
     if (!li) return;
-    var id = li.dataset.id, p = A.profiles.filter(function (x) { return x.id === id; })[0];
+    var id = li.dataset.id, p = byId(id);
     if (e.target.closest('[data-save]')) {
       var types = V.$$('[data-type]', li).filter(function (x) { return x.checked; }).map(function (x) { return x.dataset.type; });
-      V.put('/api/admin/profiles/' + id, { kids: V.$('[data-r=kids]', li).checked, restrictions: { maxCert: V.$('[data-r=maxCert]', li).value, types: types.length === 4 ? [] : types, adult: V.$('[data-r=adult]', li).checked, blockedGroups: V.$('[data-r=blockedGroups]', li).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean) } }).then(function () { V.toast('Saved'); }).catch(V.fail);
+      var kids = V.$('[data-r=kids]', li).checked;
+      var rs = { maxCert: V.$('[data-r=maxCert]', li).value, types: types.length === 4 ? [] : types, adult: V.$('[data-r=adult]', li).checked, blockedGroups: V.$('[data-r=blockedGroups]', li).value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean) };
+      V.put('/api/admin/profiles/' + id, { kids: kids, restrictions: rs }).then(function () {
+        // (The row says what was saved.)
+        p.kids = kids; p.restrictions = rs;
+        V.$('[data-chips]', li).innerHTML = profChips(p);
+        V.$('[data-lim]', li).textContent = profLimits(p, A);
+        dirty(li, false);
+        V.toast('Saved');
+      }).catch(V.fail);
     } else if (e.target.closest('[data-pin]')) V.prompt('New PIN for ' + p.name + ' (4–8 digits' + (p.admin ? '' : ', empty to remove') + ')', { type: 'password' }).then(function (pin) { if (pin === null) return; V.put('/api/admin/profiles/' + id, { pin: pin }).then(function () { V.toast('Saved'); V.router.refresh(); }).catch(V.fail); });
     else if (e.target.closest('[data-make]')) V.confirm('Make ' + p.name + ' the admin? You’ll stop being the admin. (There’s only ever one.)', { ok: 'Make admin', danger: true }).then(function (ok) { if (ok) V.api('/api/admin/profiles/' + id + '/make-admin', { method: 'POST' }).then(function () { location.reload(); }).catch(V.fail); });
-    else if (e.target.closest('[data-del]')) V.confirm('Delete ' + p.name + '? Their history, lists and messages are removed.', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/profiles/' + id).then(function () { V.router.refresh(); }).catch(V.fail); });
+    else if (e.target.closest('[data-del]')) V.confirm('Delete ' + p.name + '? Their history, lists and messages are removed.', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/profiles/' + id).then(function () { delete profOpen[id]; V.router.refresh(); }).catch(V.fail); });
   };
 };
+
 
 V.adminTabs.content = function (body, A) {
   var s = A.settings;

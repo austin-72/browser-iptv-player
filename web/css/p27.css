@@ -113,3 +113,35 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
 button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 .gp.none.why { cursor: pointer; }
 .gp.none.why:hover, .gp.none.why:focus-visible { color: var(--text, #fff); }
+
+/* Admin → Profiles: each profile is a row that opens to its settings, in sections. */
+.ap-tools { margin-bottom: .9rem; }
+.adm-profiles > li { padding: 0; overflow: hidden; }
+.ap > summary.ap-h { margin: 0; padding: .8rem 1rem; cursor: pointer; list-style: none; -webkit-tap-highlight-color: transparent; }
+.ap > summary.ap-h::-webkit-details-marker { display: none; }
+.ap > summary.ap-h:hover { background: var(--card); }
+.ap > summary.ap-h:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: 12px; }
+.ap-who { flex: 1 1 auto; min-width: 0; }
+.ap-n { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .4rem; }
+.ap-n [data-chips] { display: inline-flex; flex-wrap: wrap; gap: .25rem .3rem; }
+.ap-lim { margin: .15rem 0 .1rem; }
+.ap-lim .chip { margin-left: .3rem; }
+.ap-x { flex: none; width: .6rem; height: .6rem; margin: 0 .4rem .2rem; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim); transform: rotate(45deg); transition: transform .15s; }
+.ap[open] > summary .ap-x { transform: rotate(-135deg); margin-bottom: -.2rem; }
+.reduce-motion .ap-x { transition: none; }
+.ap[open] > summary.ap-h { border-bottom: 1px solid var(--line); }
+.ap-body { padding: .2rem 1rem .4rem; }
+.ap-sec { padding: .8rem 0; border-bottom: 1px solid var(--line); }
+.ap-sec h4 { margin: 0 0 .4rem; font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.ap-sec .check:last-child, .ap-sec .field:last-child { margin-bottom: 0; }
+.ap-body [data-st-slot]:not(:empty) { padding: .2rem 0; border-bottom: 1px solid var(--line); }
+.ap-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0 1rem; }
+.ap-foot .ap-acct { margin-left: auto; }
+.adm-house h3 { margin: 1.1rem 0 .3rem; }
+.adm-house .adm-guest { margin: .2rem 0 0 1.75rem; }
+@media (max-width: 600px) {
+  .ap > summary.ap-h { padding: .7rem .8rem; gap: .7rem; align-items: flex-start; }
+  .ap-body { padding: .2rem .8rem .4rem; }
+  .ap-h .avatar.lg { width: 2.8rem; height: 2.8rem; }
+  .adm-house .adm-guest { margin-left: 0; }
+}

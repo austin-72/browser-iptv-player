@@ -260,7 +260,7 @@
       '<div class="st-days">' + groupsHtml(r.mode, r.days) + '</div>' +
       '<p class="dim small">Leave the times empty for no bedtime. Bedtime lasts until the “allowed from” time (06:00 if empty).</p>' +
       '<label class="field"><span>Time zone</span>' + tzField(r.tz || '', tz) + '</label>' +
-      '<p class="dim small">Saved with the profile’s other limits (<b>Save limits</b> below).</p>' +
+      '<p class="dim small">Saved with the profile’s other limits (<b>Save changes</b> below).</p>' +
       (s.limited ? '<div class="st-today"><h4>Today</h4><p>' + V.esc(fmtMin(s.used) + ' watched' + (s.extra ? ' (with ' + fmtMin(s.extra) + ' extra)' : '') + ' · ' + leftText(Object.assign({}, s, { nextAtText: s.nextAtText }))) + '</p>' +
         '<div class="btn-row"><span class="dim small">Extra time today:</span><button class="btn sm" data-st-grant="15">+15 min</button><button class="btn sm" data-st-grant="30">+30 min</button><button class="btn sm" data-st-grant="60">+1 hour</button><button class="btn sm ghost" data-st-reset>Back to normal</button></div>' +
         (week ? '<div class="st-week"><span class="dim small">Last days:</span> ' + week + '</div>' : '') + '</div>' : '') +
@@ -275,6 +275,13 @@
     else r.days = DAYS.map(function (n, i) { return day(String(i)); });
     return r;
   };
+  // The profile's row says its screen time too, and opens by itself when more time was asked for.
+  var head = function (li, x) {
+    var sum = V.$('[data-st-sum]', li), on = x.rule && x.rule.on, asked = (x.requests || []).length;
+    if (sum) sum.innerHTML = (on ? ' · Screen time: ' + V.esc(summary(x)) : '') + (asked ? ' <span class="chip sm warn">Asked for more time</span>' : '');
+    var d = V.$('details.ap', li);
+    if (asked && d && !d.open) d.open = true;
+  };
   var origProfiles = V.adminTabs.profiles;
   V.adminTabs.profiles = function (body, A) {
     origProfiles(body, A);
@@ -282,11 +289,13 @@
       V.$$('.adm-profiles > li[data-id]', body).forEach(function (li) {
         var x = X.profiles[li.dataset.id];
         if (!x) return;
-        var row = V.$('.btn-row', li);
+        // (Its place in the profile's card: web/js/admin.js.)
+        var slot = V.$('[data-st-slot]', li);
         var host = document.createElement('div');
         host.className = 'st-host';
         host.innerHTML = stBox(null, x, X.tz);
-        li.insertBefore(host, row);
+        if (slot) slot.appendChild(host); else li.insertBefore(host, V.$('.btn-row', li));
+        head(li, x);
       });
       body.addEventListener('change', function (e) {
         var box = e.target.closest('.st-box');
@@ -304,7 +313,7 @@
           V.$('.st-days', box).innerHTML = groupsHtml(e.target.value, days);
         }
       });
-      // One Save for the card: "Save limits" saves the screen time too (admin.js saves the rest and says so).
+      // One Save for the card: "Save changes" saves the screen time too (admin.js saves the rest and says so).
       body.addEventListener('click', function (e) {
         var sv = e.target.closest('[data-save]');
         var li = sv && sv.closest('[data-id]');
@@ -313,7 +322,7 @@
         var id = li.dataset.id, rule = readRule(box), had = X.profiles[id] && X.profiles[id].rule;
         if (!rule.on && !had) return; // (never set up: nothing to save)
         var wasOpen = box.open;
-        V.put('/api/admin/screentime/' + id, { rule: rule }).then(function (x) { var h = box.parentNode; h.innerHTML = stBox(null, x, X.tz); if (wasOpen) V.$('.st-box', h).open = true; X.profiles[id] = x; }).catch(V.fail);
+        V.put('/api/admin/screentime/' + id, { rule: rule }).then(function (x) { var h = box.parentNode; h.innerHTML = stBox(null, x, X.tz); if (wasOpen) V.$('.st-box', h).open = true; X.profiles[id] = x; head(li, x); }).catch(V.fail);
       });
       body.addEventListener('click', function (e) {
         var box = e.target.closest('.st-box');
@@ -324,7 +333,7 @@
         box._busy = true; // (a double click doesn't give the extra time twice)
         var free = function (err) { box._busy = false; V.fail(err); };
         // (Drawn again with the answer, still open, with the focus on the same button for a remote.)
-        var done = function (x) { var h = box.parentNode, sel = btn.hasAttribute('data-st-grant') ? '[data-st-grant="' + btn.dataset.stGrant + '"]' : '[data-st-reset]'; h.innerHTML = stBox(null, x, X.tz); var nb = V.$('.st-box', h); nb.open = true; X.profiles[id] = x; var f = V.$(sel, nb); if (f) f.focus(); return x; };
+        var done = function (x) { var h = box.parentNode, sel = btn.hasAttribute('data-st-grant') ? '[data-st-grant="' + btn.dataset.stGrant + '"]' : '[data-st-reset]'; h.innerHTML = stBox(null, x, X.tz); var nb = V.$('.st-box', h); nb.open = true; X.profiles[id] = x; head(li, x); var f = V.$(sel, nb); if (f) f.focus(); return x; };
         if (btn.hasAttribute('data-st-grant')) {
           var m = +btn.dataset.stGrant;
           V.api('/api/admin/screentime/' + id + '/grant', { body: { minutes: m } }).then(function (x) { done(x); V.toast('Gave ' + fmtMin(m) + ' more today'); }, free);
