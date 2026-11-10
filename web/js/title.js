@@ -33,7 +33,7 @@ V.route('title', function (view, r) {
     '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(V.catLabel ? V.catLabel(it) : it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
     (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
-    (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select>' + (S.settings.allowDownloads && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></section>' : '') +
+    (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select>' + ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></section>' : '') +
     '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
   // A poster that doesn't load isn't replaced with initials here — the title is right next to it anyway.
   var pimg = V.$('.tp-poster img', view);
@@ -48,10 +48,12 @@ V.route('title', function (view, r) {
     var html = '';
     if (isShow) {
       var rp = V.resumePoint(it, eps || []);
+      if (rp.ep && V.warmPlay) V.warmPlay(rp.ep);
       html += '<button class="btn primary lg" data-a="play"' + (rp.ep ? '' : ' disabled') + '>' + V.icon('play') + ' ' + V.esc(rp.label) + '</button>';
       if (V.shuffleShow && eps && eps.length > 1) html += '<button class="btn lg" data-a="shuffle">' + V.icon('shuffle') + ' Shuffle</button>';
     } else {
       var resume = p && !p.w && p.p > 20;
+      if (V.warmPlay) V.warmPlay(it);
       html += '<button class="btn primary lg" data-a="play">' + V.icon('play') + ' ' + (resume ? 'Resume' : 'Play') + '</button>';
       if (resume) html += '<button class="btn lg" data-a="restart">' + V.icon('restart') + ' From the start</button>';
     }
@@ -62,7 +64,7 @@ V.route('title', function (view, r) {
       '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
       '<button class="icon-btn lg" data-a="up" aria-pressed="' + (rate > 0) + '" title="I like this" aria-label="I like this">' + V.icon(rate > 0 ? 'thumbupf' : 'thumbup') + '</button>' +
       '<button class="icon-btn lg" data-a="down" aria-pressed="' + (rate < 0) + '" title="Not for me" aria-label="Not for me">' + V.icon(rate < 0 ? 'thumbdownf' : 'thumbdown') + '</button>' +
-      (S.settings.allowDownloads && !V.device.tv ? '<button class="icon-btn lg" data-a="dl" title="' + (isShow ? 'Download episodes' : 'Download') + '" aria-label="' + (isShow ? 'Download episodes' : 'Download') + '">' + V.icon('download') + '</button>' : '') +
+      ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="icon-btn lg" data-a="dl" title="' + (isShow ? 'Download episodes' : 'Download') + '" aria-label="' + (isShow ? 'Download episodes' : 'Download') + '">' + V.icon('download') + '</button>' : '') +
       (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
       '<button class="icon-btn lg" data-a="more" title="More: queue, send, watch together…" aria-label="More">' + V.icon('dots') + '</button></div>';
     // (Drawn again — the episodes arrived, a rating — the button that had the focus keeps it: on a TV it would be lost.)
@@ -199,7 +201,7 @@ V.route('title', function (view, r) {
           p2 ? { label: 'Play from the start', icon: 'restart', fn: function () { V.play(ep, { startAt: 0 }); } } : null,
           { label: p2 && p2.w ? 'Mark as not watched' : 'Mark as watched', icon: 'check', fn: function () { if (p2 && p2.w) { V.del('/api/history?k=' + encodeURIComponent(ep.k)).then(function () { delete S.data.progress[ep.k]; render(ep.s); }); } else { V.saveProgress(ep, ep.d || 1, ep.d || 1, true); render(ep.s); } } },
           { label: 'Send to someone…', icon: 'send', fn: function () { V.shareDialog(ep); } },
-          S.settings.allowDownloads ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(ep); } } : null,
+          S.settings.allowDownloads || S.profile.admin ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(ep); } } : null,
           { label: 'Watch together…', icon: 'party', fn: function () { V.party.startDialog(ep); } },
         ].concat(V.queue ? [{ sep: true }].concat(V.queue.menuItems(ep)) : []));
       } else V.play(ep);

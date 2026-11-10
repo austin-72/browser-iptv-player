@@ -4,6 +4,42 @@
 V.watch = { it: null, list: null, mini: false };
 
 /** Plays an item. opts: { startAt, list (for channel up/down), resume: true|false (ask), party, quiet } */
+/**
+ * A head start for the film or episode a page's Play button would start: the server looks inside it now, so the
+ * conversion (most plays here) doesn't wait for that when Play is pressed. Not on slow devices' behalf alone — it's
+ * the server that gains. Half a second after the page settles, once per title, never while something is playing.
+ */
+var warmed = {}, warmT = null, warmNextT = null;
+V.warmPlay = function (it, next) {
+  if (!it || (it.t !== 'movie' && it.t !== 'episode') || warmed[it.k] || !S.settings || !S.settings.ffmpeg) return;
+  clearTimeout(next ? warmNextT : warmT);
+  var tm = setTimeout(function () {
+    if (!next && V.watch && V.watch.it) return;
+    if (!V.entry(it.k)) return;
+    warmed[it.k] = 1;
+    V.api('/api/play/sources', { body: { k: it.k } }).then(function (r) {
+      var first = r && r.sources && r.sources[0];
+      if (!first || (!next && V.watch && V.watch.it)) return;
+      return V.api('/api/play/warm', { body: { k: it.k, alt: first.alt } }).then(function (w) {
+        if (w && !w.ok && (w.why === 'soon' || w.why === 'busy')) delete warmed[it.k]; // (not this time: it may be asked again)
+      });
+    }).catch(function () { delete warmed[it.k]; });
+  }, 600);
+  if (next) warmNextT = tm; else warmT = tm;
+};
+
+// What plays next gets the same head start in the last 90 seconds of an episode or film (when the provider's account
+// has a connection to spare beside the one playing), so "Next episode" and autoplay start sooner.
+setInterval(function () {
+  var p = V.player, it = V.watch && V.watch.it;
+  if (!p || !it || !p.vod || !p.started || !V.upNext || document.hidden) return;
+  var d = p.duration;
+  if (!d || !isFinite(d) || d - p.position > 90 || d - p.position < 3) return;
+  var nx = V.upNext(it);
+  if (nx && nx.it) nx = nx.it;
+  if (nx && nx.k) V.warmPlay(nx, true);
+}, 15000);
+
 V.play = function (it, opts) {
   V._clickAt = Date.now(); // ("Time to start": counted from here — player.js _statStart)
   if (it && it.k) V.ls.session('playedHere', it.k);
@@ -646,6 +682,8 @@ V.keyHelp = function (inPlayer, live) { // inPlayer: true, false or 'all'
   var player = [
     row(['Space', 'K'], 'Play / pause'),
     row(['←', '→'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s (with Shift: 60 s)'),
+    row(['Drag'], 'On the timeline: move away from the bar while dragging for finer steps (½, ¼, ⅒)'),
+    row(['Wheel'], 'Over the timeline: 5 s a notch (with Shift: 1 s)'),
     row(['J', 'L'], 'Back ' + V.skipLen('back') + ' s / forward ' + V.skipLen('fwd') + ' s'),
     row(['↑', '↓'], live ? 'Change channel' : 'Volume'),
     row(['F'], 'Full screen'), row(['M'], 'Mute'), row(['P'], 'Picture-in-picture'), row(['U'], 'Hide the controls'),

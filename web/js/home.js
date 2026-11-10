@@ -242,10 +242,13 @@ V.route('home', function (view) {
     built = built.map(function (b, i) { return { b: b, i: i }; }).sort(function (x, y) { return (sorted.indexOf(x.b.id) - sorted.indexOf(y.b.id)) || (x.i - y.i); }).map(function (x) { return x.b; });
   }
   // A page's worth (8 rows); the rest behind "More" — open for the rest of this visit once asked for.
-  var CAP = 8, open = !!V.ls.session('home.more') || built.length <= CAP + 1;
-  built.forEach(function (b, i) { b.el._hid = b.id; if (open || i < CAP) rows.appendChild(b.el); });
+  // (Rows that are still hidden — events and "on later" fill in afterwards, or go away — don't use up a place.)
+  var CAP = 8, shownN = 0, cut = built.length;
+  built.forEach(function (b, i) { if (!b.el.hidden) shownN++; if (shownN === CAP && cut === built.length) cut = i + 1; });
+  var open = !!V.ls.session('home.more') || built.length - cut <= 1;
+  built.forEach(function (b, i) { b.el._hid = b.id; if (open || i < cut) rows.appendChild(b.el); });
   if (!open) {
-    var rest = built.slice(CAP);
+    var rest = built.slice(cut);
     var mb = document.createElement('div');
     mb.className = 'home-more';
     mb.innerHTML = '<button class="btn" data-home="more">' + V.icon('down') + ' ' + rest.length + ' more rows</button>';
@@ -254,13 +257,16 @@ V.route('home', function (view) {
       V.ls.session('home.more', 1);
       mb.remove();
       rest.forEach(function (b) { rows.appendChild(b.el); });
-      var f = rest[0] && V.$('.card', rest[0].el);
+      var f = null;
+      rest.some(function (b) { f = b.el.hidden ? null : V.$('a[href], button:not([disabled]), [tabindex="0"]', b.el); return !!f; });
       if (f && f.focus) f.focus();
     };
   }
-  V.homeSeen(built.slice(0, open ? built.length : CAP).map(function (b) { return b.id; }));
+  var seenIds = [];
+  built.slice(0, open ? built.length : cut).forEach(function (b) { if (!b.el.hidden && seenIds.indexOf(b.id) < 0) seenIds.push(b.id); });
+  V.homeSeen(seenIds);
   rows.addEventListener('click', function (e) {
-    var sec = e.target.closest('.card') && e.target.closest('section.row');
+    var sec = e.target.closest('.card, .ol-card') && e.target.closest('section.row, section');
     if (sec && sec._hid) V.homeUsed(sec._hid);
   });
   if (!rows.children.length) {
@@ -306,7 +312,8 @@ V.homePlayed = function (it) {
 V.homeManual = function () {
   var o = (S.data.home && S.data.home.order) || [];
   if (!o.length) return false;
-  var std = V.HOME_ROWS.map(function (r) { return r.id; }).filter(function (id) { return o.indexOf(id) >= 0; });
+  // (Rows from lists — "xl:…" — are put after Continue by the page that adds them: where they sit isn't your order.)
+  var std = V.HOME_ROWS.map(function (r) { return r.id; }).filter(function (id) { return o.indexOf(id) >= 0 && id.indexOf('xl:') !== 0; });
   var mine = o.filter(function (id) { return std.indexOf(id) >= 0; });
   return mine.join('|') !== std.join('|');
 };

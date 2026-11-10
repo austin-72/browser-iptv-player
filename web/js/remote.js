@@ -71,7 +71,7 @@ function remoteList(view) {
   V.$('[data-pair]', view).onclick = function () { V.pairDialog(); };
   V.$('.remote-devs', view).addEventListener('click', function (e) {
     var b = e.target.closest('[data-ask]');
-    if (b) { b.disabled = true; V.remoteAsk(b.dataset.ask).then(draw, function () { b.disabled = false; }); }
+    if (b) { b.disabled = true; V.remoteAsk(b.dataset.ask).then(function () { shown = null; draw(); }, function () { b.disabled = false; }); }
   });
 }
 
@@ -107,7 +107,16 @@ function remotePad(view, conn) {
 
 function remotePadOpen(view, conn) {
   var st = null, name = '', seek = null, artOf = '';
-  var cmd = function (c, extra) { return V.api('/api/devices/' + encodeURIComponent(conn) + '/command', { body: Object.assign({ cmd: c }, extra || {}) }).catch(function (e) { V.fail(e); if (e.status === 404) V.router.go('#/remote', true); }); };
+  // (The screen's connection is gone — it reloaded, or closed: first see whether it's back on a new one, and only
+  // then go to the list. Nothing once this page has been left.)
+  var gone = false;
+  var cmd = function (c, extra) {
+    return V.api('/api/devices/' + encodeURIComponent(conn) + '/command', { body: Object.assign({ cmd: c }, extra || {}) }).catch(function (e) {
+      if (gone) return;
+      if (e.status !== 404) return V.fail(e);
+      follow(function () { if (!gone) { V.toast('That screen isn’t open any more.'); V.router.go('#/remote', true); } });
+    });
+  };
   view.innerHTML = '<div class="remote">' +
     '<header class="rm-h"><a class="icon-btn" href="#/remote" aria-label="All screens">' + V.icon('back') + '</a><b class="rm-dev truncate">Remote</b><span class="sp"></span><button class="btn sm" data-target>' + V.icon('cast') + ' Pick things to play here</button></header>' +
     '<div class="rm-now"><div class="rm-art"></div><div class="rm-info"><div class="rm-t">Connecting…</div><div class="rm-s dim"></div></div></div>' +
@@ -156,19 +165,24 @@ function remotePadOpen(view, conn) {
   // (The screen reconnected — its page reloaded, its network blinked: it has a new connection, and this remote follows
   // it there instead of talking to the old one.)
   var devId = '';
-  var follow = function () {
-    if (!devId) return;
+  var following = false;
+  function follow(orElse) {
+    if (!devId || following) { if (orElse && !devId) orElse(); return; }
+    following = true;
     V.api('/api/devices').then(function (devs) {
-      if (devs.some(function (x) { return x.conn === conn; })) return;
-      var d = devs.filter(function (x) { return x.ok !== false && x.deviceId === devId && x.conn !== S.conn; })[0];
+      following = false;
+      if (gone) return;
+      if (!orElse && devs.some(function (x) { return x.conn === conn; })) return;
+      var d = devs.filter(function (x) { return x.ok !== false && x.deviceId === devId && x.conn !== S.conn && x.conn !== conn; })[0];
       if (d) V.router.go('#/remote/' + encodeURIComponent(d.conn), true);
-    }).catch(function () {});
-  };
+      else if (orElse) orElse();
+    }).catch(function () { following = false; });
+  }
   var hello = function () { cmd('watch'); follow(); };
   hello();
   var t = setInterval(hello, 10000);
   V.api('/api/devices').then(function (devs) { var d = devs.filter(function (x) { return x.conn === conn; })[0]; if (d) { name = d.name; devId = d.deviceId || ''; $('.rm-dev').textContent = d.name; drawTarget(); } else V.router.go('#/remote', true); }).catch(function () {}); // (offline a moment: the page tries again)
-  V.pageCleanup = function () { clearInterval(t); off(); cmd('unwatch'); };
+  V.pageCleanup = function () { clearInterval(t); off(); cmd('unwatch'); gone = true; };
   var drawTarget = function () { var on = V.remote.target && V.remote.target.conn === conn; var b = $('[data-target]'); b.classList.toggle('primary', !!on); b.innerHTML = V.icon('cast') + (on ? ' Playing things here: on' : ' Pick things to play here'); };
   view.addEventListener('click', function (e) {
     var b = e.target.closest('[data-c]');

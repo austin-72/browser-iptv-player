@@ -136,12 +136,31 @@ V.downloads = (function () {
    * Downloads; as files, the browser saves them one by one (it may ask once whether this site may save several).
    */
   function startMany(eps, opts) {
-    var have = function (k) { var r = items.get(k); return r && r.status !== 'failed' && r.status !== 'cancelled'; };
+    // (Inside the app: this profile's own copies count, not another profile's on this device. As files: nothing to go by.)
+    var have = function (k) { var r = items.get(k); return !opts.asFile && r && (!r.pid || r.pid === S.profile.id) && r.status !== 'failed' && r.status !== 'cancelled'; };
     var todo = eps.filter(function (e) { return e && e.k && !have(e.k); });
     if (!todo.length) return V.toast('Those are all downloaded already.');
     if (opts.asFile) {
-      V.toast('Saving ' + V.plural(todo.length, 'episode') + ' as files. Your browser may ask whether this site may save several.', { ms: 6000 });
-      todo.forEach(function (e, i) { setTimeout(function () { start(e, { quality: opts.quality, asFile: true, quiet: true }); }, i * 1500); });
+      // One at a time, the next when the server says the one before has finished: twenty at once would take every
+      // connection the provider's account has (and twenty conversions on the server).
+      V.toast('Saving ' + V.plural(todo.length, 'episode') + ' as files, one after another — keep this page open. Your browser may ask whether this site may save several.', { ms: 9000 });
+      var left = todo.slice(), total = todo.length;
+      var nextOne = function (ended0) {
+        if (!left.length) return V.toast(total > 1 ? 'All ' + total + ' episodes have been sent to your browser.' : 'Sent to your browser.');
+        start(left.shift(), { quality: opts.quality, asFile: true, quiet: true });
+        var began = Date.now(), going = false;
+        var poll = setInterval(function () {
+          if (going) return;
+          going = true;
+          V.api('/api/downloads/active').then(function (r) {
+            going = false;
+            // (The next one when this one has ended — or never began, which shows after 20 seconds of nothing.)
+            if (r.n > 0 && r.ended === ended0) return;
+            if (r.ended > ended0 || Date.now() - began > 20000) { clearInterval(poll); nextOne(r.ended); }
+          }).catch(function () { going = false; });
+        }, 2000);
+      };
+      V.api('/api/downloads/active').then(function (r) { nextOne(r.ended || 0); }, function () { nextOne(0); });
       return;
     }
     todo.forEach(function (e) { start(e, { quality: opts.quality, quiet: true }); });

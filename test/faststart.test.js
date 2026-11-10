@@ -128,6 +128,14 @@ test('quick start, and episodes read again after a restart', { timeout: 90000, s
     now = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
     assert.strictEqual(now[0], other, 'started quickly since: no longer held back ' + JSON.stringify(now));
 
+    // A head start: the look inside is done when the title's page opens (once; then it's kept), within the account's
+    // connections, and only for something this profile can see.
+    const w1 = (await api('POST', '/api/play/warm', { k: two.k, alt: now[0] })).body;
+    assert.ok(w1.ok === true || w1.why === 'off', JSON.stringify(w1));
+    const w2 = (await api('POST', '/api/play/warm', { k: two.k, alt: now[0] })).body;
+    assert.ok(w2.cached || w2.why === 'soon' || w2.why === 'off', JSON.stringify(w2));
+    assert.strictEqual((await api('POST', '/api/play/warm', { k: 'nope' })).status, 404);
+
     // A restart: the server no longer knows the episode until its series is read again.
     app.kill(); await new Promise((r) => app.once('exit', r));
     await boot();

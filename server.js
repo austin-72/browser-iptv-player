@@ -588,8 +588,14 @@ async function readObj(req) {
   return b && typeof b === 'object' && !Array.isArray(b) ? b : {};
 }
 const GUEST_DENY = /^\/api\/(?:admin\/|dvr\b|homelists\b|wishlist\b|follow\b|series-follow\b|messages|party\b|lists\b|me$|me\/avatar|profiles$|markers\/|item\/[^/]+\/match|screentime\/|pair\/approve|reminders|new-episodes|onboard)/;
+const connSeen = new Map(); // connection id → when its page last asked the server anything (its own session's only)
 function requireProfile(ctx) {
   if (!ctx.profile) throw new HttpError(403, 'Choose a profile first.');
+  // (This page is alive — /api/devices goes by it. Only a signed-in page's own connection counts.)
+  if (ctx.conn && ctx.sess) {
+    if (!connSeen.has(ctx.conn)) { const c = hub.conn(ctx.conn); if (c && c.sess === ctx.sess.id) connSeen.set(ctx.conn, Date.now()); }
+    else connSeen.set(ctx.conn, Date.now());
+  }
   return ctx.profile;
 }
 function requireAdmin(ctx) {
@@ -1152,6 +1158,32 @@ route('GET', '/api/epg/range', (req, res, p, q, ctx) => {
   }
   sendJsonGz(req, res, out);
 });
+/**
+ * Why a channel has no listings, in plain words — so an empty guide row doesn't look like the app being broken: no
+ * guide added at all, a guide that failed to download, no guide carrying this channel, or listings that ran out.
+ */
+route('GET', '/api/epg/why/:k', (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const it = catalog.visible(prof, p.k);
+  if (!it || (it.t !== 'live' && it.t !== 'radio')) throw new HttpError(404, 'Channel not found');
+  if (overrides.hasLocks && overrides.isLocked(it) && !overrides.allowed(ctx)) throw new HttpError(404, 'Channel not found');
+  const admin = !!(ctx.profile && ctx.profile.admin);
+  const errOf = (g) => (admin ? ' — “' + g.name + '” failed to update (' + String(g.status.error || 'unknown error').slice(0, 120) + ')' : ' — a guide failed to update');
+  const guides = lists.guides().filter((g) => g.enabled !== false);
+  const failed = guides.filter((g) => g.status && g.status.ok === false);
+  const out = (reason, text, fix) => ({ reason, text, fix: admin ? fix : 'The person who runs this server can sort it out (Admin → TV guides).' });
+  if (it.epg) {
+    const now = Date.now(), list = epg.range(it.epg, now - 86400e3, now + 14 * 86400e3);
+    const last = list.length ? list[list.length - 1].e : 0;
+    if (list.length && last > now) return { ...out('gap', 'This channel’s guide has listings, but none for the time you’re looking at.', 'Guides often cover only a day or two ahead; nothing to fix unless it stays empty.'), until: last };
+    return out('ran-out', 'This channel’s listings have run out: its guide hasn’t brought new ones' + (failed.length ? errOf(failed[0]) + '.' : '.'), 'Admin → TV guides → Refresh, or check the guide’s address.');
+  }
+  if (!guides.length && !epg.stats().channels) return out('no-guide', 'No TV guide has been added to this server yet, so no channel has listings.', 'Admin → TV guides → add your provider’s guide address, or use “Find guides”.');
+  if (failed.length && failed.length === guides.length) return out('failed', 'The TV guide couldn’t be downloaded' + (admin ? ' (' + String(failed[0].status.error || 'unknown error').slice(0, 120) + ')' : '') + ', so there are no listings right now.', 'Admin → TV guides → Refresh, or check the guide’s address.');
+  const id = epg.resolve({ epgOverride: it.eo, tvgId: it.tvgId, tvgName: it.tvgName, name: it._o ? it._o.n : it.n });
+  if (id) return out('empty', 'A guide lists this channel but has no programmes for it — the guide’s provider sends none.', 'Admin → Lists → edit channels → pick another guide channel for it, or add a second guide.');
+  return out('no-match', 'None of the ' + (guides.length || 'added') + ' TV guide' + (guides.length === 1 ? '' : 's') + ' carr' + (guides.length === 1 ? 'ies' : 'y') + ' this channel' + (it.tvgId ? (admin ? ' (the provider calls it “' + String(it.tvgId).slice(0, 60) + '”)' : '') : ' (the provider gave it no guide name)') + '. The channel itself still plays.', 'Admin → Lists → edit channels → pick its guide channel by hand, or add a guide that covers it (“Find guides”).');
+}, 'site');
 route('GET', '/api/epg/search', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const needle = String(q.get('q') || '').trim().toLowerCase();
@@ -1223,9 +1255,10 @@ function relayable(it, url) {
   add(it.u);
   for (const a of it.alts || []) add(a.u);
   if (it.cu && it.cu.source) add(it.cu.source);
+  // (Only a web address on one of this item's own hosts: never a file, and an item without a host has none.)
   let h;
-  try { h = new URL(url).host; } catch { return false; }
-  return hosts.has(h);
+  try { const x = new URL(url); if (!/^https?:$/.test(x.protocol)) return false; h = x.host; } catch { return false; }
+  return !!h && hosts.has(h);
 }
 route('POST', '/api/play/relay', async (req, res, p, q, ctx) => {
   const b = await readJSON(req);
@@ -1661,6 +1694,7 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   const skip = new Set((Array.isArray(b.exclude) ? b.exclude : []).map(Number));
   // (current: the copy this device is trying right now — looked at too when its account has room for one more.)
   const current = Number.isInteger(b.current) ? b.current : null;
+  const curList = current !== null ? srcList(it, current) : null;
   const copies = [-1, ...(it.alts || []).map((x, i) => i)].filter((a) => !skip.has(a));
   const use = listUsage();
   const others = (lid) => (use.get(lid) || []).filter((c) => !(c.relayShared ? (c.viewers || []).every((v) => v.id === ctx.conn) : c.id === ctx.conn));
@@ -1675,7 +1709,9 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
     const lid = srcList(it, alt);
     if (!a || !/^https?:\/\//i.test(a.u || '')) { out.push({ alt, untested: true }); continue; }
     const limit = connLimit(it, alt);
-    if (limit > 0 && others(lid).length + (alt === current ? 1 : 0) >= limit) { out.push({ alt, busy: true }); continue; }
+    // (The copy this device is starting holds — or is about to hold — one of its account's connections: that counts
+    // for every copy on the same account, not only for itself.)
+    if (limit > 0 && others(lid).length + (lid === curList ? 1 : 0) >= limit) { out.push({ alt, busy: true }); continue; }
     // (One look per account at a time, at most six at once: the rest stay untested.)
     if (lists.has(lid) || tasks.length >= 6) { out.push({ alt, untested: true }); continue; }
     lists.add(lid);
@@ -1715,9 +1751,11 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
   // (Given up on as slow to start, never having played: its list's copies aren't the first ones tried for a while.)
   if (it && b.failed && !b.started && /slow to start/i.test(String(b.msg || ''))) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), 0, true);
   if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; } // (a copy that failed: Channel health's to rank, as the admin set it)
-  if (it && Number(b.ms) > 0) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Number(b.ms), false);
+  // (cms: how long this copy itself took, when an earlier copy was given up on first — its wait isn't this one's doing.)
+  const sms = Number(b.cms) > 0 ? Number(b.cms) : Number(b.ms);
+  if (it && sms > 0) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), sms, false);
   // (Played straight from the provider: how long it took is the provider's doing. A converted start isn't counted.)
-  if (it && Number(b.ms) > 0 && !b.failed && /^(native|direct|helper)$/.test(String(b.route || ''))) noteSpeed(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Math.min(Number(b.ms), 120000), true);
+  if (it && sms > 0 && !b.failed && /^(native|direct|helper)$/.test(String(b.route || ''))) noteSpeed(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Math.min(sms, 120000), true);
   return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type, startMs: b.ms }) };
 });
 route('POST', '/api/stats/watch', async (req, res, p, q, ctx) => {
@@ -1751,6 +1789,37 @@ route('GET', '/api/direct-helper.zip', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="direct-streams-helper.zip"', 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
   res.end(buf);
 }, 'site');
+/**
+ * A head start: a film's or episode's page is open, with its Play button showing. The look inside the file (ffprobe:
+ * 1–3 seconds with most providers, and the first thing a conversion waits for) is done now and kept for ten minutes,
+ * so pressing Play starts converting at once. Only when the account has a connection to spare, never for a local
+ * file or one looked at already, and at most one every three seconds per profile. Answers straight away.
+ */
+const warmAt = new Map(), warming = new Map(); // profile → when it last asked; list → head starts running on it
+route('POST', '/api/play/warm', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const b = await readJSON(req);
+  if (!media.available || !media.probeAvailable || settings().warmStart === false) return { ok: false, why: 'off' };
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk);
+  if (it.t !== 'movie' && it.t !== 'episode') return { ok: false, why: 'kind' };
+  const alt = Number.isInteger(b.alt) ? b.alt : -1;
+  const src = inputOf(it, alt, '');
+  if (!src || src.local || !isUrl(src.input)) return { ok: false, why: 'local' };
+  if (media.probeCached(src.input, src.headers)) return { ok: true, cached: true };
+  if (Date.now() - (warmAt.get(prof.id) || 0) < 3000) return { ok: false, why: 'soon' };
+  // (Room for it: nobody on this list's account right now when it allows one connection, and no other head start
+  // running on it — so a head start never takes the connection a viewer is about to need, and two never overlap.)
+  const lim = connLimit(it, alt), lid = srcList(it, alt);
+  const using = (listUsage().get(lid) || []).length + (warming.get(lid) || 0);
+  if (lim !== 0 && using + (lim === 1 ? 1 : 2) > lim) return { ok: false, why: 'busy' };
+  warmAt.set(prof.id, Date.now());
+  if (warmAt.size > 500) warmAt.delete(warmAt.keys().next().value);
+  warming.set(lid, (warming.get(lid) || 0) + 1);
+  const done = () => { const n = (warming.get(lid) || 1) - 1; if (n > 0) warming.set(lid, n); else warming.delete(lid); };
+  media.probe(src.input, { headers: src.headers }).then(done, done);
+  return { ok: true };
+}, 'site');
+
 route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
@@ -1801,10 +1870,10 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   }
   let pr, d, s;
   if (guess) {
-    const [pp, sp] = await Promise.allSettled([media.probe(src.input, { headers: src.headers, timeout: 15000 }), start(guess)]);
-    pr = pp.status === 'fulfilled' ? pp.value : null;
-    if (sp.status === 'rejected') throw sp.reason;
-    s = sp.value;
+    // (The conversion is what the viewer waits for: once it's ready, the look inside gets 5 more seconds, not 15.)
+    const look = media.probe(src.input, { headers: src.headers, timeout: 15000 }).catch(() => null);
+    s = await start(guess);
+    pr = await Promise.race([look, new Promise((ok) => setTimeout(() => ok(null), 5000))]);
     d = decide(pr);
     if (!pr) d = guess; // (the look inside didn't answer: what's running stays)
     else if (d.transcode !== guess.transcode || d.audioOnly !== guess.audioOnly || d.audioTrack !== guess.audioTrack || d.live !== guess.live) {
@@ -1879,11 +1948,31 @@ route('GET', '/api/session/:sid/:file', async (req, res, p) => {
 // (The player's check of the connection between a device and here, when a video keeps buffering.)
 route('GET', '/api/ping', () => ({ t: Date.now() }), 'site');
 route('POST', '/api/session/:sid/ping', (req, res, p) => ({ alive: !!media.touch(p.sid) }), 'site');
-route('DELETE', '/api/session/:sid', (req, res, p) => { media.stopSession(p.sid); return { ok: true }; }, 'site');
+route('DELETE', '/api/session/:sid', (req, res, p, q, ctx) => {
+  // (Its own, or the admin's to stop: a session id seen in a log isn't a way to stop someone else's film.)
+  const se = media.sessions.get(p.sid);
+  if (se && se.owner && !(ctx.profile && (ctx.profile.id === se.owner || ctx.profile.admin))) throw new HttpError(403, 'That stream isn’t yours to stop.');
+  media.stopSession(p.sid);
+  return { ok: true };
+}, 'site');
 route('GET', '/api/proxy', (req, res, p, q) => proxy.handle(req, res, q, req.cast), 'site');
+const localKeys = new Map(); // /api/local/… → the catalogue item it belongs to ('' = an episode or a file outside the catalogue)
 route('GET', '/api/local/:list/:id', (req, res, p, q, ctx) => {
   // (Recordings belong to the profile that made them; a Chromecast's signed address is allowed through.)
   if (p.list === 'dvr' && !req.cast && dvrHooks.dvrOwnerOk && !dvrHooks.dvrOwnerOk(ctx && ctx.profile, p.id)) throw new HttpError(404, 'File not found');
+  // A media-folder file: only for a profile that may watch it (a cast link was checked when it was made).
+  if (p.list !== 'dvr' && !req.cast) {
+    requireProfile(ctx);
+    const u = `/api/local/${p.list}/${p.id}`;
+    let k = localKeys.get(u);
+    if (k === undefined) {
+      const hit = catalog.items.find((x) => (x.loc && x.loc.list === p.list && x.loc.id === p.id) || x.u === u || (x.alts || []).some((a) => a.u === u));
+      k = hit ? hit.k : '';
+      if (localKeys.size > 5000) localKeys.clear();
+      localKeys.set(u, k);
+    }
+    if (k) { try { item(ctx, k); } catch (e) { if (e.status === 404 || e.status === 403) throw new HttpError(404, 'File not found'); localKeys.delete(u); throw e; } }
+  }
   countBytes(res, 'local');
   const li = lists.libraryItem(p.list, p.id);
   if (!li) throw new HttpError(404, 'File not found');
@@ -1927,7 +2016,7 @@ route('GET', '/api/subs/:k/:track', async (req, res, p, q, ctx) => {
 route('GET', '/api/frame/:k', async (req, res, p, q, ctx) => {
   const it = item(ctx, p.k);
   if (it.t === 'live') throw new HttpError(400, 'Not for live channels');
-  if (oneConnection(it)) throw new HttpError(409, 'The provider allows only one connection at a time.');
+  if (oneConnection(it, q.get('shot') === '1' ? clampInt(q.get('alt'), -1, 99, -1) : -1)) throw new HttpError(409, 'The provider allows only one connection at a time.');
   // (shot=1: the player's screenshot of a stream it can't copy itself — one played straight from the provider, which
   // the browser won't let the page read: full size, at that very moment, from the copy playing.)
   const shot = q.get('shot') === '1';
@@ -1936,10 +2025,18 @@ route('GET', '/api/frame/:k', async (req, res, p, q, ctx) => {
   const t = shot ? Math.round((Number(q.get('t')) || 0) * 10) / 10 : Math.round((Number(q.get('t')) || 0) / 10) * 10;
   const file = await media.frame(src.input, t, { headers: src.headers, width: clampInt(q.get('w'), 120, 640, 240), png: shot });
   serveFile(req, res, file, { cache: 'private, max-age=604800' });
+  if (shot) res.once('close', () => fs.unlink(file, () => {})); // (a full-size screenshot is for now, not for keeping)
 });
+// How many downloads this profile has running: a season saved as files is sent one episode at a time (downloads.js),
+// each started when the one before has finished, so it never takes a whole account's connections at once.
+const dlRunning = new Map();
+const dlEnded = new Map(); // profile → how many of its downloads have ended since the server started
+route('GET', '/api/downloads/active', (req, res, p, q, ctx) => { const id = requireProfile(ctx).id; return { n: dlRunning.get(id) || 0, ended: dlEnded.get(id) || 0 }; }, 'site');
 route('GET', '/api/download/:k', async (req, res, p, q, ctx) => {
   countBytes(res, 'download');
   const prof = requireProfile(ctx);
+  dlRunning.set(prof.id, (dlRunning.get(prof.id) || 0) + 1);
+  res.once('close', () => { const n = (dlRunning.get(prof.id) || 1) - 1; if (n > 0) dlRunning.set(prof.id, n); else dlRunning.delete(prof.id); dlEnded.set(prof.id, (dlEnded.get(prof.id) || 0) + 1); });
   if (settings().allowDownloads === false && !prof.admin) throw new HttpError(403, 'Downloads are turned off.');
   const it = item(ctx, p.k);
   if (it.t === 'live' || it.t === 'show') throw new HttpError(400, 'Only movies, episodes and audio can be downloaded.');
@@ -1989,6 +2086,7 @@ route('GET', '/api/social', (req, res, p, q, ctx) => {
     const pr = userdata.prefs(c.pid);
     if (pr.presence === false) continue;
     const it = catalog.visible(prof, c.playing.k);
+    if (it && overrides.hasLocks && overrides.isLocked(it) && !overrides.allowed(ctx)) continue; // (a locked channel isn't named to those it's locked for)
     if (it) presence.push({ pid: c.pid, k: c.playing.k, n: it.n, i: it.logo || '', at: c.playing.at });
   }
   return {
@@ -2064,6 +2162,7 @@ route('POST', '/api/presence', async (req, res, p, q, ctx) => {
   }
   return { ok: true };
 });
+setInterval(() => { const t = Date.now() - 3600e3; for (const [k, v] of connSeen) if (v < t) connSeen.delete(k); }, 600e3).unref();
 route('GET', '/api/devices', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   // Someone else's private viewing shows as just "playing", without what it is.
@@ -2071,15 +2170,24 @@ route('GET', '/api/devices', (req, res, p, q, ctx) => {
   // Screens it may control (ok), and — not for a guest — other profiles' screens it can ask to (ok: false): those
   // without what's on them, until the person there says yes.
   const now = Date.now();
-  // One entry per screen: a device that reconnected (a flaky network, a page reloaded) leaves its old connections
-  // half-open for a while, and each showed up as another copy of the same screen. Its newest connection is the screen;
-  // the asker's own connection always stays.
-  const live = new Map();
+  // One entry per screen: a device that reconnected leaves its old connections half-open for a while, and each showed
+  // up as another copy of it. Of one browser's connections (same sign-in, device and profile) the newest is a screen,
+  // and so is any other whose page has spoken since that one connected (two windows of one browser are two screens;
+  // a page that reloaded never speaks on its old connection again).
+  const groups = new Map();
   for (const c of hub.conns) {
     if (!c.pid) continue;
-    const key = c.id === ctx.conn ? 'me' : c.sess + '|' + (c.deviceId || '') + '|' + c.pid;
-    const o = live.get(key);
-    if (!o || c.at >= o.at) live.set(key, c);
+    const key = c.sess + '|' + (c.deviceId || '') + '|' + c.pid;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  const live = new Map();
+  for (const g of groups.values()) {
+    const newest = g.reduce((a, c) => (c.at >= a.at ? c : a));
+    for (const c of g) {
+      const seen = connSeen.get(c.id) || 0;
+      if (c === newest || c.id === ctx.conn || (seen > newest.at && now - seen < 90e3)) live.set(c.id, c);
+    }
   }
   return [...live.values()].filter((c) => c.pid && (canControl(ctx, c) || (!prof.guest && c.sess !== ctx.sess.id))).map((c) => {
     const ok = canControl(ctx, c);
@@ -2143,7 +2251,7 @@ route('POST', '/api/pair/start', async (req, res) => {
 }, 'public');
 route('GET', '/api/pair/:id', (req, res, p, q) => {
   const x = pairs.get(p.id);
-  if (!x || x.secret !== q.get('s')) throw new HttpError(404, 'That code has expired.');
+  if (!x || String(q.get('s') || '').length !== x.secret.length || !crypto.timingSafeEqual(Buffer.from(String(q.get('s'))), Buffer.from(x.secret))) throw new HttpError(404, 'That code has expired.');
   if (Date.now() - x.created > PAIR_TTL) { pairs.delete(p.id); throw new HttpError(410, 'That code has expired.'); }
   if (!x.approved) return { waiting: true };
   pairs.delete(p.id);
@@ -2214,17 +2322,18 @@ function handoffLanding(req, res, token) {
 function mayControl(prof, sessId, c) {
   if (!c || !prof) return false;
   if (c.pid === prof.id) return true;
-  return remoteAllowed(sessId, c);
+  return remoteAllowed(sessId, c, prof.id);
 }
 // Phones a screen let in: "<screen's session>|<phone's session>" → { pid: the screen's profile then, until }.
 // (For as long as the screen stays on that profile, 12 hours at most; and the screen can stop it.)
 const remoteOk = new Map();
 const remoteAsks = new Map(); // id → { from: phone's session, fromConn, name, device, to: screen's conn, at, no }
 const REMOTE_OK_MS = 12 * 3600e3;
-function remoteAllowed(sessId, c) {
+function remoteAllowed(sessId, c, by) {
   if (!sessId || !c || !c.pid) return false;
   const k = c.sess + '|' + sessId, a = remoteOk.get(k);
   if (!a) return false;
+  if (a.by && by && a.by !== by) return false; // (allowed for the profile that asked: not for another one on that phone)
   if (a.pid !== c.pid || a.until < Date.now()) { remoteOk.delete(k); return false; }
   return true;
 }
@@ -2247,7 +2356,7 @@ route('POST', '/api/devices/:conn/ask', (req, res, p, q, ctx) => {
   if (waiting) return { asked: true };
   if ([...remoteAsks.values()].filter((a) => a.from === ctx.sess.id && now - a.at < 60e3).length >= 5) throw new HttpError(429, 'Wait a minute before asking again.');
   const id = crypto.randomBytes(9).toString('base64url');
-  remoteAsks.set(id, { from: ctx.sess.id, fromConn: ctx.conn, name: prof.name, device: ctx.sess.name || '', to: c.id, at: now });
+  remoteAsks.set(id, { from: ctx.sess.id, by: prof.id, fromConn: ctx.conn, name: prof.name, device: ctx.sess.name || '', to: c.id, at: now });
   hub.send(c, 'remote-ask', { id, from: prof.name, device: ctx.sess.name || '' });
   return { asked: true };
 });
@@ -2259,7 +2368,7 @@ route('POST', '/api/remote-ask/:id', async (req, res, p, q, ctx) => {
   if (!a || !c || c.sess !== ctx.sess.id) throw new HttpError(404, 'That request has gone.');
   const b = await readObj(req);
   const ok = b.allow === true;
-  if (ok) { remoteOk.set(c.sess + '|' + a.from, { pid: c.pid, until: Date.now() + REMOTE_OK_MS }); remoteAsks.delete(p.id); } else a.no = Date.now();
+  if (ok) { remoteOk.set(c.sess + '|' + a.from, { pid: c.pid, by: a.by, until: Date.now() + REMOTE_OK_MS }); remoteAsks.delete(p.id); } else a.no = Date.now();
   const back = a.fromConn && hub.conn(a.fromConn);
   if (back && back.sess === a.from) hub.send(back, 'remote-answer', { conn: c.id, name: c.deviceName || '', ok });
   return { ok: true };
@@ -2292,7 +2401,9 @@ const castSign = (pathq, hours = 8) => {
   // (What the link opens: a conversion session's files, a signed proxy address, or one file of a media folder —
   // not every file in that folder.)
   const parts = pathq.split('?')[0].split('/');
-  const data = Buffer.from(JSON.stringify({ p: parts.slice(0, parts[2] === 'local' ? 5 : 4).join('/'), e: exp })).toString('base64url');
+  // (A portal's item — /api/proxy/stalker/<list>/<kind>/<id> — is signed whole; a proxy address as /api/proxy alone.)
+  const keep = parts[2] === 'local' ? 5 : parts[2] === 'proxy' ? (parts[3] === 'stalker' ? parts.length : 3) : 4;
+  const data = Buffer.from(JSON.stringify({ p: parts.slice(0, keep).join('/'), e: exp })).toString('base64url');
   const sig = crypto.createHmac('sha256', castSecret).update(data).digest('base64url').slice(0, 24);
   return `/c/${data}.${sig}${pathq}`;
 };
@@ -2310,6 +2421,16 @@ route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
     if (!it) throw new HttpError(404, 'File not found');
     item(ctx, it.k); // (hidden or locked for this profile: refused)
   }
+  // Only what this profile itself could open: its own conversion session, a proxy address (which carries its own
+  // signature, checked when used), or a portal item it may watch — never a bare prefix that opens everyone's.
+  const pathOnly = String(pq).split('?')[0];
+  const sm = pathOnly.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/[^/]+/);
+  const st = pathOnly.match(/^\/api\/proxy\/stalker\/[^/]+\/(live|vod|ep)\/[^/]+$/);
+  if (/^\/api\/session\b/.test(pathOnly)) {
+    if (!sm) throw new HttpError(400, 'Only stream addresses can be cast'); // (one session's files — its id is only known to those playing it — never all of them)
+  } else if (st) {
+    if (st[1] !== 'ep') { const sit = catalog.items.find((x) => x.u === pathOnly || (x.alts || []).some((a) => a.u === pathOnly)); if (!sit) throw new HttpError(404, 'File not found'); item(ctx, sit.k); }
+  } else if (/^\/api\/proxy\b/.test(pathOnly) && pathOnly !== '/api/proxy') throw new HttpError(400, 'Only stream addresses can be cast');
   // (hours: a TV's own player, signed for a day — see web/js/player.js signMedia — rather than a cast's 8 hours.)
   return { url: castSign(String(pq), clampInt(hours, 1, 24, 8)) };
 });
@@ -2346,7 +2467,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (typeof b.userAgent === 'string') s.userAgent = b.userAgent.trim() || DEFAULT_SETTINGS.userAgent;
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
@@ -3043,7 +3164,7 @@ require('./lib/routes-p3')({ route, requireProfile, requireAdmin, readJSON, Http
 // [routes:p4]
 const p4 = require('./lib/routes-p4')({
   route, requireProfile, requireAdmin, readJSON, HttpError, catalog, lists, accounts, epg, settings, tmdb, media, proxy, castSign, inputOf, videoViaProxy,
-  connLimit, listUsage, serveFile, clientIp, userdata, Catalog, dataDir: D, ready: () => catalogReady,
+  item: (ctx, k) => item(ctx, k), connLimit, listUsage, serveFile, clientIp, userdata, Catalog, dataDir: D, ready: () => catalogReady,
   relayExtra: (id) => relayFinished.extra(id),
   loopbackBase: () => `${tls ? 'https' : 'http'}://127.0.0.1:${cfg.port}`, // (other apps' tuner streams fetch the relay through this server)
 });
@@ -3155,7 +3276,7 @@ async function handle(req, res) {
   try { u = new URL(req.url, 'http://x'); } catch { return sendJSON(res, 400, { error: 'Bad request' }); }
   let pathname;
   try { pathname = decodeURIComponent(u.pathname); } catch { pathname = u.pathname; }
-  const ctx = { sess: null, profile: null, conn: req.headers['x-conn'] || '' };
+  const ctx = { sess: null, profile: null, conn: String(req.headers['x-conn'] || '').slice(0, 40) };
   try {
     if (!hostAllowed(cfg.trustProxy && req.headers['x-forwarded-host'] ? req.headers['x-forwarded-host'] : req.headers.host)) {
       throw new HttpError(403, `This server doesn’t answer to “${req.headers.host}”. Add it with the ALLOWED_HOSTS setting (see README), or change the site password first.`);
@@ -3176,7 +3297,11 @@ async function handle(req, res) {
       const sig = crypto.createHmac('sha256', castSecret).update(cm[1]).digest('base64url').slice(0, 24);
       let tok;
       try { tok = JSON.parse(Buffer.from(cm[1], 'base64url').toString('utf8')); } catch {}
-      if (sig !== cm[2] || !tok || tok.e < Date.now() / 1000 || !(cm[3] === tok.p || cm[3].startsWith(tok.p + '/'))) throw new HttpError(403, 'This cast link has expired.');
+      const sigOk = sig.length === cm[2].length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(cm[2]));
+      // (A link for a conversion session opens that session's files; one for a proxy address or a portal's item opens
+      // exactly that — not everything under /api/proxy. And links only read: never DELETE or POST.)
+      const under = tok && typeof tok.p === 'string' && (cm[3] === tok.p || (/^\/api\/(session|local)\//.test(tok.p) && cm[3].startsWith(tok.p + '/')));
+      if (!sigOk || !tok || tok.e < Date.now() / 1000 || !under || !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) throw new HttpError(403, 'This cast link has expired.');
       res.setHeader('Access-Control-Allow-Origin', '*');
       if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Headers': 'Range', 'Access-Control-Allow-Methods': 'GET, HEAD' }); return res.end(); }
       req.cast = `/c/${cm[1]}.${cm[2]}`;

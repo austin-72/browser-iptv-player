@@ -108,3 +108,8 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
   .vp-seek .knob { transform: scale(1); }
   .vp-seek.drag .tip { bottom: 3.2rem; }
 }
+
+/* "Why?" beside an empty guide, and guide rows that can be asked. */
+button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.gp.none.why { cursor: pointer; }
+.gp.none.why:hover, .gp.none.why:focus-visible { color: var(--text, #fff); }

@@ -55,7 +55,7 @@ V.route('guide', function (view, r) {
       need.forEach(function (i) {
         var c = chans[i];
         var list = res[c.k] || [];
-        if (!list.length) html += '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">' + (V.parental && !V.parental.open(c) ? V.icon('lock') + ' Locked' : 'No listings') + '</span></div>';
+        if (!list.length) html += (V.parental && !V.parental.open(c) ? '<div class="gp none" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">' + V.icon('lock') + ' Locked</span></div>' : '<div class="gp none why" role="button" tabindex="0" data-k="' + V.esc(c.k) + '" style="top:' + i * ROW + 'px;left:0;width:' + width + 'px"><span class="gp-stick">No listings · why?</span></div>');
         list.forEach(function (p) {
           var l = Math.max(0, px(p.s)), rr = Math.min(width, px(p.e));
           if (rr - l < 2) return;
@@ -121,6 +121,9 @@ V.route('guide', function (view, r) {
   V.pageCleanup = function () { clearInterval(tick); };
   side.addEventListener('click', function (e) { var b = e.target.closest('[data-k]'); if (b) V.play(V.entry(b.dataset.k), { list: chans }); });
   canvas.addEventListener('click', function (e) {
+    // A row with no listings (or made-up blocks): say why, rather than leave it looking broken.
+    var none = e.target.closest('.gp.none[data-k], .gp.ph[data-k]'); // (.ph: the made-up hour blocks of a channel without a guide)
+    if (none) { V.guideWhy(V.entry(none.dataset.k)); return; }
     var b = e.target.closest('.gp[data-s]');
     if (!b) return;
     var c = V.entry(b.dataset.k);
@@ -129,9 +132,17 @@ V.route('guide', function (view, r) {
   // Arrow keys move between programmes on TVs / keyboards.
   canvas.addEventListener('keydown', function (e) {
     var cur = e.target.closest('.gp');
+    if (cur && cur.classList.contains('why') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); V.guideWhy(V.entry(cur.dataset.k)); return; }
     if (!cur || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(e.key) < 0) return;
     e.preventDefault(); e.stopPropagation();
-    if (cur.classList.contains('none')) return;
+    if (cur.classList.contains('none')) {
+      // (A row with no listings, reached by its "why?": Up and Down go on to the nearest row that has programmes.)
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      var y0 = parseFloat(cur.style.top), pick = null, pd = Infinity;
+      V.$$('.gp[data-s]', canvas).forEach(function (x) { var y = parseFloat(x.style.top), dy = e.key === 'ArrowDown' ? y - y0 : y0 - y; if (dy > 0 && (dy < pd || (dy === pd && x.classList.contains('now')))) { pd = dy; pick = x; } });
+      if (pick) pick.focus();
+      return;
+    }
     var top = parseFloat(cur.style.top), left = parseFloat(cur.style.left), w = parseFloat(cur.style.width);
     // Up/Down: the nearest row that has programmes to move to (a channel without listings is passed over).
     // (Only this row's programmes, or the next row's that has any — not every programme drawn so far.)
@@ -167,6 +178,18 @@ V.route('guide', function (view, r) {
   }
   bindTools();
 });
+
+/** "Why are there no listings for this channel?" — asked of the server, answered in a small dialog with Watch. */
+V.guideWhy = function (c) {
+  if (!c) return;
+  V.api('/api/epg/why/' + encodeURIComponent(c.k)).then(function (w) {
+    V.dialog({
+      title: 'No listings for ' + c.n,
+      body: '<p>' + V.esc(w.text) + (w.until ? ' They run until ' + V.esc(V.fmtDay(w.until) + ', ' + V.fmtClock(w.until)) + '.' : '') + '</p><p class="dim">' + V.esc(w.fix || '') + '</p>',
+      actions: [{ label: 'Watch the channel', primary: true, fn: function () { V.play(c); } }, { label: 'Close' }]
+    });
+  }).catch(V.fail);
+};
 
 V.programmeDialog = function (c, p, list) {
   var now = Date.now();

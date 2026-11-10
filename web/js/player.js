@@ -172,7 +172,8 @@ PP.load = function (it, opts) {
   if (!opts.quiet) { this._downWaits = 0; this._attemptLog = []; this._everStarted = false; this._startedAlt = null; this._relayHoldSince = 0; this._clickAt = V._clickAt && Date.now() - V._clickAt < 120000 ? V._clickAt : Date.now(); V._clickAt = 0; this._startTimed = false; }
   if (V.crumb) V.crumb('player', (opts.quiet ? 'reload ' : 'play ') + it.t + ' “' + it.n + '”' + (opts.force ? ' (force ' + opts.force + ')' : '') + (opts.alt !== undefined ? ' (backup ' + opts.alt + ')' : '') + (opts.startAt ? ' at ' + Math.round(opts.startAt) + ' s' : ''));
   if (!opts.quiet) this._picRetried = this._picConverted = false;
-  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; this._fmt = {}; }
+  if (opts.alt === undefined && !opts.quiet) { this.alt = -1; this._altsLeft = S.settings && it.a ? it.a.map(function (x, i) { return i; }) : []; this._triedAlts = []; this._raced = null; this._fmt = {}; this._raceDone = false; this._racing = null; this._connLimit = 0; this._copyAt = Date.now(); }
+  else if (opts.alt !== undefined && opts.alt !== this.alt) this._copyAt = Date.now(); // (another copy: its own time to start — see _statStart)
   // Smart failover: a copy that's slow to start (6 s) — the others are looked at meanwhile, so if it fails the next
   // one is a copy that works right now.
   clearTimeout(this._raceT); clearTimeout(this._stallT);
@@ -1179,7 +1180,8 @@ PP._race = function (withCurrent) {
   var it = this.it, self = this;
   if (!it || !S.settings || S.settings.smartFailover === false) return Promise.resolve(null);
   if (this._raced && Date.now() - this._raced.at < 45000 && (!withCurrent || this._raced.cur === this.alt)) return Promise.resolve(this._raced);
-  if (this._racing) return this._racing;
+  if (this._racing && this._racingFor === it.k) return this._racing;
+  this._racingFor = it.k;
   var cur = this.alt;
   var ex = (this._triedAlts || []).concat(withCurrent ? [] : [cur]);
   this._racing = V.api('/api/play/race', { body: { k: it.k, exclude: ex, current: withCurrent ? cur : undefined } }).then(function (r) {
@@ -1228,6 +1230,9 @@ PP._failed = function (err) {
   // (With just one other copy there's nothing to choose between: straight to it.)
   if (this._altsLeft && this._altsLeft.length > 1 && S.settings && S.settings.smartFailover !== false && !this._raceDone) {
     // (First the others are looked at, all at once: the next copy tried is one that works right now.)
+    // (What was being tried is abandoned from here: its own time-out or error, arriving now, must not count as a
+    // second failure — that dropped a copy untried, or started the next way of playing the copy just given up on.)
+    this.token++;
     var tk = this.token, me0 = this, e0 = err;
     this._raceDone = true;
     if ((this._triedAlts || []).indexOf(this.alt) < 0) (this._triedAlts || (this._triedAlts = [])).push(this.alt);
@@ -1247,6 +1252,7 @@ PP._failed = function (err) {
     var total = (this.it.a || []).length + 1;
     var why = /slow to start|isn’t answering/i.test(err && err.message || '') ? 'answered too slowly' : shortWhy(err);
     this._step('Switching to copy ' + (next + 2) + ' of ' + total, 'Copy ' + (this.alt + 2) + ' ' + why + ((this._srcNames && this._srcNames[next]) ? ' · next: ' + this._srcNames[next] : ''));
+    this.token++; // (as above: nothing still running for the old copy may act any more)
     var tok = this.token, it = this.it;
     var me = this;
     // (A film: the backup starts where this one was, or was meant to start — not at the beginning.)
@@ -1513,7 +1519,7 @@ PP._statStart = function () {
   // Time to start: from pressing Play to this first picture (once per title — not a reconnect or a switch later on).
   var ms = !this._startTimed && this._clickAt ? Date.now() - this._clickAt : 0;
   this._startTimed = true;
-  V.api('/api/stats/play', { body: { k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host, cu: it.t === 'catchup' ? 1 : undefined, ms: ms || undefined } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
+  V.api('/api/stats/play', { body: { k: k, alt: this.alt, route: route, reason: this._routeReason(route), host: location.host, cu: it.t === 'catchup' ? 1 : undefined, ms: ms || undefined, cms: ms && this._copyAt && this._copyAt > this._clickAt ? Date.now() - this._copyAt : undefined } }).then(function (r) { if (self._statSig === sig) self._statId = r.id; }).catch(function () {});
   // Over 15 seconds: an error report ("Slow to start") with what each step took, to see where the time went.
   if (ms > 15000 && V.reportError) {
     V.reportError('slow', { message: 'Slow to start (' + (MODE_LABEL[a.via + ':' + (a.kind === '?' ? 'native' : a.kind || a.mode)] || route) + ')' }, {
@@ -1636,7 +1642,9 @@ PP._stalled = function () {
   var self = this, v = this.video, tk = this.token, now = Date.now();
   clearTimeout(this._whyT);
   if (v.seeking || (this._seekAt && now - this._seekAt < 8000) || !this.it) return;
-  if (this._stallsFor !== tk) { this._stallsFor = tk; this._stalls = []; this._whyAt = 0; }
+  // (Counted per video and copy, not per connection: the reconnect after 15 seconds of nothing is part of the same trouble.)
+  var sf = this.it.k + '|' + this.alt;
+  if (this._stallsFor !== sf) { this._stallsFor = sf; this._stalls = []; this._whyAt = 0; }
   this._stalls = this._stalls.filter(function (t) { return now - t < 180e3; });
   this._stalls.push(now);
   var often = this._stalls.length >= 3;
@@ -1662,13 +1670,14 @@ PP._why = function () {
       if (done) return;
       done = true;
       var ms = Date.now() - t0;
+      if (ok === 'server') return resolve({ who: 'source', text: 'The server is busy or restarting just now — not this device. It carries on by itself.' });
       if (!ok || ms > 2500) return resolve({ who: 'device', text: 'The connection between this device and the server is ' + (ok ? 'slow' : 'not getting through') + ' right now — the Wi‑Fi or internet here, not the channel.' });
       resolve(viaServer
         ? { who: 'source', text: 'Your connection is fine (the server answered in ' + ms + ' ms). The provider is sending this slowly, or the server is busy converting it.' }
         : { who: 'provider', text: 'Your connection is fine (the server answered in ' + ms + ' ms). The provider is sending this slowly — nothing on this device needs restarting.' });
     };
     setTimeout(function () { end(false); }, 4000);
-    try { fetch('/api/ping?t=' + t0, { cache: 'no-store', credentials: 'same-origin' }).then(function (r) { end(r.ok); }, function () { end(false); }); } catch (e) { end(false); }
+    try { fetch('/api/ping?t=' + t0, { cache: 'no-store', credentials: 'same-origin' }).then(function (r) { end(r.status >= 500 ? 'server' : true); }, function () { end(false); }); } catch (e) { end(false); }
   });
 };
 
@@ -1731,6 +1740,7 @@ PP._teardown = function () {
 
 PP.stop = function () {
   this.token++;
+  this._dropWarm(); // (a conversion got ready on the side: not left running on the server)
   this._teardown();
   this.it = null;
   this.started = false;
@@ -2447,8 +2457,10 @@ PP._tick = function () {
   seek.hidden = !w;
   if (w) {
     var f2 = (v.currentTime - w.start) / (w.end - w.start);
-    V.$('.fill', seek).style.width = V.clamp(f2, 0, 1) * 100 + '%';
-    V.$('.knob', seek).style.left = V.clamp(f2, 0, 1) * 100 + '%';
+    if (!seek.classList.contains('drag')) { // (being dragged: it shows where it will go)
+      V.$('.fill', seek).style.width = V.clamp(f2, 0, 1) * 100 + '%';
+      V.$('.knob', seek).style.left = V.clamp(f2, 0, 1) * 100 + '%';
+    }
     V.$('.buf', seek).style.width = '100%';
   }
   if (this.onTick) this.onTick(0, 0);
@@ -2597,7 +2609,7 @@ PP._bind = function () {
     var f = sp[1] > sp[0] ? V.clamp((t - sp[0]) / (sp[1] - sp[0]), 0, 1) : 0;
     V.$('.fill', seek).style.width = f * 100 + '%'; V.$('.knob', seek).style.left = f * 100 + '%';
     tip.style.left = V.clamp(f * r.width, 60, Math.max(60, r.width - 60)) + 'px';
-    var d = t - self.position, by = Math.abs(d) >= 1 ? ' (' + (d > 0 ? '+' : '−') + V.fmtDur(Math.abs(d)) + ')' : '';
+    var d = t - (self.vod ? self.position : self.video.currentTime), by = Math.abs(d) >= 1 ? ' (' + (d > 0 ? '+' : '−') + V.fmtDur(Math.abs(d)) + ')' : '';
     tipT.textContent = (self.vod ? V.fmtDur(t) + by : '−' + V.fmtDur(sp[1] - t)) + (note ? ' · ' + note : '');
     seek.setAttribute('aria-valuetext', self.vod ? V.fmtDur(t) + ' of ' + V.fmtDur(sp[1]) : V.fmtDur(sp[1] - t) + ' behind live');
   };
@@ -2639,7 +2651,7 @@ PP._bind = function () {
     if (!d) return;
     e.preventDefault();
     var sp = span();
-    if (!wheelT) cur = self.position;
+    if (!wheelT) cur = self.vod ? self.position : self.video.currentTime; // (a live window is in the video's own time)
     cur = V.clamp(cur + (d < 0 ? 1 : -1) * (e.shiftKey ? 1 : 5), sp[0], sp[1]);
     seek.classList.add('drag');
     show(cur);

@@ -226,6 +226,33 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Quicker to start:** when the provider has said what a film or episode is (or for a live channel), a server conversion starts straight away, with the look inside the stream running at the same time instead of first — a few seconds sooner. This briefly uses two connections, so it only happens when the account has room for two; if the look finds something else is needed (converting the picture, another audio language), the conversion starts again that way. Admin → Playback → *Start conversions quickly* turns it off. Live conversions come in 2-second pieces instead of 4, and a TV's or phone's own player waits for about three before it starts. On a PlayStation, copies the server already knows can only play through it aren't each checked first, and the signed address comes in the same answer.
 - **Fewer steps before the video:** the copy order and how this device reaches the copy that goes first come in one answer. The separate check before an episode is gone too, since the server reads a series again itself when it needs to. On a TV or PlayStation (light catalogue), the stream addresses of a film whose page is open, and of everything in Continue watching, are fetched ahead, and the player comes up at once while an address is fetched.
 - **Continue watching opens the page:** a film or episode in *Continue watching* opens its page, whose main button says *Resume* (for a series, *Resume S1:E3*, or the next episode), instead of starting at once.
+- **Access, tightened:** a signed stream link opens exactly what it was made for (one conversion session, one proxy
+  address, one portal item — it used to cover everything under `/api/proxy`) and only reads; no link is made for a bare
+  prefix; a portal (Stalker) item or a media-folder file asked for by a browser needs a profile that may watch it; a
+  channel's address can't be swapped for a file on the server's disk; stopping a conversion is its owner's or the
+  admin's; a remote allowed for one profile isn't allowed for another on the same phone; locked channels aren't named
+  in “watching now”.
+- **Starting a video, steadier:** a copy that's given up on can no longer fail a second time a moment later (which
+  skipped a copy untried); checking the other copies never opens a second connection on the account being started;
+  a copy's own time to start is what's remembered, not the wait for the copy before it; a conversion that's ready
+  doesn't wait up to 15 seconds for the look inside; closing the player stops a conversion got ready on the side.
+  An episode's copies keep their order between reads of a series (a slow provider left out of one answer used to
+  renumber them, so a player's “backup 2” became another copy).
+- **Second review, fixed:** a season saved as files goes one episode at a time (it took a connection and a
+  conversion per episode, all at once); a head start never overlaps another or takes an account's last connection,
+  and what plays next gets one in the last 90 seconds; a subtitle source that failed is asked again after a minute,
+  not six hours; two fetched subtitles with the same name no longer show on top of each other; SubDL downloads are
+  https-only with every redirect checked; a guide row with no listings can be left with the arrow keys; *Why?* gives
+  provider details to the admin only and nothing for a locked channel.
+- **Why no listings:** an empty guide row, or a channel's page with no guide information, has a *Why?* that answers
+  in plain words — no guide added, the guide failed to download, no guide carries this channel, its listings ran out
+  — and what to do, with the channel still a tap away.
+- **A head start for Play:** opening a film's or series' page has the server look inside the file its Play button
+  would start (when the account has a connection to spare), so the conversion doesn't wait 1–3 seconds for that when
+  Play is pressed. Admin → Playback → *Get ready when a title’s page opens* turns it off.
+- **Second look at this week's changes:** the remote follows a reloaded screen instead of dropping to the list; two
+  windows of one browser are two screens again; Home keeps ordering itself when a list row is added, doesn't count
+  hidden rows towards its eight, and counts each row once per visit; the live timeline holds still while dragged.
 - **Buffering, explained:** when a video has waited 5 seconds, or stops for the third time in three minutes, the player
   checks the connection between the device and the server and says where the hold-up is — this device's connection, or
   the provider sending slowly — with *Try another copy* when there is one, so nobody restarts things that were fine.

@@ -220,3 +220,16 @@ test('subtitles from a conversion that started part-way: ffmpeg’s short times 
   const vtt = 'WEBVTT\n\n04:56.000 --> 04:59.000\nbefore\n\n04:58.000 --> 05:03.000\nacross\n\n05:02.000 --> 05:05.000 line:90%\nafter\n\n01:02:03.500 --> 01:02:05.000\nlater';
   assert.strictEqual(shiftVtt(vtt, -300), 'WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nacross\n\n00:00:02.000 --> 00:00:05.000 line:90%\nafter\n\n00:57:03.500 --> 00:57:05.000\nlater');
 });
+
+test('SubDL file addresses: only its own, over https, and nothing that climbs out', () => {
+  const { SubDL, assToSrt } = require('../lib/subsources');
+  const f = (u) => SubDL.fileUrl(u);
+  assert.ok(f('/subtitle/123-456.zip'));
+  assert.ok(f('https://dl.subdl.com/subtitle/a b [x].zip'));
+  for (const bad of ['http://dl.subdl.com/x.zip', 'https://subdl.com.evil.tld/x.zip', 'https://evil.tld/subdl.com/x.zip', 'https://user@dl.subdl.com/x.zip', 'https://u:p@subdl.com/x.zip',
+    '//evil.tld/x.zip', '/a/../../etc/passwd', '/a/%2e%2e/b.zip', '/%2e%2e%2fsecret', '/a\\b.zip', '/%5c%5cevil/x', 'ftp://subdl.com/x', '/%2f%2fevil.tld/x']) assert.strictEqual(f(bad), '', bad);
+  // (A blank line inside an ASS line would end the cue early once converted.)
+  const srt = assToSrt('[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,One\\N\\NTwo\n');
+  assert.match(srt, /One\nTwo\n/);
+  assert.doesNotMatch(srt, /One\n\nTwo/);
+});

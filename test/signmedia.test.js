@@ -40,6 +40,11 @@ test('signed stream addresses: a day long, and opened without signing in', { tim
     assert.notStrictEqual((await api('GET', '/api/session/abc123/index.m3u8', undefined, true)).status, 410);
     // And only for that session's files.
     assert.strictEqual((await api('GET', day.replace('/abc123/', '/other1/'), undefined, true)).status, 403);
+    // No link for a bare prefix (it would open everyone's), none that reaches beyond its own address, and links only read.
+    for (const path of ['/api/session', '/api/session/', '/api/proxy/stalker/x', '/api/proxy/anything']) assert.strictEqual((await api('POST', '/api/cast/link', { path })).status, 400, path);
+    const prox = (await api('POST', '/api/cast/link', { path: '/api/proxy?d=x&s=y' })).body.url;
+    assert.strictEqual((await api('GET', prox.split('/api/proxy')[0] + '/api/proxy/stalker/l/live/1', undefined, true)).status, 403);
+    assert.strictEqual((await api('DELETE', day.replace('/index.m3u8', ''), undefined, true)).status, 403);
   } finally {
     app.kill();
   }

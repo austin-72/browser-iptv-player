@@ -82,4 +82,14 @@ test('a series on several lists: once one copy has answered, a slow provider hol
   assert.ok(ms >= 2400 && ms < 4000, `answered after ${ms} ms`);
   assert.strictEqual(slowDone, false);
   assert.deepStrictEqual(eps.map((e) => `S${e.s}E${e.e} ${e.u}`), ['S1E1 http://b/1/1.mp4'], 'what the copy that answered has');
+  // The slow copy is in the next answer — added after the one that was there: the copy an episode plays from, and the
+  // order of its backups, never change between reads (a player holding "backup 1" keeps getting the same one).
+  c.lists.xtSeries = (lid) => Promise.resolve(lid === 'A' ? { info: {}, episodes: [ep(1, 1, 'a'), ep(1, 2, 'a')] } : { info: {}, episodes: [ep(1, 1, 'b')] });
+  const again = await c.episodes(st.k);
+  assert.deepStrictEqual(again.map((e) => `S${e.s}E${e.e} ${e.u} ${(e.alts || []).map((a) => a.u).join(',')}`), ['S1E1 http://b/1/1.mp4 http://a/1/1.mp4', 'S1E2 http://a/1/2.mp4 ']);
+  assert.strictEqual(again[0], eps[0], 'the same episode, added to');
+  // A list's copy that changed its address takes its old place.
+  c.lists.xtSeries = (lid) => Promise.resolve(lid === 'A' ? { info: {}, episodes: [ep(1, 1, 'a2'), ep(1, 2, 'a')] } : { info: {}, episodes: [ep(1, 1, 'b2')] });
+  const third = await c.episodes(st.k);
+  assert.strictEqual(`${third[0].u} ${third[0].alts.map((a) => a.u).join(',')}`, 'http://b2/1/1.mp4 http://a2/1/1.mp4');
 });

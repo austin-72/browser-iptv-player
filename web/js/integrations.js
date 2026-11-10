@@ -28,7 +28,8 @@
     }
     if (p.hls && p.hls.subtitleTrack >= 0) p.hls.subtitleTrack = -1;
     setTimeout(function () {
-      for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === have.label ? 'showing' : 'disabled';
+      // (This very track — two fetched ones, or one inside the file, can carry the same name, and showed on top of each other.)
+      for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = (have.el.track ? v.textTracks[j] === have.el.track : v.textTracks[j].label === have.label) ? 'showing' : 'disabled';
       p._extOn = have.url;
       if (p._menuRefresh) p._menuRefresh();
     }, 60);
@@ -42,7 +43,7 @@
     var hideExt = function () { list.forEach(function (x) { if (x.el.track) x.el.track.mode = 'disabled'; }); p._extOn = null; p._extKeep = null; };
     var items = out.subs ? out.subs.items.filter(function (x) { return !list.some(function (e) { return e.label === x.label; }); }).map(function (x) { var fn = x.fn; return { label: x.label, on: x.on && !p._extOn, fn: function () { hideExt(); fn(); } }; }) : [{ label: 'Off', on: !p._extOn, fn: hideExt }];
     list.forEach(function (e) {
-      items.push({ label: e.label, on: p._extOn === e.url, fn: function () { for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = v.textTracks[j].label === e.label ? 'showing' : 'disabled'; p._extOn = e.url; p._extKeep = { k: p.it && p.it.k, url: e.url, label: e.label, lang: e.lang }; } });
+      items.push({ label: e.label, on: p._extOn === e.url, fn: function () { for (var j = 0; j < v.textTracks.length; j++) v.textTracks[j].mode = (e.el.track ? v.textTracks[j] === e.el.track : v.textTracks[j].label === e.label) ? 'showing' : 'disabled'; p._extOn = e.url; p._extKeep = { k: p.it && p.it.k, url: e.url, label: e.label, lang: e.lang }; } });
     });
     out.subs = { value: p._extOn ? (list.filter(function (e) { return e.url === p._extOn; })[0] || {}).label : out.subs ? out.subs.value : 'Off', items: items };
   };

@@ -28,7 +28,7 @@ test('a phone asks before it becomes another profile’s remote', { timeout: 600
       const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch {}
       return { status: r.status, body: j };
     };
-    const o = { api, sse: '' };
+    const o = { api, sse: '', useConn: (c) => { conn = c; } };
     o.connect = async (name) => {
       const res = await new Promise((ok) => { http.get(`http://127.0.0.1:${port}/api/events?name=${encodeURIComponent(name)}`, { headers: { Cookie: cookie } }, ok); });
       streams.push(res);
@@ -58,6 +58,11 @@ test('a phone asks before it becomes another profile’s remote', { timeout: 600
     const tvs = (await phone2.api('GET', '/api/devices')).body.filter((x) => x.name === 'Living room TV');
     assert.deepStrictEqual(tvs.map((x) => x.conn), [tv.conn], JSON.stringify(tvs));
     await tv.api('POST', '/api/presence', { conn: tv.conn, playing: { k: 'secret-film', n: 'A Private Film', pos: 10 } });
+
+    // (A second window of the same browser is a screen of its own: its page still speaks on the older connection.)
+    await new Promise((r) => setTimeout(r, 15));
+    tv.useConn(oldConn); assert.strictEqual((await tv.api('GET', '/api/devices')).status, 200); tv.useConn(tv.conn);
+    assert.strictEqual((await phone2.api('GET', '/api/devices')).body.filter((x) => x.name === 'Living room TV').length, 2);
 
     // Not asked yet: listed, but not what's on it, and it can't be controlled.
     let d = (await phone.api('GET', '/api/devices')).body.find((x) => x.conn === tv.conn);

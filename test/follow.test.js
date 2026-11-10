@@ -153,6 +153,16 @@ test('Events, suggestions, automatic reminders and event channels on the real se
     assert.ok((await api('GET', '/api/epg/search?q=chiefs')).body.some((h) => h.k === nfl.k));
     assert.ok((await api('GET', '/api/onlater?h=24&kinds=sport')).body.items.some((x) => x.t === 'Chiefs @ Bills' || (x.ks || []).includes(nfl.k) || x.k === nfl.k));
 
+    // "Why no listings?": a channel no guide carries says so (and that it still plays); one with listings doesn't claim that.
+    const news = cat.items.find((x) => x.n === 'Daily News'), arena = cat.items.find((x) => x.n === 'Arena Sports 1');
+    const whyNews = (await api('GET', '/api/epg/why/' + encodeURIComponent(news.k))).body;
+    assert.strictEqual(whyNews.reason, 'no-match', JSON.stringify(whyNews));
+    assert.match(whyNews.text, /None of the 1 TV guide carries this channel \(the provider gave it no guide name\)/);
+    assert.match(whyNews.fix, /pick its guide channel by hand/);
+    const whyArena = (await api('GET', '/api/epg/why/' + encodeURIComponent(arena.k))).body;
+    assert.ok(['gap', 'ran-out'].includes(whyArena.reason), JSON.stringify(whyArena));
+    assert.strictEqual((await api('GET', '/api/epg/why/nope')).status, 404);
+
     // Following: suggestions, then Events (live first, the best copy: an HD one the profile can see).
     const sug = (await api('GET', '/api/follow/suggest?q=Chelsae')).body;
     assert.strictEqual(sug[0].n, 'Chelsea');

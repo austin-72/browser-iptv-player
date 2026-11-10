@@ -219,7 +219,8 @@ V.route('channel', function (view, r) {
   };
   view.addEventListener('click', acts);
   var sched = V.$('.sched', view);
-  if (!c.E) { sched.innerHTML = '<p class="dim">' + (c.es === 'none' ? 'No event right now.' : c.ev ? V.eventLabel(c) + ' · the channel’s name doesn’t say when it starts.' : 'No guide information for this channel.') + '</p>'; return; }
+  sched.addEventListener('click', function (e) { if (e.target.closest('[data-why]') && V.guideWhy) V.guideWhy(c); });
+  if (!c.E) { sched.innerHTML = '<p class="dim">' + (c.es === 'none' ? 'No event right now.' : c.ev ? V.eventLabel(c) + ' · the channel’s name doesn’t say when it starts.' : 'No guide information for this channel. <button class="link" data-why>Why?</button>') + '</p>'; return; }
   var now = Date.now();
   var from = now - (canCU ? Math.min(7, (c.cu && c.cu.days) || 7) : 0.25) * 86400e3;
   V.epg.range([c.k], from, now + 3 * 86400e3).then(function (res) {
@@ -234,7 +235,7 @@ V.route('channel', function (view, r) {
         return '<li class="prog' + (live ? ' now' : '') + (past ? ' past' : '') + '"><span class="pt num">' + V.fmtClock(p.s) + '</span><span class="pb"><b>' + V.esc(p.t) + '</b>' + (p.st ? ' <span class="dim">· ' + V.esc(p.st) + '</span>' : '') + (p.ep ? ' <span class="dim">' + V.esc(p.ep) + '</span>' : '') + (p.d ? '<small class="dim clamp2">' + V.esc(p.d) + '</small>' : '') + '</span>' +
           (live ? '<button class="btn sm primary" data-p="live">' + V.icon('play') + ' Watch</button>' : cu ? '<button class="btn sm" data-p="cu" data-s="' + p.s + '">' + V.icon('play') + ' Play</button>' : !past ? '<button class="icon-btn" data-p="rem" data-s="' + p.s + '" aria-pressed="' + rem + '" aria-label="Remind me">' + V.icon(rem ? 'bellf' : 'bell') + '</button>' : '') + (V.dvr ? V.dvr.progButton(c, p) : '') + '</li>';
       }).join('') + '</ul>';
-    }).join('') || '<p class="dim">No guide information for this channel.</p>';
+    }).join('') || '<p class="dim">No guide information for this channel. <button class="link" data-why>Why?</button></p>';
     var cur = V.$('.prog.now', sched);
     if (cur) setTimeout(function () { cur.scrollIntoView({ block: 'center' }); }, 50);
     sched.onclick = function (e) {
