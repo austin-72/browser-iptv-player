@@ -2376,8 +2376,10 @@ PP._tick = function () {
     seek.hidden = !tot;
     if (tot) {
       var f = V.clamp(pos / tot, 0, 1);
-      V.$('.fill', seek).style.width = f * 100 + '%';
-      V.$('.knob', seek).style.left = f * 100 + '%';
+      if (!seek.classList.contains('drag')) { // (being dragged: it shows where it will go, not where it is)
+        V.$('.fill', seek).style.width = f * 100 + '%';
+        V.$('.knob', seek).style.left = f * 100 + '%';
+      }
       seek.setAttribute('aria-valuenow', Math.round(pos));
       seek.setAttribute('aria-valuemax', Math.round(tot));
       seek.setAttribute('aria-valuetext', V.fmtDur(pos) + ' of ' + V.fmtDur(tot));
@@ -2530,24 +2532,73 @@ PP._bind = function () {
   var frameReq = V.debounce(function (t) {
     if (!self.vod || !self.it || !S.settings.ffmpeg || self.it.t === 'catchup' || self.it.t === 'radio') return;
     if (self._noFrames === self.it.k) return; // the server said it can't for this one (e.g. a one-connection provider)
-    var src = '/api/frame/' + encodeURIComponent(self.it.k) + '?t=' + Math.round(t / 10) * 10 + '&w=240';
+    var g = self._frameStep || 10;
+    var src = '/api/frame/' + encodeURIComponent(self.it.k) + '?t=' + Math.round(t / g) * g + '&w=240';
     var k0 = self.it.k;
     tipImg.onload = function () { tipImg.hidden = false; self._frameFails = 0; };
     tipImg.onerror = function () { tipImg.hidden = true; self._frameFails = (self._frameFails || 0) + 1; if (self._frameFails >= 2) self._noFrames = k0; };
     if (tipImg.getAttribute('src') !== src) tipImg.src = src;
   }, 180);
+  // Dragging the timeline. Where you press is where it goes; from there it follows your finger or the mouse — and the
+  // further you move away from the bar (up or down), the finer it gets: half speed, a quarter, a tenth, so a few
+  // seconds either way are easy to hit even on a phone and a three-hour film. The picture moves once, when you let go
+  // (a conversion on the server starts again at each jump). The mouse wheel over the bar steps 5 seconds (1 with Shift).
+  var drag = false, cur = 0, lastX = 0, fine = 1, wheelT = null;
+  var span = function () { var w = self.liveWindow; return self.vod ? [0, self.duration || 0] : w ? [w.start, w.end] : [0, 0]; };
+  var show = function (t, note) {
+    var sp = span(), r = seek.getBoundingClientRect();
+    var f = sp[1] > sp[0] ? V.clamp((t - sp[0]) / (sp[1] - sp[0]), 0, 1) : 0;
+    V.$('.fill', seek).style.width = f * 100 + '%'; V.$('.knob', seek).style.left = f * 100 + '%';
+    tip.style.left = V.clamp(f * r.width, 60, Math.max(60, r.width - 60)) + 'px';
+    var d = t - self.position, by = Math.abs(d) >= 1 ? ' (' + (d > 0 ? '+' : '−') + V.fmtDur(Math.abs(d)) + ')' : '';
+    tipT.textContent = (self.vod ? V.fmtDur(t) + by : '−' + V.fmtDur(sp[1] - t)) + (note ? ' · ' + note : '');
+    seek.setAttribute('aria-valuetext', self.vod ? V.fmtDur(t) + ' of ' + V.fmtDur(sp[1]) : V.fmtDur(sp[1] - t) + ' behind live');
+  };
+  var frameAt = function (t) { self._frameStep = fine < 1 ? 2 : 10; frameReq(t); };
   seek.addEventListener('pointermove', function (e) {
+    var r = seek.getBoundingClientRect();
+    if (drag) {
+      var sp = span(), away = Math.max(r.top - e.clientY, e.clientY - r.bottom, 0);
+      fine = away < 45 ? 1 : away < 110 ? 0.5 : away < 180 ? 0.25 : 0.1;
+      cur = V.clamp(cur + (e.clientX - lastX) / r.width * (sp[1] - sp[0]) * fine, sp[0], sp[1]);
+      lastX = e.clientX;
+      seek.classList.toggle('fine', fine < 1);
+      show(cur, fine === 1 ? '' : fine === 0.5 ? 'fine ½' : fine === 0.25 ? 'fine ¼' : 'fine ⅒');
+      frameAt(cur);
+      return;
+    }
+    if (wheelT) return;
     var t = at(e);
     tipT.textContent = self.vod ? V.fmtDur(t) : (self.liveWindow ? '−' + V.fmtDur(self.liveWindow.end - t) : '');
-    var r = seek.getBoundingClientRect();
     tip.style.left = V.clamp(e.clientX - r.left, 60, r.width - 60) + 'px';
-    if (e.pointerType === 'mouse' || drag) frameReq(t);
-    if (drag) { var f = V.clamp((e.clientX - r.left) / r.width, 0, 1); V.$('.fill', seek).style.width = f * 100 + '%'; V.$('.knob', seek).style.left = f * 100 + '%'; }
+    if (e.pointerType === 'mouse') frameAt(t);
   });
-  seek.addEventListener('pointerleave', function () { tipImg.hidden = true; });
-  var drag = false;
-  seek.addEventListener('pointerdown', function (e) { drag = true; seek.classList.add('drag'); seek.setPointerCapture(e.pointerId); });
-  seek.addEventListener('pointerup', function (e) { if (drag) { drag = false; seek.classList.remove('drag'); tipImg.hidden = true; self.seek(at(e)); } });
+  seek.addEventListener('pointerleave', function () { if (!drag) tipImg.hidden = true; });
+  var endDrag = function () { drag = false; fine = 1; seek.classList.remove('drag'); seek.classList.remove('fine'); tipImg.hidden = true; };
+  seek.addEventListener('pointerdown', function (e) {
+    if (e.button > 0) return;
+    if (wheelT) { clearTimeout(wheelT); wheelT = null; }
+    drag = true; fine = 1; cur = at(e); lastX = e.clientX;
+    seek.classList.add('drag');
+    try { seek.setPointerCapture(e.pointerId); } catch (x) {}
+    show(cur); frameAt(cur);
+  });
+  seek.addEventListener('pointerup', function () { if (drag) { endDrag(); self.seek(cur); } });
+  // (The touch was taken away — a call coming in, the system's own swipe: nothing moves.)
+  seek.addEventListener('pointercancel', function () { if (drag) { endDrag(); self._tick(); } });
+  seek.addEventListener('wheel', function (e) {
+    if (!self.started || drag || (!self.vod && !self.liveWindow)) return;
+    var d = e.deltaY || e.deltaX;
+    if (!d) return;
+    e.preventDefault();
+    var sp = span();
+    if (!wheelT) cur = self.position;
+    cur = V.clamp(cur + (d < 0 ? 1 : -1) * (e.shiftKey ? 1 : 5), sp[0], sp[1]);
+    seek.classList.add('drag');
+    show(cur);
+    clearTimeout(wheelT);
+    wheelT = setTimeout(function () { wheelT = null; seek.classList.remove('drag'); self.seek(cur); }, 350);
+  }, { passive: false });
   seek.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? -60 : -V.skipLen('back')); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); self.skip(e.shiftKey ? 60 : V.skipLen('fwd')); }
@@ -2585,7 +2636,7 @@ PP._bind = function () {
   });
   this.el.addEventListener('touchstart', wake, { passive: true });
   this.el.addEventListener('focusin', wake);
-  this.el.addEventListener('mouseleave', function () { if (!self.video.paused && V.$('.vp-menu', h).hidden) self.el.classList.add('idle'); });
+  this.el.addEventListener('mouseleave', function () { if (!self.video.paused && V.$('.vp-menu', h).hidden && !V.$('.vp-seek.drag', h)) self.el.classList.add('idle'); });
 };
 
 /** "Hide the controls": everything goes until the mouse moves, the screen is touched or a key is pressed. */
@@ -2606,6 +2657,7 @@ PP._wake = function (sticky) {
   this._recentWake = !wasIdle;
   clearTimeout(this._idleT);
   this._idleT = setTimeout(function () {
+    if (V.$('.vp-seek.drag', self.host)) return self._wake(sticky); // (the timeline is being dragged: the controls stay)
     if (!self.video.paused && V.$('.vp-menu', self.host).hidden && V.$('.vp-side', self.host).hidden && self.started && !(document.activeElement && document.activeElement.classList.contains('vol'))) { self.el.classList.add('idle'); self._recentWake = false; }
   }, sticky ? 4500 : 2500);
 };

@@ -95,3 +95,16 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
 .fy-chips::-webkit-scrollbar { display: none; }
 .fy-chips .chip { flex: 0 0 auto; white-space: nowrap; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
 .home-more { text-align: center; margin: 1.2rem 0 0; }
+
+/* The timeline: a taller place to press (the bar looks the same), a bigger knob and time while dragging, and a tint
+   while fine-scrubbing. On touch screens the knob is always there to grab. */
+.vp-seek::before { content: ''; position: absolute; left: 0; right: 0; top: -.7rem; bottom: -.7rem; }
+.vp-seek.drag .knob { transform: scale(1.5); }
+.vp-seek.drag .track { height: 9px; }
+.vp-seek.drag .tip { font-size: 1rem; padding: 6px 8px; white-space: nowrap; }
+.vp-seek.fine .fill, .vp-seek.fine .knob { filter: brightness(1.35); }
+@media (pointer: coarse) {
+  .vp-seek { height: 2.2rem; }
+  .vp-seek .knob { transform: scale(1); }
+  .vp-seek.drag .tip { bottom: 3.2rem; }
+}
