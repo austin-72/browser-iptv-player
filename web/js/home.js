@@ -80,23 +80,34 @@ V.route('home', function (view) {
   var hasVod = S.movies.length + S.shows.length > 0;
 
   // Hero
-  var heroIt = V.entry(recs.hero) || (V.continueWatching()[0] || {}).it;
+  // What you're in the middle of leads (watched in the last two weeks): its picture, how much is left, one Resume
+  // button. The film picked for you is for when there's nothing to resume.
+  var cw0 = V.continueWatching()[0];
+  var resumeIt = cw0 && cw0.it && (cw0.it.t === 'movie' || cw0.it.t === 'episode') && Date.now() - (cw0.at || 0) < 14 * 86400e3 ? cw0.it : null;
+  var resumeNext = !!(resumeIt && cw0.next);
+  var heroIt = resumeIt || V.entry(recs.hero) || (cw0 || {}).it;
   if (heroIt && heroIt.t === 'episode') heroIt = V.showOf(heroIt) || heroIt;
+  if (resumeIt && !(heroIt.t === 'movie' || heroIt.t === 'show')) { resumeIt = null; heroIt = V.entry(recs.hero); }
+  var resumeMeta = function () {
+    var pr = V.progressOf(resumeIt.k), left = pr && pr.d && !pr.w ? Math.max(1, Math.round((pr.d - pr.p) / 60)) : 0;
+    return [resumeIt.t === 'episode' ? V.epLabel(resumeIt) + (resumeIt.et ? ' · ' + resumeIt.et : '') : heroIt.y, resumeNext ? 'Next episode' : left ? left + ' min left' : ''].filter(Boolean);
+  };
   if (!heroIt && hasVod) { var pool = S.movies.concat(S.shows).filter(function (x) { return x.i; }); heroIt = pool[Math.floor(Math.random() * Math.min(pool.length, 200))]; }
   var html = '';
   if (heroIt && (heroIt.t === 'movie' || heroIt.t === 'show')) {
     html += '<section class="hero" style="--tint:' + V.tint(heroIt.n) + '"><div class="hero-bg">' + (heroIt.bd || heroIt.i ? '<img src="' + V.esc(heroIt.bd || heroIt.i) + '" alt="" referrerpolicy="no-referrer"' + (heroIt.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
-      '<div class="hero-body"><div class="hero-kicker">' + V.esc(heroIt.t === 'show' ? 'Series' : 'Movie') + (recs.hero === heroIt.k ? ' · Picked for you' : '') + '</div><h2 class="hero-t">' + V.esc(heroIt.n) + '</h2>' +
-      '<div class="hero-meta">' + [heroIt.y, heroIt.c, heroIt.r ? '★ ' + heroIt.r : '', (heroIt.gn || []).slice(0, 3).join(' · ')].filter(Boolean).map(V.esc).join('<span class="dot-sep"></span>') + '</div>' +
+      '<div class="hero-body"><div class="hero-kicker">' + (resumeIt ? 'Continue watching' : V.esc(heroIt.t === 'show' ? 'Series' : 'Movie') + (recs.hero === heroIt.k ? ' · Picked for you' : '')) + '</div><h2 class="hero-t">' + V.esc(heroIt.n) + '</h2>' +
+      '<div class="hero-meta">' + (resumeIt ? resumeMeta() : [heroIt.y, heroIt.c, heroIt.r ? '★ ' + heroIt.r : '', (heroIt.gn || []).slice(0, 3).join(' · ')].filter(Boolean)).map(V.esc).join('<span class="dot-sep"></span>') + '</div>' +
+      (resumeIt && !resumeNext && V.pctOf(resumeIt.k) > 0 ? '<div class="hero-prog" role="presentation"><i style="width:' + Math.round(V.pctOf(resumeIt.k) * 100) + '%"></i></div>' : '') +
       '<p class="hero-plot" hidden></p>' +
-      '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + ' Play</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
+      '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + (resumeIt ? (resumeNext ? ' Play ' : ' Resume ') + (resumeIt.t === 'episode' ? V.esc(V.epLabel(resumeIt)) : '') : ' Play') + '</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
       '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
   }
   if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.filter(function (m) { return !(S.profile && S.profile.kids && (m.id === 'scary' || m.id === 'kids')); }).map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') /* (a kids' profile: no "Something scary", and everything is for kids already) */ + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button>' + (V.homeFootExtra ? V.homeFootExtra() : '') + '</div>';
   view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
   if (heroIt) {
-    V.$('[data-hero=play]', view) && (V.$('[data-hero=play]', view).onclick = function () { V.play(heroIt); });
+    V.$('[data-hero=play]', view) && (V.$('[data-hero=play]', view).onclick = function () { V.play(resumeIt || heroIt); });
     var lb = V.$('[data-hero=list]', view);
     if (lb) lb.onclick = function () { V.toggle('list', heroIt.k).then(function (on) { lb.innerHTML = V.icon(on ? 'check' : 'plus'); V.toast(on ? 'Added to My List' : 'Removed from My List'); }); };
     V.details(heroIt.k).then(function (d) {
@@ -104,7 +115,7 @@ V.route('home', function (view) {
       var ht = V.$('.hero-t', view);
       if (!ht || ht.textContent !== heroIt.n) return;
       var p = V.$('.hero-plot', view);
-      if (p && d.plot) { p.textContent = d.plot; p.hidden = false; }
+      if (p && d.plot && !resumeIt) { p.textContent = d.plot; p.hidden = false; }
       // Swap the blurred poster for the backdrop (something else may already have copied the details onto the item).
       if (d.bd) { if (!heroIt.bd) heroIt.bd = d.bd; var img = V.$('.hero-bg img.blur', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
     }).catch(function () {});
@@ -114,7 +125,15 @@ V.route('home', function (view) {
   if (sb) sb.onclick = function () { V.surprise(); };
 
   var rows = V.$('.rows', view);
-  var add = function (o) { var r = V.row(o); if (r) rows.appendChild(r); };
+  // Rows are built first, then put in order and cut to a page's worth (see below).
+  var built = [], curId = '';
+  var push = function (el, id) { if (el) built.push({ id: id || curId, el: el }); };
+  var add = function (o) { push(V.row(o)); };
+  // The recommendation rows (top picks, because you watched…, genres, people) are one row, "For you", with a chip
+  // for each; the two channel rows are one, "Your channels". Each sits where the first of its parts would have.
+  var recSets = [], chanSets = {};
+  var rec = function (o) { if (o.items && o.items.length) { if (!recSets.length) built.push({ id: 'foryou', ph: 'foryou' }); recSets.push(o); } };
+  var chan = function (which, items) { if (!chanSets.favs && !chanSets.recentch) built.push({ id: 'channels', ph: 'channels' }); chanSets[which] = items; };
   var builders = {
     continue: function () {
       var cw = V.continueWatching();
@@ -136,8 +155,8 @@ V.route('home', function (view) {
         if (items.length >= 3) add({ id: 'ontv:' + kind.id, title: kind.label, items: items, play: true, more: '#/guide' });
       });
     },
-    onlater: function () { var r = V.onLaterRow && V.onLaterRow(); if (r) rows.appendChild(r); },
-    events: function () { var r = V.eventsRow && V.eventsRow(); if (r) rows.appendChild(r); },
+    onlater: function () { push(V.onLaterRow && V.onLaterRow()); },
+    events: function () { push(V.eventsRow && V.eventsRow()); },
     shared: function () {
       var soc = S.socialCache;
       if (!soc) return;
@@ -145,11 +164,11 @@ V.route('home', function (view) {
       (S.recentShares || []).forEach(function (m) { var it = V.entry(m.item.k); if (it && !seen.has(it.k)) { seen.add(it.k); items.push(it); } });
       add({ id: 'shared', title: 'Sent to you', items: items.slice(0, 20), more: '#/messages' });
     },
-    top: function () { add({ id: 'top', title: 'Top picks for ' + S.profile.name, items: keysToItems(recs.top).slice(0, 30), track: true }); },
-    mix: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('mix:') === 0; }).forEach(function (r) { add({ id: r.id, title: r.title, items: keysToItems(r.keys), track: true }); }); },
-    people: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('cast:') === 0 || r.id.indexOf('dir:') === 0; }).forEach(function (r) { add({ id: r.id, title: r.title, items: keysToItems(r.keys), track: true }); }); },
-    because: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('because:') === 0; }).forEach(function (r) { add({ id: r.id, title: r.title, items: keysToItems(r.keys), track: true }); }); },
-    genres: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('genre:') === 0; }).forEach(function (r) { add({ id: r.id, title: r.title, items: keysToItems(r.keys), track: true }); }); },
+    top: function () { rec({ id: 'top', title: 'Top picks', items: keysToItems(recs.top).slice(0, 30) }); },
+    mix: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('mix:') === 0; }).forEach(function (r) { rec({ id: r.id, title: r.title, items: keysToItems(r.keys) }); }); },
+    people: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('cast:') === 0 || r.id.indexOf('dir:') === 0; }).forEach(function (r) { rec({ id: r.id, title: r.title, items: keysToItems(r.keys) }); }); },
+    because: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('because:') === 0; }).forEach(function (r) { rec({ id: r.id, title: r.title, items: keysToItems(r.keys) }); }); },
+    genres: function () { (recs.rows || []).filter(function (r) { return r.id.indexOf('genre:') === 0; }).forEach(function (r) { rec({ id: r.id, title: r.title, items: keysToItems(r.keys) }); }); },
     live: function () {
       var favs = keysToItems(S.data.favs).filter(function (x) { return x.t === 'live'; });
       var recent = V.recentChannels().filter(function (x) { return x.t === 'live'; });
@@ -160,8 +179,8 @@ V.route('home', function (view) {
       if (!items.length) items = S.live.slice(0, 30);
       add({ id: 'live', title: 'On now', items: items.slice(0, 40), more: '#/live', play: true });
     },
-    favs: function () { add({ id: 'favs', title: 'Favourite channels', items: keysToItems(S.data.favs).filter(function (x) { return x.t === 'live' || x.t === 'radio'; }), play: true, more: '#/live?g=__fav' }); },
-    recentch: function () { add({ id: 'recentch', title: 'Recently watched channels', items: V.recentChannels().slice(0, 30), play: true }); },
+    favs: function () { chan('favs', keysToItems(S.data.favs).filter(function (x) { return x.t === 'live' || x.t === 'radio'; })); },
+    recentch: function () { chan('recentch', V.recentChannels().slice(0, 30)); },
     household: function () { add({ id: 'household', title: 'Popular in your household', items: keysToItems(recs.household), numbered: true }); },
     new: function () {
       var items = V.topN([S.movies, S.shows], 40, function (x) { return x.ad && notHidden(x) ? x.ad : 0; });
@@ -183,13 +202,125 @@ V.route('home', function (view) {
       add({ id: 'random', title: 'Something different', items: V.sample([S.movies, S.shows], 24, V.hash(new Date().toDateString() + S.profile.id), ok), track: true });
     },
   };
-  order.forEach(function (id) { if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } else if (!hid.has(id) && V.homeRowBuilder) { try { V.homeRowBuilder(id, add); } catch (e) { console.error(e); } } }); // (rows from lists: homelists.js)
+  order.forEach(function (id) { curId = id; if (!hid.has(id) && builders[id]) { try { builders[id](); } catch (e) { console.error(e); } } else if (!hid.has(id) && V.homeRowBuilder) { try { V.homeRowBuilder(id, add); } catch (e) { console.error(e); } } }); // (rows from lists: homelists.js)
+  // "For you": the chip chosen last time (this visit) stays chosen.
+  var forYou = function (i) {
+    var set = recSets[i] || recSets[0];
+    var el = V.row({ id: 'foryou', title: 'For ' + S.profile.name, items: set.items, track: true });
+    if (!el) return null;
+    if (recSets.length > 1) {
+      var chips = document.createElement('div');
+      chips.className = 'chips fy-chips'; chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Which picks');
+      chips.innerHTML = recSets.slice(0, 12).map(function (r, j) { return '<button class="chip sm' + (r === set ? ' on' : '') + '" data-fy="' + j + '" aria-pressed="' + (r === set) + '">' + V.esc(r.title) + '</button>'; }).join('');
+      el.insertBefore(chips, V.$('.row-wrap', el));
+      chips.onclick = function (e) {
+        var b = e.target.closest('[data-fy]');
+        if (!b || !el.parentNode) return;
+        V.ls.session('home.fy', recSets[+b.dataset.fy].id);
+        var nu = forYou(+b.dataset.fy);
+        if (nu) { nu._hid = 'foryou'; el.parentNode.replaceChild(nu, el); var on = V.$('.fy-chips .on', nu); if (on && on.focus) on.focus(); }
+      };
+    }
+    return el;
+  };
+  built.forEach(function (b) {
+    if (b.ph === 'foryou') { var want = V.ls.session('home.fy'), at = 0; recSets.forEach(function (r, j) { if (r.id === want) at = j; }); b.el = forYou(at); }
+    if (b.ph === 'channels') {
+      var seenCh = {}, both = (chanSets.favs || []).concat(chanSets.recentch || []).filter(function (c) { if (seenCh[c.k]) return false; seenCh[c.k] = 1; return true; });
+      b.el = V.row({ id: 'channels', title: 'Your channels', items: both, play: true, more: chanSets.favs && chanSets.favs.length ? '#/live?g=__fav' : '#/live' });
+    }
+  });
+  built = built.filter(function (b) { return b.el; });
+  // The order: yours, if you set one in Customise. Otherwise the page sorts itself (V.homeOrder): what you're in the
+  // middle of and new episodes first, live TV up at the hours you watch it here, rows you use up, rows you never do down.
+  var ids = [];
+  built.forEach(function (b) { if (ids.indexOf(b.id) < 0) ids.push(b.id); });
+  if (!V.homeManual()) {
+    var sorted = V.homeOrder(ids);
+    built = built.map(function (b, i) { return { b: b, i: i }; }).sort(function (x, y) { return (sorted.indexOf(x.b.id) - sorted.indexOf(y.b.id)) || (x.i - y.i); }).map(function (x) { return x.b; });
+  }
+  // A page's worth (8 rows); the rest behind "More" — open for the rest of this visit once asked for.
+  var CAP = 8, open = !!V.ls.session('home.more') || built.length <= CAP + 1;
+  built.forEach(function (b, i) { b.el._hid = b.id; if (open || i < CAP) rows.appendChild(b.el); });
+  if (!open) {
+    var rest = built.slice(CAP);
+    var mb = document.createElement('div');
+    mb.className = 'home-more';
+    mb.innerHTML = '<button class="btn" data-home="more">' + V.icon('down') + ' ' + rest.length + ' more rows</button>';
+    rows.appendChild(mb);
+    V.$('button', mb).onclick = function () {
+      V.ls.session('home.more', 1);
+      mb.remove();
+      rest.forEach(function (b) { rows.appendChild(b.el); });
+      var f = rest[0] && V.$('.card', rest[0].el);
+      if (f && f.focus) f.focus();
+    };
+  }
+  V.homeSeen(built.slice(0, open ? built.length : CAP).map(function (b) { return b.id; }));
+  rows.addEventListener('click', function (e) {
+    var sec = e.target.closest('.card') && e.target.closest('section.row');
+    if (sec && sec._hid) V.homeUsed(sec._hid);
+  });
   if (!rows.children.length) {
     rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists?add=1">Add a list</a>' : '');
   }
   if (!S.recs || Date.now() - (S.recsAt || 0) > 5 * 60e3) V.loadRecs();
   if (V.loadHomeLists) V.loadHomeLists();
 });
+
+/* How this profile uses Home on this device: which rows it picks from, and whether it watches live TV or films and
+   series at each time of day. Kept on the device (so a TV and a phone each get their own order); halved every two
+   weeks so old habits fade. */
+var LIVE_ROWS = { live: 1, ontv: 1, events: 1, onlater: 1, channels: 1 };
+var useKey = function () { return 'home.use.' + ((S.profile && S.profile.id) || ''); };
+var useGet = function () {
+  var u = V.ls.get(useKey(), null) || {};
+  u.r = u.r || {}; u.s = u.s || {}; u.h = u.h || {};
+  var day = Math.floor(Date.now() / 86400e3);
+  if (!u.d) u.d = day;
+  if (day - u.d >= 14) { u.d = day; [u.r, u.s].forEach(function (m) { Object.keys(m).forEach(function (k) { m[k] = Math.floor(m[k] / 2); if (!m[k]) delete m[k]; }); }); Object.keys(u.h).forEach(function (k) { u.h[k] = [Math.floor(u.h[k][0] / 2), Math.floor(u.h[k][1] / 2)]; }); }
+  return u;
+};
+var hourBucket = function () { var h = new Date().getHours(); return h < 5 ? 'n' : h < 11 ? 'm' : h < 17 ? 'a' : h < 23 ? 'e' : 'n'; };
+V.homeUsed = function (id) { var u = useGet(); u.r[id] = Math.min(999, (u.r[id] || 0) + 1); V.ls.set(useKey(), u); };
+/** Rows shown on a visit (counted at most once every ten minutes: the page is drawn several times as things load). */
+V.homeSeen = function (ids) {
+  var u = useGet();
+  if (Date.now() - (u.t || 0) < 600e3) return;
+  u.t = Date.now();
+  ids.forEach(function (id) { u.s[id] = Math.min(999, (u.s[id] || 0) + 1); });
+  V.ls.set(useKey(), u);
+};
+/** Something was played: live or not, at this time of day. */
+V.homePlayed = function (it) {
+  if (!it || !S.profile) return;
+  var u = useGet(), b = hourBucket(), c = u.h[b] || [0, 0];
+  c[it.t === 'live' || it.t === 'radio' || it.t === 'catchup' ? 0 : 1]++;
+  u.h[b] = c;
+  V.ls.set(useKey(), u);
+};
+/** Did this profile put the rows in an order of its own (Customise → the arrows)? Saved in the standard order — as
+    Customise used to do when only a row was hidden — isn't one. */
+V.homeManual = function () {
+  var o = (S.data.home && S.data.home.order) || [];
+  if (!o.length) return false;
+  var std = V.HOME_ROWS.map(function (r) { return r.id; }).filter(function (id) { return o.indexOf(id) >= 0; });
+  var mine = o.filter(function (id) { return std.indexOf(id) >= 0; });
+  return mine.join('|') !== std.join('|');
+};
+/** The rows' ids, sorted for now (the order given is the standard one). */
+V.homeOrder = function (ids, use, bucket, tv) {
+  var u = use || useGet(), c = u.h[bucket || hourBucket()] || [0, 0], n = c[0] + c[1];
+  var liveAdj = n >= 5 ? (c[0] / n > 0.6 ? -6 : c[0] / n < 0.25 ? 3 : 0) : (tv === undefined ? V.device.tv : tv) ? -2 : 0;
+  var FIRST = { 'continue': -300, neweps: -200, shared: -100 };
+  var score = {};
+  ids.forEach(function (id, i) {
+    if (FIRST[id]) { score[id] = FIRST[id]; return; }
+    var clicks = u.r[id] || 0;
+    score[id] = i - Math.min(5, 1.5 * Math.log(1 + clicks) / Math.LN2) + ((u.s[id] || 0) >= 15 && !clicks ? 4 : 0) + (LIVE_ROWS[id] ? liveAdj : 0);
+  });
+  return ids.slice().sort(function (a, b) { return (score[a] - score[b]) || (ids.indexOf(a) - ids.indexOf(b)); });
+};
 
 V.loadRecs = function () {
   if (V._recsLoading) return V._recsLoading; // (one request at a time: start-up asks from several places)
@@ -227,6 +358,7 @@ V.customizeHome = function () {
   var order = (home.order && home.order.length ? home.order : []).concat(V.HOME_ROWS.map(function (r) { return r.id; })).filter(function (x, i, a) { return a.indexOf(x) === i && V.HOME_ROWS.some(function (r) { return r.id === x; }); });
   var hidden = new Set(home.hidden || []);
   var pinned = (home.pinned || []).slice();
+  var moved = false;
   var render = function (d) {
     V.$('.rows-edit', d).innerHTML = order.map(function (id, i) {
       var r = V.HOME_ROWS.filter(function (x) { return x.id === id; })[0];
@@ -239,15 +371,15 @@ V.customizeHome = function () {
   ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupList(t).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.label) + ' (' + g.items.length + ')</option>'); }); });
   V.dialog({
     title: 'Customise your home page', wide: true,
-    body: '<p class="dim">Choose which rows you see and their order.</p><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
+    body: '<p class="dim">Choose which rows you see. Until you move one, the page orders them itself — by the time of day, this device, and the rows you use; move any with the arrows and they stay in your order (Reset goes back). Recommendations share one “For you” row, and favourite and recent channels one “Your channels” row.</p><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
       '<div class="inline"><select class="input" data-pick><option value="">Choose a category…</option>' + groupOpts.join('') + '</select><button class="btn" data-pin>Pin</button></div>',
-    actions: [{ label: 'Reset', fn: function () { S.data.home = { order: [], hidden: [], pinned: [] }; V.saveHome(); V.router.refresh(); } }, { label: 'Save', primary: true, fn: function () { S.data.home = { order: order, hidden: Array.from(hidden), pinned: pinned }; V.saveHome(); V.router.refresh(); } }],
+    actions: [{ label: 'Reset', fn: function () { S.data.home = { order: [], hidden: [], pinned: [] }; V.saveHome(); V.router.refresh(); } }, { label: 'Save', primary: true, fn: function () { S.data.home = { order: moved || V.homeManual() ? order : [], hidden: Array.from(hidden), pinned: pinned }; V.saveHome(); V.router.refresh(); } }],
     onOpen: function (d) {
       render(d);
       d.addEventListener('click', function (e) {
         var b;
-        if ((b = e.target.closest('[data-up]'))) { var i = +b.dataset.up; order.splice(i - 1, 0, order.splice(i, 1)[0]); render(d); }
-        else if ((b = e.target.closest('[data-down]'))) { var j = +b.dataset.down; order.splice(j + 1, 0, order.splice(j, 1)[0]); render(d); }
+        if ((b = e.target.closest('[data-up]'))) { moved = true; var i = +b.dataset.up; order.splice(i - 1, 0, order.splice(i, 1)[0]); render(d); }
+        else if ((b = e.target.closest('[data-down]'))) { moved = true; var j = +b.dataset.down; order.splice(j + 1, 0, order.splice(j, 1)[0]); render(d); }
         else if ((b = e.target.closest('[data-unpin]'))) { pinned.splice(+b.dataset.unpin, 1); render(d); }
         else if (e.target.closest('[data-pin]')) { var v = V.$('[data-pick]', d).value; if (v && pinned.indexOf(v) < 0) pinned.push(v); if (pinned.indexOf('pinned') < 0) hidden.delete('pinned'); render(d); }
       });

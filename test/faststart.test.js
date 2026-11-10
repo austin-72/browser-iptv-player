@@ -112,6 +112,21 @@ test('quick start, and episodes read again after a restart', { timeout: 90000, s
     const after = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
     assert.notStrictEqual(after[0], firstAlt, 'the slow copy is no longer first: ' + JSON.stringify(after));
     assert.strictEqual(after[after.length - 1], firstAlt);
+    // The copy now first is given up on by a player (nothing after 9 seconds, another copy answering quickly): it goes
+    // last too, though a look at its provider would find it answering — until one of its videos starts quickly.
+    const other = after[0];
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, route: 'native', reason: '', ms: 900 });
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, route: 'native', reason: '', ms: 900 });
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, route: 'native', reason: '', ms: 900 });
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, route: 'native', reason: '', ms: 900 });
+    await api('POST', '/api/stats/play', { k: two.k, alt: other, failed: true, backup: true, msg: 'This copy was slow to start.' });
+    let now = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
+    assert.strictEqual(now[now.length - 1], other, 'given up on as slow: last ' + JSON.stringify(now));
+    await api('POST', '/api/stats/play', { k: two.k, alt: other, route: 'convert', reason: '', ms: 3000 });
+    now = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
+    await api('POST', '/api/stats/play', { k: two.k, alt: firstAlt, failed: true, backup: true, msg: 'This copy was slow to start.' });
+    now = (await api('POST', '/api/play/sources', { k: two.k })).body.sources.map((x) => x.alt);
+    assert.strictEqual(now[0], other, 'started quickly since: no longer held back ' + JSON.stringify(now));
 
     // A restart: the server no longer knows the episode until its series is read again.
     app.kill(); await new Promise((r) => app.once('exit', r));

@@ -434,6 +434,15 @@ V.adminTabs.content = function (body, A) {
   V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked, tmdbLangs: V.$('[data-tmdblang]', body).checked }, 'Saved — everyone using the default sees the change (a language nobody had before takes a few minutes to appear)'); };
 };
 
+/** Whether the chosen hardware encoder works (the server tries it when it starts and when the choice changes). */
+function hwNote(s, st) {
+  var c = st && st.hwCheck;
+  if (!s.hwaccel) return '<p class="note small" data-hwnote hidden></p>';
+  if (!c || c.want !== s.hwaccel) return '<p class="note small" data-hwnote>Checking whether it works…</p>';
+  return c.ok ? '<p class="note small" data-hwnote>Working: conversions use the graphics chip.</p>'
+    : '<p class="note warn small" data-hwnote><b>Not working, so conversions use software.</b> ' + V.esc(c.why) + '</p>';
+}
+
 V.adminTabs.playback = function (body, A) {
   var s = A.settings, st = A.status;
   var opt = function (cur, list) { return list.map(function (o) { return '<option value="' + o[0] + '"' + (String(cur) === String(o[0]) ? ' selected' : '') + '>' + o[1] + '</option>'; }).join(''); };
@@ -445,7 +454,7 @@ V.adminTabs.playback = function (body, A) {
     '<label class="switch"><input type="checkbox" data-b="smartFailover"' + (s.smartFailover !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Switch to a working copy quickly</b><small>When a channel or film has copies from several lists and the one playing fails (or is slow to start), the server tries the others all at once — through the stream relay when it’s on, one per provider account, never on an account with no free connection — and the player goes straight to the quickest one that works, instead of trying them one by one. Off: one after another, as before.</small></span></label>' +
     '<label class="switch"><input type="checkbox" data-b="quickStart"' + (s.quickStart !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Start conversions quickly</b><small>When the provider has said what a film or episode is (or for a live channel), the server starts converting straight away and looks inside the stream at the same time, instead of one after the other — a few seconds sooner. This briefly uses two connections, so only when the account has room for two. If the look finds something else is needed, the conversion starts again that way.</small></span></label></section>' +
     '<section class="card-sec"><h2>Conversion (ffmpeg)</h2>' + (st.ffmpeg ? '' : '<p class="note warn">ffmpeg isn’t installed.</p>') +
-    '<div class="grid2"><label class="field"><span>Hardware encoder</span><select class="input" data-s="hwaccel">' + opt(s.hwaccel, [['', 'None (software)'], ['vaapi', 'Intel/AMD (VAAPI)'], ['qsv', 'Intel Quick Sync'], ['nvenc', 'NVIDIA (NVENC)'], ['videotoolbox', 'Apple (VideoToolbox)']]) + '</select><small class="dim">Available: ' + (st.encoders.length ? st.encoders.join(', ') : 'none detected') + '. Falls back to software if it fails.</small></label>' +
+    '<div class="grid2"><label class="field"><span>Hardware encoder</span><select class="input" data-s="hwaccel">' + opt(s.hwaccel, [['', 'None (software)'], ['vaapi', 'Intel/AMD (VAAPI)'], ['qsv', 'Intel Quick Sync'], ['nvenc', 'NVIDIA (NVENC)'], ['videotoolbox', 'Apple (VideoToolbox)']]) + '</select><small class="dim">Available: ' + (st.encoders.length ? st.encoders.join(', ') : 'none detected') + '. Falls back to software if it fails.</small>' + hwNote(s, st) + '</label>' +
     '<label class="field"><span>Software speed</span><select class="input" data-s="transcodePreset">' + opt(s.transcodePreset, [['ultrafast', 'Fastest (bigger)'], ['superfast', 'Very fast'], ['veryfast', 'Fast (recommended)'], ['faster', 'Balanced'], ['fast', 'Better quality'], ['medium', 'Best quality (slow)']]) + '</select></label>' +
     '<label class="field"><span>Highest resolution when converting</span><select class="input" data-s="transcodeMaxHeight">' + opt(s.transcodeMaxHeight, [[2160, '4K'], [1440, '1440p'], [1080, '1080p'], [720, '720p'], [480, '480p']]) + '</select></label>' +
     '<label class="field"><span>Quality (CRF, lower = better)</span><input class="input" type="number" min="16" max="35" data-s="transcodeCrf" value="' + s.transcodeCrf + '"></label>' +
@@ -459,7 +468,9 @@ V.adminTabs.playback = function (body, A) {
     else if (t.dataset.s) p[t.dataset.s] = t.dataset.s === 'transcodeMaxHeight' ? +t.value : t.value;
     else if (t.dataset.b) p[t.dataset.b] = t.checked;
     else return;
-    V.adminSave(p).then(function () { if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }, 'smartFailover' in p ? { smartFailover: p.smartFailover } : {}); });
+    V.adminSave(p).then(function (saved) {
+      if ('hwaccel' in p) { st.hwCheck = saved && saved._hwCheck; var n = V.$('[data-hwnote]', body); if (n) n.outerHTML = hwNote(S.admin.settings, st); }
+      if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }, 'smartFailover' in p ? { smartFailover: p.smartFailover } : {}); });
   };
 };
 

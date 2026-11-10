@@ -250,6 +250,7 @@ PP.load = function (it, opts) {
       clearTimeout(warmT);
       if (token !== self.token) return;
       if (a.via !== 'session') self._dropWarm(); // (this way started: the head start isn't needed)
+      if (a.via === 'browser') mbSlow(false);
       self.attempt = a;
       if (V.crumb) V.crumb('player', 'started via ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' in ' + (Date.now() - t0) + ' ms');
       self._afterStart();
@@ -271,6 +272,7 @@ PP.load = function (it, opts) {
       if (log.length > 12) log.shift();
       if (V.crumb) V.crumb('player', 'attempt failed: ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' — ' + e.message);
       if (a.via === 'direct' || a.via === 'split') self._triedDirect = true;
+      if (a.via === 'browser' && /didn’t start in time/.test(e.message)) mbSlow(true);
       console.warn('[player] attempt failed', a.via, a.kind || a.mode, e.message);
       self._teardownMedia();
       // The browser can't decode it: another route to the same bytes won't help — go straight to conversion.
@@ -303,9 +305,35 @@ PP.load = function (it, opts) {
       if (token !== self.token) return;
       // A watch party sharing one connection: the party's stream through the server first (see lib/fanout.js).
       plan = opts.share && !opts.force && it.t !== 'catchup' ? [{ via: 'party', party: opts.share, kind: '?' }].concat(p) : p;
+      if (!opts.only && !opts.plan && !opts.force) plan = self._mbLater(plan);
       return next(0);
     }, function (e) { if (token === self.token) self._failed(e); });
   });
+};
+
+/* This browser's own conversion didn't start in time (8 seconds gone, every time, with a provider that sends each piece
+   of a file slowly): for six hours the server's conversion goes first on this device and the browser's after it, as on
+   iPhones — until one of the browser's starts. Kept across pages (when the browser allows). */
+var mbSlowAt = null;
+var mbSlow = function (set) {
+  if (set === undefined) {
+    if (mbSlowAt === null) { mbSlowAt = 0; try { mbSlowAt = +window.localStorage.getItem('vp.mbSlowAt') || 0; } catch (e) {} }
+    return Date.now() - mbSlowAt < 6 * 3600e3;
+  }
+  if (!set && !mbSlow()) return false;
+  mbSlowAt = set ? Date.now() : 0;
+  try { if (set) window.localStorage.setItem('vp.mbSlowAt', String(mbSlowAt)); else window.localStorage.removeItem('vp.mbSlowAt'); } catch (e) {}
+  return set;
+};
+PP._mbLater = function (plan) {
+  if (!mbSlow()) return plan;
+  var first = -1, i;
+  for (i = 0; i < plan.length; i++) if (plan[i].via === 'session') { first = i; break; }
+  var mbs = plan.filter(function (x, j) { return x.via === 'browser' && (first < 0 || j < first); });
+  if (first < 0 || !mbs.length) return plan;
+  var out = [];
+  plan.forEach(function (x, j) { if (mbs.indexOf(x) < 0) out.push(x); if (j === first) out = out.concat(mbs); });
+  return out;
 };
 
   /** Picks the copy to play (see /api/play/sources). Returns false when it asked the viewer something instead. */

@@ -226,6 +226,27 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Quicker to start:** when the provider has said what a film or episode is (or for a live channel), a server conversion starts straight away, with the look inside the stream running at the same time instead of first — a few seconds sooner. This briefly uses two connections, so it only happens when the account has room for two; if the look finds something else is needed (converting the picture, another audio language), the conversion starts again that way. Admin → Playback → *Start conversions quickly* turns it off. Live conversions come in 2-second pieces instead of 4, and a TV's or phone's own player waits for about three before it starts. On a PlayStation, copies the server already knows can only play through it aren't each checked first, and the signed address comes in the same answer.
 - **Fewer steps before the video:** the copy order and how this device reaches the copy that goes first come in one answer. The separate check before an episode is gone too, since the server reads a series again itself when it needs to. On a TV or PlayStation (light catalogue), the stream addresses of a film whose page is open, and of everything in Continue watching, are fetched ahead, and the player comes up at once while an address is fetched.
 - **Continue watching opens the page:** a film or episode in *Continue watching* opens its page, whose main button says *Resume* (for a series, *Resume S1:E3*, or the next episode), instead of starting at once.
+- **Error reports, gone through again:** an episode whose series has left the catalogue no longer breaks the player's
+  Episodes panel; an answer from the proxy in front of the server (502, 520, 524 — the server restarting, a blip) is
+  shown but no longer filed as a bug, and a read it answered for is asked once more first; a script that didn't arrive
+  is fetched once more before saying so.
+- **Home, smarter:** what you're in the middle of leads the page (*Continue watching*, how much is left, one Resume
+  button; the film picked for you shows when there's nothing to resume). Rows order themselves — live TV up at the times
+  of day it's watched on that device, rows you pick from up, rows never used down, new episodes at the top when there
+  are some — until you move a row in Customise, after which your order stays. Recommendations share one *For you* row
+  with a chip for each kind, favourite and recent channels one *Your channels* row, and the page shows eight rows with
+  the rest behind *More rows*.
+- **Remote, steadier:** the picture of what's playing on the remote no longer flashes (it was put in again with every
+  update from the screen), a screen that reconnected shows once in the list of screens instead of once per old
+  connection, and an open remote follows its screen to the new connection.
+- **Slow copies remembered:** a copy the player gave up on because it hadn't started after 9 seconds (while another
+  answered quickly) puts its list's copies after the others' for six hours, or until one of its videos starts in under
+  8 seconds — so the next episode doesn't begin on the same slow copy. And a device whose own conversion didn't start
+  in time has the server's conversion go first for six hours, instead of waiting 8 seconds on it every time.
+- **Hardware encoder, checked:** the server tries the chosen hardware encoder on a half-second test picture when it
+  starts and whenever the choice changes, and Admin → Playback says whether it works and, if not, why — for example no
+  graphics device inside the container, which is always the case for Intel or AMD under Docker Desktop on Windows or Mac.
+  One that can't work is never tried on a viewer's video.
 - **Downloading a series:** a series' page has a Download button, and the episode list a *Season* one, to download a season, the whole series or the episodes not watched yet, in one quality. Episodes already downloaded are left out. Kept in the app (on https), they download one after another in Downloads; as files, the browser saves them one by one, named like *Harbor Lights S01E01 Low Tide.mp4*, and may ask once whether the site may save several. Films and single episodes download as before (their page's Download, an episode's ⋯ menu). Not on TVs and games consoles, which can't keep videos.
 - **Subtitles, fixed:** their size now follows the picture on screen, 4.5% of its height at *Subtitle style → 100%*, so they're the same size against the picture in a window, full screen, on a phone held either way or on a TV. They used to be "3.2em", which each browser read differently. Lines sit just above the bottom of the picture, not the bottom of the video's box, which on a phone held upright is in the black below it. A film resumed through the server's conversion no longer shows a screen full of subtitle lines at once: ffmpeg writes times under an hour as *mm:ss*, and the ends of those weren't moved back. Subtitles fetched online (SubDL, Addic7ed, OpenSubtitles) stay on through a reload, such as a jump in a converted film or a new quality, with their times moved to match.
 - **SubDL:** a title SubDL doesn't have under its TMDB number is searched again by name (and year, for a film), and a subtitle without a language field counts as the language asked for. A SubDL subtitle whose file SubDL gives as a whole address, or with spaces or brackets in its name, downloads; these were refused as "Bad subtitle" (only addresses on SubDL's own sites are fetched). A download holding only styled .ass/.ssa subtitles is shown as plain ones. When SubDL (or another source) can't search — a bad key, today's searches used up, the site down — *Find subtitles* says so under the results, and the server log says so once an hour, instead of the source being left out silently.
@@ -327,7 +348,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 | `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see [Security](#security)) |
 | `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used (the last address in X-Forwarded-For that isn’t local or Cloudflare’s) |
 | `HTTPS_CERT`, `HTTPS_KEY` | — | Paths to a certificate and key, so the server speaks https itself |
-| `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Falls back to software if it fails |
+| `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Tested when the server starts; falls back to software if it fails. Docker Desktop on Windows or Mac can't pass Intel or AMD graphics through |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Render device for VAAPI |
 | `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` | Where ffmpeg is installed if it isn't on the PATH |
 | `MAX_MEMORY_MB` | 60% of RAM (4–12 GB) | Memory limit for the server; big catalogues and guides need room |

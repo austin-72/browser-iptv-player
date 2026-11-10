@@ -80,6 +80,8 @@ V.offerResume = function () {
   // Once per spot per tab (reloading the page doesn't ask again).
   // (Not what was just playing on this very device — the page reloaded after an update, or the profile was switched.)
   if (V.ls.session('playedHere') === cw.it.k) return;
+  // (Home's banner is already offering it: "Continue watching … Resume".)
+  if (document.body.dataset.page === 'home' && V.$('.hero [data-hero=play]') && /Resume/.test(V.$('.hero [data-hero=play]').textContent)) return;
   var sig = cw.it.k + '|' + Math.round(p.p);
   if (V.ls.session('resumeOffered') === sig) return;
   V.ls.session('resumeOffered', sig);

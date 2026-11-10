@@ -247,7 +247,7 @@
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
     var r = e.reason;
-    if (r && r.offline) return; // (the server couldn't be reached: not a bug)
+    if (r && (r.offline || r.proxy)) return; // (the server couldn't be reached, or the proxy in front of it answered: not a bug)
     if (r && r.status && r.status < 500) return; // (the server said no — a message the viewer saw, not a bug)
     // The in-browser converter tidying up after a conversion that was stopped or failed (its error was already
     // handled — the player moved on to another way of playing): a knock-on effect, not a fault of its own.

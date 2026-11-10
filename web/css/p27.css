@@ -87,3 +87,11 @@ dialog.dlg.trl-dlg .dlg-b { padding: 0; }
 /* Starting to play: the step, how long it's been, and — when it's slow — what's being done about it (player.js _step). */
 .vp-msg[data-step] .s { margin-bottom: .35rem; font-variant-numeric: tabular-nums; }
 .vp-msg[data-step] .s.h { margin: .6rem auto 0; max-width: 30rem; font-size: .88em; opacity: .85; }
+
+/* Home: the resume banner's progress, "For you" chips, and the "more rows" button. */
+.hero-prog { height: 4px; max-width: 22rem; border-radius: 2px; background: rgba(255,255,255,.3); overflow: hidden; margin: 0 0 .4rem; }
+.hero-prog i { display: block; height: 100%; background: var(--accent, #fff); }
+.fy-chips { display: flex; flex-wrap: nowrap; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin: 0 0 .7rem; padding: 2px; }
+.fy-chips::-webkit-scrollbar { display: none; }
+.fy-chips .chip { flex: 0 0 auto; white-space: nowrap; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.home-more { text-align: center; margin: 1.2rem 0 0; }

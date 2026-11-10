@@ -1631,7 +1631,7 @@ const { probe: probeCopy } = require('./lib/health');
  * are Channel health's to rank, as the admin set it) — so it isn't the one
  * tried first, which was where the 30–60 second starts came from.
  */
-const listSpeed = new Map(); // list id → { ms (smoothed), failAt }
+const listSpeed = new Map(); // list id → { ms (smoothed), failAt, slowAt }
 function noteSpeed(lid, ms, ok) {
   if (!lid) return;
   const s = listSpeed.get(lid) || { ms: 0, failAt: 0 };
@@ -1639,7 +1639,20 @@ function noteSpeed(lid, ms, ok) {
   else { s.ms = s.ms ? s.ms * 0.6 + ms * 0.4 : ms; if (ms < 5000) s.failAt = 0; }
   listSpeed.set(lid, s);
 }
-const slowList = (lid) => { const s = lid && listSpeed.get(lid); return !!s && ((s.failAt && Date.now() - s.failAt < 600e3) || s.ms > 8000); };
+/**
+ * A player gave up on a copy from this list because it hadn't started after 9 seconds while another copy answered
+ * quickly (given: true), or a video from it started (ms). Its copies go after the others' for six hours, or until one
+ * of its videos starts in under 8 seconds — a quick look at it (the race) can't tell: such a list often answers at
+ * once and then sends the video slowly, and the copy being played is never looked at on a one-connection account.
+ */
+function noteStart(lid, ms, given) {
+  if (!lid) return;
+  const s = listSpeed.get(lid) || { ms: 0, failAt: 0 };
+  if (given) s.slowAt = Date.now();
+  else if (ms > 0 && ms < 8000) s.slowAt = 0;
+  listSpeed.set(lid, s);
+}
+const slowList = (lid) => { const s = lid && listSpeed.get(lid); return !!s && ((s.failAt && Date.now() - s.failAt < 600e3) || (s.slowAt && Date.now() - s.slowAt < 6 * 3600e3) || s.ms > 8000); };
 route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   requireProfile(ctx);
   if (settings().smartFailover === false) return { order: [] };
@@ -1699,7 +1712,10 @@ route('POST', '/api/stats/play', async (req, res, p, q, ctx) => {
     if (src && !src.local && isUrl(src.input)) provider = new URL(src.input).host;
   } catch {}
   if (it && p9Hooks.played) { try { p9Hooks.played(it, Number.isInteger(b.alt) ? b.alt : -1, b); } catch (e) { log(`Channel health: ${e.message}`); } }
+  // (Given up on as slow to start, never having played: its list's copies aren't the first ones tried for a while.)
+  if (it && b.failed && !b.started && /slow to start/i.test(String(b.msg || ''))) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), 0, true);
   if (b.failed) { if (!b.backup) stats.fail(); return { ok: true }; } // (a copy that failed: Channel health's to rank, as the admin set it)
+  if (it && Number(b.ms) > 0) noteStart(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Number(b.ms), false);
   // (Played straight from the provider: how long it took is the provider's doing. A converted start isn't counted.)
   if (it && Number(b.ms) > 0 && !b.failed && /^(native|direct|helper)$/.test(String(b.route || ''))) noteSpeed(srcList(it, Number.isInteger(b.alt) ? b.alt : -1), Math.min(Number(b.ms), 120000), true);
   return { id: stats.play({ route: String(b.route || ''), reason: String(b.reason || ''), provider, host: String(b.host || req.headers.host || ''), profile: prof.guest ? 'guest' : prof.id, type, startMs: b.ms }) };
@@ -2053,7 +2069,17 @@ route('GET', '/api/devices', (req, res, p, q, ctx) => {
   // Screens it may control (ok), and — not for a guest — other profiles' screens it can ask to (ok: false): those
   // without what's on them, until the person there says yes.
   const now = Date.now();
-  return [...hub.conns].filter((c) => c.pid && (canControl(ctx, c) || (!prof.guest && c.sess !== ctx.sess.id))).map((c) => {
+  // One entry per screen: a device that reconnected (a flaky network, a page reloaded) leaves its old connections
+  // half-open for a while, and each showed up as another copy of the same screen. Its newest connection is the screen;
+  // the asker's own connection always stays.
+  const live = new Map();
+  for (const c of hub.conns) {
+    if (!c.pid) continue;
+    const key = c.id === ctx.conn ? 'me' : c.sess + '|' + (c.deviceId || '') + '|' + c.pid;
+    const o = live.get(key);
+    if (!o || c.at >= o.at) live.set(key, c);
+  }
+  return [...live.values()].filter((c) => c.pid && (canControl(ctx, c) || (!prof.guest && c.sess !== ctx.sess.id))).map((c) => {
     const ok = canControl(ctx, c);
     const asked = !ok && [...remoteAsks.values()].some((a) => a.from === ctx.sess.id && a.to === c.id && !a.no && now - a.at < 60e3);
     return { conn: c.id, name: c.deviceName, deviceId: ok ? c.deviceId : '', playing: ok ? shown(c) : null, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || ''), ok, asked };
@@ -2300,7 +2326,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
     devices: accounts.sessionsList(),
     me: ctx.sess ? ctx.sess.id : null,
     status: {
-      version: cfg.version, ffmpeg: media.available, ffmpegVersion: media.version, hw: media.hw, encoders: [...media.encoders].filter((e) => /h264_/.test(e)),
+      version: cfg.version, ffmpeg: media.available, ffmpegVersion: media.version, hw: media.hw, hwCheck: media.hwCheck, encoders: [...media.encoders].filter((e) => /h264_/.test(e)),
       sessions: [...media.sessions.values()].map((x) => ({ id: x.id, label: x.label, owner: x.owner, transcode: x.transcode, hw: x.hw, height: x.height, startedAt: x.startedAt })),
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
@@ -2327,7 +2353,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (Array.isArray(b.hiddenGroups)) s.hiddenGroups = b.hiddenGroups.map(String);
   if (Array.isArray(b.hiddenKeys)) s.hiddenKeys = b.hiddenKeys.map(String);
   if (typeof b.transcodePreset === 'string' && /^(ultrafast|superfast|veryfast|faster|fast|medium)$/.test(b.transcodePreset)) s.transcodePreset = b.transcodePreset;
-  if ('hwaccel' in b && ['', 'vaapi', 'nvenc', 'qsv', 'videotoolbox'].includes(b.hwaccel)) { s.hwaccel = b.hwaccel; media.hwFailed = false; }
+  if ('hwaccel' in b && ['', 'vaapi', 'nvenc', 'qsv', 'videotoolbox'].includes(b.hwaccel)) { s.hwaccel = b.hwaccel; media.hwFailed = false; media.hwCheck = null; }
   if (typeof b.tmdbKey === 'string' && !/^•/.test(b.tmdbKey)) s.tmdbKey = b.tmdbKey.trim();
   num('epgDays', 1, 21); num('epgPastDays', 0, 14); num('epgRefreshHours', 1, 168); num('transcodeCrf', 16, 35); num('transcodeMaxHeight', 240, 2160);
   num('maxTranscodes', 0, 32); num('maxSessions', 1, 64); num('remuxReadrate', 0, 10);
@@ -2376,6 +2402,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   let smartChanged = false;
   if (b.smart && typeof b.smart === 'object') { const was = JSON.stringify(Smart.config(s)); s.smart = Smart.clean(b.smart, s.smart); smartChanged = JSON.stringify(Smart.config(s)) !== was; }
   settingsStore.save();
+  if ('hwaccel' in b) await media.testHw().catch(() => null); // so Admin can say straight away whether it works
   if ('tmdbLangs' in b) relang('settings');
   if (smartChanged) { smartRetag('settings'); smartTrending(); if (!enrichJob) setTimeout(() => { try { startEnrich(true); } catch {} }, 5000); }
   if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b) scheduleRebuild(100);
@@ -2452,7 +2479,7 @@ route('POST', '/api/admin/proxy/test', async (req, res, p, q, ctx) => {
 /** Settings as the admin page sees them (secrets masked). */
 function adminSettingsView() {
   const s = settings();
-  return { ...s, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })), relay: { url: (s.relay || {}).url || '', all: (s.relay || {}).all !== false, hasSecret: !!(s.relay || {}).secret, proxy: (s.relay || {}).proxy || '' } };
+  return { ...s, _hwCheck: media.hwCheck, tmdbKey: s.tmdbKey ? '••••' + s.tmdbKey.slice(-4) : '', proxies: (s.proxies || []).map((x) => ({ ...x, url: x.url.replace(/:([^:@/]+)@/, ':••••@') })), relay: { url: (s.relay || {}).url || '', all: (s.relay || {}).all !== false, hasSecret: !!(s.relay || {}).secret, proxy: (s.relay || {}).proxy || '' } };
 }
 route('POST', '/api/admin/password', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -3304,6 +3331,7 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
   const T = { modules: process.uptime() - tmdbLoadS, 'TMDB details': tmdbLoadS };
   let t = Date.now();
   const ff = await media.detect();
+  media.testHw().catch(() => null); // in the background: a viewer never waits on a hardware encoder that can't work
   T.ffmpeg = (Date.now() - t) / 1000; t = Date.now();
   for (const g of lists.guides()) if (!g.enabled) epg.removeSource(g.id);
   epg.setOrder(lists.guides().filter((g) => g.enabled).map((g) => g.id));

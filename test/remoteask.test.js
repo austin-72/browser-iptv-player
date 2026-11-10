@@ -51,6 +51,14 @@ test('a phone asks before it becomes another profile’s remote', { timeout: 600
     await tv.connect('Living room TV'); await phone.connect('Alex phone'); await phone2.connect('Sam phone');
     await tv.api('POST', '/api/presence', { conn: tv.conn, playing: { k: 'secret-film', n: 'A Private Film', pos: 10 } });
 
+    // The TV reconnected (its old connection still half-open): one screen in the list, not two — its newest.
+    const oldConn = tv.conn;
+    tv.sse = ''; await tv.connect('Living room TV');
+    assert.notStrictEqual(tv.conn, oldConn);
+    const tvs = (await phone2.api('GET', '/api/devices')).body.filter((x) => x.name === 'Living room TV');
+    assert.deepStrictEqual(tvs.map((x) => x.conn), [tv.conn], JSON.stringify(tvs));
+    await tv.api('POST', '/api/presence', { conn: tv.conn, playing: { k: 'secret-film', n: 'A Private Film', pos: 10 } });
+
     // Not asked yet: listed, but not what's on it, and it can't be controlled.
     let d = (await phone.api('GET', '/api/devices')).body.find((x) => x.conn === tv.conn);
     assert.deepStrictEqual([d.ok, d.playing, d.profile], [false, null, 'Sam']);

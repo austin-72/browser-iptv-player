@@ -188,7 +188,13 @@ V.api = function (path, opts) {
         if (!r.ok) {
           // (No message from the app: a proxy in front of it — Cloudflare — answered instead. Say what that means.)
           var plain = { 502: 'The server couldn’t be reached just now (or it’s restarting). Try again in a moment.', 503: 'The server is busy or restarting. Try again in a moment.', 504: 'The server took too long to answer. Try again in a moment.', 520: 'The server gave an unexpected answer. Try again in a moment.', 521: 'The server is down or restarting. Try again in a moment.', 522: 'The server took too long to answer. Try again in a moment.', 523: 'The server can’t be reached just now.', 524: 'The server took too long to answer (more than 100 seconds). It may still be working on it — check again in a minute.' }[r.status];
-          var err = new Error((j && j.error) || plain || ('Server error ' + r.status)); err.status = r.status; if (!j && plain && r.status !== 504 && r.status !== 524) err.down = true; throw err;
+          var err = new Error((j && j.error) || plain || ('Server error ' + r.status)); err.status = r.status; if (!j && plain && r.status !== 504 && r.status !== 524) err.down = true;
+          // (Answered by the proxy in front of the server, not the app: nothing in the app to fix — not reported as a bug.)
+          if (!j && plain) err.proxy = true;
+          // A read that the proxy answered for (the server restarting, a blip between them): asked once more, quietly.
+          var isGet = !opts.method || opts.method === 'GET';
+          if (err.down && isGet && body === undefined && !opts.noWait && !opts._again) return new Promise(function (ok) { setTimeout(ok, 1500); }).then(function () { return V.api(path, Object.assign({}, opts, { _again: true })); });
+          throw err;
         }
         return j;
       });
@@ -227,7 +233,7 @@ V.fail = function (e) {
   console.warn(e);
   V.toast((e && e.message) || String(e), { error: true });
   // A failure that isn't the server saying no or the network being down is a bug: report it (errors.js).
-  if (V.reportError && e && !e.offline && !(e.status && e.status < 500)) V.reportError('shown', e instanceof Error ? e : { message: String((e && e.message) || e) }, e.status ? { status: e.status } : {});
+  if (V.reportError && e && !e.offline && !e.proxy && !(e.status && e.status < 500)) V.reportError('shown', e instanceof Error ? e : { message: String((e && e.message) || e) }, e.status ? { status: e.status } : {});
 };
 
 // ---------- dialogs (native <dialog>, so focus and Escape work everywhere)
@@ -380,8 +386,10 @@ V.download = function (name, data, type) {
 };
 V.loadScript = (function () {
   var cache = {};
+  var one = function (src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.async = true; s.onload = res; s.onerror = function () { s.remove(); rej(new Error('Couldn’t load ' + src)); }; document.head.appendChild(s); }); };
   return function (src) {
-    if (!cache[src]) cache[src] = new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.async = true; s.onload = res; s.onerror = function () { delete cache[src]; rej(new Error('Couldn’t load ' + src)); }; document.head.appendChild(s); });
+    // (A script that didn't arrive — the connection blinked: once more after a second, before saying so.)
+    if (!cache[src]) cache[src] = one(src).catch(function () { return new Promise(function (ok) { setTimeout(ok, 1000); }).then(function () { return one(src); }); }).catch(function (e) { delete cache[src]; throw e; });
     return cache[src];
   };
 })();

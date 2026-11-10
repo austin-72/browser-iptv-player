@@ -171,3 +171,27 @@ test('the server: a film whose look inside failed is still converted as a film (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the chosen hardware encoder is tried once on a test picture, and one that can’t work is never used', { skip: !hasFfmpeg }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwcheck-'));
+  let want = 'vaapi';
+  const media = new Media({ ...cfg, vaapiDevice: path.join(dir, 'no-such-renderD128') }, dir, () => ({ userAgent: 'Test', hwaccel: want }));
+  try {
+    await media.detect();
+    media.encoders.add('h264_vaapi'); // (built in, as in the Docker image, but no device passed through)
+    const c = await media.testHw();
+    assert.strictEqual(c.ok, false);
+    assert.match(c.why, /no graphics device/);
+    assert.match(c.why, /Docker Desktop on Windows/);
+    assert.strictEqual(media.hw, '', 'conversions use software straight away');
+    // An encoder this ffmpeg doesn't have.
+    want = 'videotoolbox'; media.encoders.delete('h264_videotoolbox');
+    assert.match((await media.testHw()).why, /wasn’t built with h264_videotoolbox/);
+    // One that starts and then fails (the encoder exists in the list but not really): ffmpeg's words, plus a hint.
+    want = 'nvenc'; media.encoders.add('h264_nvenc');
+    const n = await media.testHw();
+    if (!n.ok) { assert.match(n.why, /h264_nvenc didn’t start/); assert.match(n.why, /gpus: all/); assert.strictEqual(media.hw, ''); }
+    // None chosen: nothing to test.
+    want = ''; assert.strictEqual(await media.testHw(), null);
+  } finally { clearInterval(media._reaper); fs.rmSync(dir, { recursive: true, force: true }); }
+});

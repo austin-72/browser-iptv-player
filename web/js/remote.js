@@ -50,16 +50,18 @@ V.route('remote', function (view, r) {
 function remoteList(view) {
   view.innerHTML = V.pageHead('Remote') + '<p class="dim">Pick a screen to control.</p><div class="remote-devs"><div class="spinner"></div></div>' +
     '<div class="btn-row"><button class="btn" data-pair>' + V.icon('tv') + ' Sign in a TV</button></div>';
+  var shown = null;
   var draw = function () {
     V.api('/api/devices').then(function (devs) {
       var others = devs.filter(function (d) { return d.conn !== S.conn; });
       var box = V.$('.remote-devs', view);
       if (!box) return;
-      box.innerHTML = others.length ? others.map(function (d) {
+      var html = others.length ? others.map(function (d) {
         // Someone else's screen: asked first (what's on it isn't shown until they allow it).
         if (d.ok === false) return '<button class="remote-dev rm-ask" data-ask="' + V.esc(d.conn) + '"' + (d.asked ? ' disabled' : '') + '>' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.asked ? 'Asked — waiting for an answer on that screen' : 'Ask to use it as a remote') + '</small></span>' + V.icon('lock') + '</button>';
         return '<a class="remote-dev" href="#/remote/' + encodeURIComponent(d.conn) + '">' + V.icon(d.tv ? 'tv' : 'devices') + '<span><b>' + V.esc(d.name) + '</b>' + (d.profile ? ' <span class="chip sm">' + V.esc(d.profile) + '</span>' : '') + '<small class="dim">' + (d.playing ? 'Playing ' + V.esc(d.playing.n || '') : 'Nothing playing') + '</small></span>' + V.icon('next') + '</a>';
       }).join('') : V.empty('No other screens open', '', '<ol class="rm-steps"><li>Open the app on your TV or computer.</li><li>Pick <b>' + V.esc(S.profile.name) + '</b> there — it shows up here in a few seconds.</li></ol><p class="dim small">TV not signed in yet? Choose “Sign in with your phone” on it, then <b>Sign in a TV</b> below.</p>');
+      if (html !== shown) { shown = html; box.innerHTML = html; } // (not redrawn every 5 seconds when nothing changed)
     }).catch(V.fail);
   };
   draw();
@@ -104,7 +106,7 @@ function remotePad(view, conn) {
 }
 
 function remotePadOpen(view, conn) {
-  var st = null, name = '', seek = null;
+  var st = null, name = '', seek = null, artOf = '';
   var cmd = function (c, extra) { return V.api('/api/devices/' + encodeURIComponent(conn) + '/command', { body: Object.assign({ cmd: c }, extra || {}) }).catch(function (e) { V.fail(e); if (e.status === 404) V.router.go('#/remote', true); }); };
   view.innerHTML = '<div class="remote">' +
     '<header class="rm-h"><a class="icon-btn" href="#/remote" aria-label="All screens">' + V.icon('back') + '</a><b class="rm-dev truncate">Remote</b><span class="sp"></span><button class="btn sm" data-target>' + V.icon('cast') + ' Pick things to play here</button></header>' +
@@ -130,8 +132,10 @@ function remotePadOpen(view, conn) {
   var $ = function (q) { return V.$(q, view); };
   var draw = function () {
     if (!st) return;
-    if (st.idle) { $('.rm-t').textContent = 'Nothing playing'; $('.rm-s').textContent = 'Pick something below or on any page, and choose “Play on…”.'; $('.rm-art').innerHTML = ''; $('.rm-seek').hidden = true; return; }
-    $('.rm-art').innerHTML = V.art(st.i, st.n, 'art');
+    if (st.idle) { $('.rm-t').textContent = 'Nothing playing'; $('.rm-s').textContent = 'Pick something below or on any page, and choose “Play on…”.'; $('.rm-art').innerHTML = ''; artOf = ''; $('.rm-seek').hidden = true; return; }
+    // (Only when the picture changes: put in again with every update from the screen — once a second — it flashed.)
+    var artNow = (st.i || '') + '|' + (st.n || '');
+    if (artNow !== artOf) { artOf = artNow; $('.rm-art').innerHTML = V.art(st.i, st.n, 'art'); }
     $('.rm-t').textContent = st.n + (st.no ? ' · ' + st.no : '');
     $('.rm-s').textContent = st.sub || '';
     V.$('[data-c=toggle]', view).innerHTML = V.icon(st.paused ? 'play' : 'pause');
@@ -149,10 +153,21 @@ function remotePadOpen(view, conn) {
     var m = $('.rm-msg'); m.hidden = !st.msg; m.textContent = st.msg || '';
   };
   var off = V.on('devstate', function (d) { if (d.from === conn) { st = d.state; draw(); } });
-  var hello = function () { cmd('watch'); };
+  // (The screen reconnected — its page reloaded, its network blinked: it has a new connection, and this remote follows
+  // it there instead of talking to the old one.)
+  var devId = '';
+  var follow = function () {
+    if (!devId) return;
+    V.api('/api/devices').then(function (devs) {
+      if (devs.some(function (x) { return x.conn === conn; })) return;
+      var d = devs.filter(function (x) { return x.ok !== false && x.deviceId === devId && x.conn !== S.conn; })[0];
+      if (d) V.router.go('#/remote/' + encodeURIComponent(d.conn), true);
+    }).catch(function () {});
+  };
+  var hello = function () { cmd('watch'); follow(); };
   hello();
   var t = setInterval(hello, 10000);
-  V.api('/api/devices').then(function (devs) { var d = devs.filter(function (x) { return x.conn === conn; })[0]; if (d) { name = d.name; $('.rm-dev').textContent = d.name; drawTarget(); } else V.router.go('#/remote', true); }).catch(function () {}); // (offline a moment: the page tries again)
+  V.api('/api/devices').then(function (devs) { var d = devs.filter(function (x) { return x.conn === conn; })[0]; if (d) { name = d.name; devId = d.deviceId || ''; $('.rm-dev').textContent = d.name; drawTarget(); } else V.router.go('#/remote', true); }).catch(function () {}); // (offline a moment: the page tries again)
   V.pageCleanup = function () { clearInterval(t); off(); cmd('unwatch'); };
   var drawTarget = function () { var on = V.remote.target && V.remote.target.conn === conn; var b = $('[data-target]'); b.classList.toggle('primary', !!on); b.innerHTML = V.icon('cast') + (on ? ' Playing things here: on' : ' Pick things to play here'); };
   view.addEventListener('click', function (e) {

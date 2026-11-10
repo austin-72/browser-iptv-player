@@ -394,6 +394,7 @@ V.unit = function (it) { return it && it.t === 'episode' ? V.showOf(it) || it : 
 
 /** Episodes of a show: from the catalogue, or loaded from the server (Xtream series load on demand). */
 V.loadEpisodes = function (show) {
+  if (!show) return Promise.resolve([]); // (an episode whose series isn't in the catalogue any more: nothing to list)
   if (show._eps) return Promise.resolve(show._eps);
   var local = S.epsByShow.get(show.k) || [];
   if (!show.x && local.length) { show._eps = local; return Promise.resolve(local); }

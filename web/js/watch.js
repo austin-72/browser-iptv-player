@@ -7,6 +7,7 @@ V.watch = { it: null, list: null, mini: false };
 V.play = function (it, opts) {
   V._clickAt = Date.now(); // ("Time to start": counted from here — player.js _statStart)
   if (it && it.k) V.ls.session('playedHere', it.k);
+  if (V.homePlayed) V.homePlayed(it); // (Home orders its rows by what's watched at this time of day: home.js)
   opts = opts || {};
   if (!it) return;
   // "Play on the TV" mode (Remote): send it there instead.
