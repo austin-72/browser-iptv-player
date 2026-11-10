@@ -408,20 +408,22 @@ V.adminTabs.profiles = function (body, A) {
   body.innerHTML = '<div class="page-tools ap-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a profile</button><span class="dim small">' + A.profiles.length + (A.profiles.length === 1 ? ' profile' : ' profiles') + '. Open one to change what it can watch, its screen time or its PIN.</span></div>' +
     '<ul class="adm-profiles">' + A.profiles.map(card).join('') + '</ul>' +
     '<section class="card-sec adm-house"><h2>For the whole household</h2>' +
-    '<label class="check"><input type="checkbox" data-aop' + (s.adminOnlyProfiles || hasKids ? ' checked' : '') + (hasKids ? ' disabled' : '') + '><span>Only the admin can add profiles' + (hasKids ? ' <small class="dim">— always, while there’s a kids profile</small>' : '') + '</span></label>' +
+    '<label class="check"><input type="checkbox" data-aop' + (s.adminOnlyProfiles ? ' checked' : '') + '><span>Only the admin can add profiles <small class="dim" data-aopnote' + (hasKids && !s.adminOnlyProfiles ? '' : ' hidden') + '>— off now: anyone here, a child on a kids profile too, can add a profile without limits</small></span></label>' +
     // A Guest on "Who's watching?" (web/js/guest.js): nothing it watches is kept or shown to anyone else.
     '<h3>Guest</h3><label class="check"><input type="checkbox" data-guest="guestProfile"' + (s.guestProfile ? ' checked' : '') + '><span>Offer a Guest on “Who’s watching?” <small class="dim">— for visitors: no PIN, nothing they watch, like or add to My List is saved (it’s forgotten when they leave), and none of it goes into anyone’s recommendations or “also watched”. Guests can’t record, message, start watch parties or change anything here.</small></span></label>' +
     '<div class="adm-guest"' + (s.guestProfile ? '' : ' hidden') + '><div class="grid2"><div><label class="check"><input type="checkbox" data-guest="guestKids"' + (s.guestKids ? ' checked' : '') + '><span>Kids’ titles and channels only</span></label>' +
     '<label class="check"><input type="checkbox" data-guest="guestAdult"' + (s.guestAdult ? ' checked' : '') + '><span>Allow adult (18+) groups <small class="dim">— not with kids’ titles only' + (s.noAdult ? '; off for everyone now (Languages & content → Adult content)' : '') + '</small></span></label></div>' +
     '<label class="field"><span>Age limit for guests</span><select class="input" data-guest="guestMaxCert">' + opts(PROF_CERTS, s.guestMaxCert || '') + '</select></label></div></div></section>';
   var byId = function (id) { return A.profiles.filter(function (x) { return x.id === id; })[0]; };
+  // (With a kids profile in the house, the page says what leaving "Only the admin can add profiles" off means.)
+  var aopNote = function () { V.$('[data-aopnote]', body).hidden = V.$('[data-aop]', body).checked || !A.profiles.some(function (x) { return x.kids; }); };
   var dirty = function (li, on) { var d = V.$('[data-dirty]', li); if (d) d.hidden = !on; li.classList.toggle('dirty', !!on); };
   // (Which rows are open, for when the page is drawn again after a PIN or a deletion.)
   body.addEventListener('toggle', function (e) { var li = e.target.classList && e.target.classList.contains('ap') && e.target.closest('[data-id]'); if (li) profOpen[li.dataset.id] = e.target.open; }, true);
   body.addEventListener('input', function (e) { var li = e.target.closest('.ap-limits, .st-box') && e.target.closest('[data-id]'); if (li) dirty(li, true); });
   body.onchange = function (e) {
     var t = e.target, li = t.closest('[data-id]');
-    if (t.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: t.checked }).catch(function () { t.checked = !t.checked; });
+    if (t.hasAttribute('data-aop')) V.adminSave({ adminOnlyProfiles: t.checked }).then(aopNote).catch(function () { t.checked = !t.checked; aopNote(); });
     else if (t.hasAttribute('data-guest')) {
       var gp = {};
       gp[t.dataset.guest] = t.type === 'checkbox' ? t.checked : t.value;
@@ -452,6 +454,7 @@ V.adminTabs.profiles = function (body, A) {
       V.put('/api/admin/profiles/' + id, { kids: kids, restrictions: rs }).then(function () {
         // (The row says what was saved.)
         p.kids = kids; p.restrictions = rs;
+        aopNote();
         V.$('[data-chips]', li).innerHTML = profChips(p);
         V.$('[data-lim]', li).textContent = profLimits(p, A);
         dirty(li, false);

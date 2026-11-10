@@ -235,8 +235,8 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
     file whole first; a wrong file uploaded over a playlist no longer replaces it.
   - *Can't be held up or got round:* a crafted error report, a broken guide file or a gzip bomb can't freeze the
     server; the parental PIN and profile PINs lock for longer each time and count guesses across devices and
-    profiles; an unlock is for the profile that entered the PIN; with a kids profile in the house only the admin adds
-    profiles, and a kids profile can't delete itself; "don't remember my PIN" now ends 30 minutes after the profile was
+    profiles; an unlock is for the profile that entered the PIN; a kids profile can't delete itself (who may add
+    profiles is the admin's choice: Admin → Profiles → *Only the admin can add profiles*); "don't remember my PIN" now ends 30 minutes after the profile was
     last used; a message between profiles can't carry code; a provider's ids can't name files outside the cache.
   - *Player:* a film that stops well before its end is picked up where it stopped instead of being marked watched and
     followed by the next episode; a browser-side conversion that was given up on is really stopped (it could later

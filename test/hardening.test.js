@@ -70,5 +70,19 @@ test('statistics: a provider named like something every object has stays a name'
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('who may add profiles is the admin\'s setting, with a kids profile in the house too', () => {
+  const { Accounts } = require('../lib/accounts');
+  const dir = tmp('acc');
+  const acc = new Accounts(dir, { defaultPassword: 'house-password' });
+  const admin = acc.create({ name: 'Admin', pin: '1234' }, null, {});
+  acc.create({ name: 'Kid', kids: true }, { profileId: admin.id }, {});
+  // Left off: anyone here can add one (the admin's choice, said on the page).
+  assert.ok(acc.create({ name: 'Visitor' }, { profileId: null }, { adminOnlyProfiles: false }).id);
+  // Turned on: only from the admin's profile.
+  assert.throws(() => acc.create({ name: 'Another' }, { profileId: null }, { adminOnlyProfiles: true }), /Only the admin/);
+  assert.ok(acc.create({ name: 'Another' }, { profileId: admin.id }, { adminOnlyProfiles: true }).id);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // (The pieces above keep timers of their own — saving later, tidying up: nothing to wait for here.)
 test.after(() => { setImmediate(() => process.exit(process.exitCode || 0)); });
