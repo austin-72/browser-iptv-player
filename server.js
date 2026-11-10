@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS = {
   transcodePreset: 'veryfast', transcodeCrf: 22, transcodeMaxHeight: 1080, maxTranscodes: 3, maxSessions: 10, remuxReadrate: 0, hwaccel: '',
   tmdbKey: '', introDetection: true,
   adminOnlyProfiles: false, allowDownloads: true, allowParties: true,
+  noAdult: false, // (no adult (18+) content for anyone: left out of the catalogue — lib/catalog.js isAdult)
   guestProfile: false, guestKids: false, guestMaxCert: '', guestAdult: false, // (a Guest on "Who's watching?": lib/accounts.js startGuest)
   exportKey: crypto.randomBytes(12).toString('hex'),
   allowedHosts: [],
@@ -121,6 +122,7 @@ const overrides = new Overrides(D);
 const epg = new Epg(path.join(D, 'epg'), { offsets: overrides.d.guideOffsets, background: true });
 let catalog;
 let rebuildTimer = null;
+let catalogNow = false; // (the next catalogue is one every device should load straight away)
 const scheduleRebuild = (ms = 1500) => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuildCatalog, ms); };
 const lists = new Lists({
   dir: path.join(D, 'lists'), media, getSettings: settings,
@@ -286,7 +288,11 @@ function afterRebuild() {
   }
   // (TMDB's details went on each title while it was built: catalog.decorate.)
   catalog.cache.clear();
-  if (!catalog.sameAsBefore) hub.toAll('catalog', { version: catalog.version });
+  // (After the admin took adult content out — or put it back — every device loads the new catalogue now, the ones
+  // that otherwise wait until it suits them too: web/js/main.js.)
+  const now = catalogNow && catalog.adultInfo().off === !!settings().noAdult;
+  if (now) catalogNow = false;
+  if (!catalog.sameAsBefore) hub.toAll('catalog', now ? { version: catalog.version, now: true } : { version: catalog.version });
   afterCatalog();
 }
 /** After a new catalogue (built, or the saved one at start-up): the jobs that go through it, a little later. */
@@ -317,7 +323,7 @@ let builtSig = ''; // what the catalogue in use was made from (catalogInputs at 
 function catalogInputs() {
   const h = crypto.createHash('sha1').update(CODE_SIG);
   const S = settings();
-  h.update(JSON.stringify([S.tidyGroups, S.groupRules, S.hiddenGroups, S.hiddenKeys, S.defaultLangs, S.showUnknownLang, keepSig(), overrides.d]));
+  h.update(JSON.stringify([S.tidyGroups, S.groupRules, S.hiddenGroups, S.hiddenKeys, S.defaultLangs, S.showUnknownLang, keepSig(), overrides.d, !!S.noAdult]));
   for (const l of lists.all().concat(lists.extras || [])) {
     const { status, account, ...conf } = l; // (how its last refresh went doesn't change what's in it)
     h.update(JSON.stringify(conf));
@@ -2483,7 +2489,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   }
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
@@ -2545,7 +2551,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if ('hwaccel' in b) await media.testHw().catch(() => null); // so Admin can say straight away whether it works
   if ('tmdbLangs' in b) relang('settings');
   if (smartChanged) { smartRetag('settings'); smartTrending(); if (!enrichJob) setTimeout(() => { try { startEnrich(true); } catch {} }, 5000); }
-  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b) scheduleRebuild(100);
+  if ('hiddenGroups' in b || 'hiddenKeys' in b || 'defaultLangs' in b || 'showUnknownLang' in b || 'groupRules' in b || 'tidyGroups' in b || 'tmdbTitles' in b || 'noAdult' in b) { if ('noAdult' in b) catalogNow = true; scheduleRebuild(100); }
   hub.toAll('settings', publicSettings());
   return adminSettingsView();
 });
@@ -2711,7 +2717,8 @@ route('GET', '/api/admin/groups', (req, res, p, q, ctx) => {
   for (const l of lists.all()) { const parsed = lists.parsed.get(l.id); if (!parsed) continue; }
   for (const it of catalog.items) if (it.t !== 'episode') add(it);
   for (const g of settings().hiddenGroups) if (!groups.has(g)) groups.set(g, { name: g, count: 0, types: {}, langs: {}, hidden: true });
-  return { groups: [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)), langs };
+  // (The adult (18+) entries the lists hold, by provider category, for the switch that leaves them out for everyone.)
+  return { groups: [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)), langs, adult: catalog.adultInfo() };
 });
 route('POST', '/api/admin/tmdb/test', async (req, res, p, q, ctx) => { requireAdmin(ctx); try { return { ok: await tmdb.test() }; } catch (e) { return { ok: false, error: e.message }; } });
 let enrichJob = null;

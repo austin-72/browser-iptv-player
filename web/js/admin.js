@@ -365,7 +365,7 @@ V.adminTabs.profiles = function (body, A) {
     // A Guest on "Who's watching?" (web/js/guest.js): nothing it watches is kept or shown to anyone else.
     '<section class="card-sec adm-guest"><h3>Guest</h3><label class="check"><input type="checkbox" data-guest="guestProfile"' + (A.settings.guestProfile ? ' checked' : '') + '><span>Offer a Guest on “Who’s watching?” <small class="dim">— for visitors: no PIN, nothing they watch, like or add to My List is saved (it’s forgotten when they leave), and none of it goes into anyone’s recommendations or “also watched”. Guests can’t record, message, start watch parties or change anything here.</small></span></label>' +
     '<div class="grid2"><div><label class="check"><input type="checkbox" data-guest="guestKids"' + (A.settings.guestKids ? ' checked' : '') + '><span>Kids’ titles and channels only</span></label>' +
-    '<label class="check"><input type="checkbox" data-guest="guestAdult"' + (A.settings.guestAdult ? ' checked' : '') + '><span>Allow adult (18+) groups <small class="dim">— not with kids’ titles only</small></span></label></div>' +
+    '<label class="check"><input type="checkbox" data-guest="guestAdult"' + (A.settings.guestAdult ? ' checked' : '') + '><span>Allow adult (18+) groups <small class="dim">— not with kids’ titles only' + (A.settings.noAdult ? '; off for everyone now (Languages & content → Adult content)' : '') + '</small></span></label></div>' +
     '<label class="field"><span>Age limit for guests</span><select class="input" data-guest="guestMaxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(A.settings.guestMaxCert || '') === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label></div></section>' +
     '<ul class="adm-profiles">' + A.profiles.map(function (p) {
       var r = p.restrictions || {};
@@ -373,7 +373,7 @@ V.adminTabs.profiles = function (body, A) {
         '<div class="dim small">' + (p.hasPin ? 'PIN set' : 'No PIN') + ' · languages: ' + (p.langs ? V.esc(p.langs.map(function (c) { return V.langName(c); }).join(', ')) || 'none' : 'default') + ' · last used ' + V.fmtAgo(p.lastUsedAt) + '</div></div></div>' +
         (p.admin ? '' : '<div class="ap-limits grid2"><label class="field"><span>Age limit</span><select class="input" data-r="maxCert">' + certs.map(function (c) { return '<option value="' + c[0] + '"' + (String(r.maxCert) === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label>' +
           '<div class="field"><span>Can watch</span><div class="chips">' + [['live', 'Live TV'], ['movie', 'Movies'], ['show', 'Series'], ['radio', 'Radio']].map(function (t) { var on = !r.types || !r.types.length || r.types.indexOf(t[0]) >= 0; return '<label class="chip-check"><input type="checkbox" data-type="' + t[0] + '"' + (on ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') + '</div></div>' +
-          '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile (only kids’ titles and channels)</span></label><label class="check"><input type="checkbox" data-r="adult"' + (r.adult ? ' checked' : '') + '><span>Allow adult (18+) groups</span></label>' +
+          '<label class="check"><input type="checkbox" data-r="kids"' + (p.kids ? ' checked' : '') + '><span>Kids profile (only kids’ titles and channels)</span></label><label class="check"><input type="checkbox" data-r="adult"' + (r.adult ? ' checked' : '') + '><span>Allow adult (18+) groups' + (A.settings.noAdult ? ' <small class="dim">— off for everyone (Languages & content → Adult content)</small>' : '') + '</span></label>' +
           '<label class="field wide"><span>Blocked categories (one per line)</span><textarea class="input" rows="2" data-r="blockedGroups">' + V.esc((r.blockedGroups || []).join('\n')) + '</textarea></label></div>') +
         '<label class="check ap-pri"><input type="checkbox" data-pri' + (p.priority ? ' checked' : '') + '><span>Priority viewer <small class="dim">— when every connection to a provider is in use, this profile takes one from someone on a standard profile</small></span></label>' +
         '<div class="btn-row">' + (p.admin ? '' : '<button class="btn sm primary" data-save>Save limits</button>') + '<button class="btn sm" data-pin>' + (p.hasPin ? 'Reset PIN' : 'Set a PIN') + '</button>' + (p.admin ? '' : '<button class="btn sm" data-make>Make admin</button><button class="btn sm danger" data-del>Delete</button>') + '</div></li>';
@@ -414,8 +414,36 @@ V.adminTabs.content = function (body, A) {
     '<label class="check"><input type="checkbox" data-tmdblang' + (s.tmdbLangs !== false ? ' checked' : '') + '><span>Use TMDB’s original language when a film’s or series’ language is only guessed</span></label>' +
     '<p class="dim small">When a provider only says “EN” for a whole category, or nothing at all, a Korean film in it counts as Korean, so profiles see the languages they chose. Not for cartoons and children’s titles (usually dubbed), multi-language copies, or a copy whose name says its language. Needs a TMDB key.</p>' +
     '<button class="btn primary" data-save-l>Save languages</button><div class="lang-stats dim small"></div></section>' +
+    // Adult (18+) content left out for everyone (lib/catalog.js isAdult; the counts come with /api/admin/groups).
+    '<section class="card-sec adm-adult"><h2>Adult content</h2><label class="check"><input type="checkbox" data-noadult' + (s.noAdult ? ' checked' : '') + '><span>Leave out adult (18+) content for everyone <small class="dim">— porn channels and films are taken out of the catalogue altogether: no profile sees them (the admin neither), they can’t be searched for or played, and “Allow adult (18+) groups” on a profile no longer does anything.</small></span></label><p class="dim small adult-stats"></p></section>' +
     '<section class="card-sec"><h2>Hidden categories</h2><p class="dim">Hidden for everyone (the admin too). Tick to hide.</p><input class="input" type="search" data-gf placeholder="Filter categories"><div class="groups-adm"><div class="spinner"></div></div><button class="btn primary" data-save-g>Save hidden categories</button></section>';
+  // What the lists hold that counts as adult, by the providers' own categories (so a missed one can be spotted).
+  var adultEl = V.$('.adult-stats', body), adultTries = 0;
+  var adultNote = function (a) {
+    if (!a) return;
+    var on = !!S.admin.settings.noAdult;
+    var gs = a.groups || [];
+    var names = gs.slice(0, 8).map(function (x) { return V.esc(x[0]) + ' (' + Number(x[1]).toLocaleString() + ')'; }).join(', ') + (gs.length > 8 ? ' and ' + (gs.length - 8) + ' more' : '');
+    var miss = ' Something adult still showing? Tick its category under Hidden categories below.';
+    if (!!a.off !== on) adultEl.innerHTML = 'The catalogue is being rebuilt — with big lists that takes a minute or two.';
+    else if (!a.n) adultEl.innerHTML = 'Nothing in your lists counts as adult content right now.' + (on ? miss : '');
+    else adultEl.innerHTML = (on ? 'Left out: ' : 'In your lists: ') + Number(a.n).toLocaleString() + (a.n === 1 ? ' adult entry' : ' adult entries') + (names ? ' — ' + names : '') + '.' + (on ? miss : ' Only profiles allowed adult groups see them now.');
+  };
+  // (After a change: look again until the rebuilt catalogue is the one in use, while this page is still open.)
+  var adultWait = function () {
+    if (!document.body.contains(adultEl) || ++adultTries > 120) return;
+    V.api('/api/admin/groups').then(function (g) {
+      if (!document.body.contains(adultEl)) return;
+      adultNote(g.adult);
+      if (g.adult && !!g.adult.off !== !!S.admin.settings.noAdult) setTimeout(adultWait, 5000);
+    }).catch(function () { setTimeout(adultWait, 5000); });
+  };
+  V.$('[data-noadult]', body).onchange = function (e) {
+    var box = e.target, on = box.checked;
+    V.adminSave({ noAdult: on }, on ? 'Saved — adult content is being taken out' : 'Saved — the catalogue is being rebuilt').then(function () { adultTries = 0; adultNote({ off: !on }); setTimeout(adultWait, 3000); }).catch(function () { box.checked = !on; });
+  };
   V.api('/api/admin/groups').then(function (g) {
+    adultNote(g.adult);
     var hidden = new Set(s.hiddenGroups || []);
     var langs = Object.keys(g.langs).sort(function (a, b) { return g.langs[b] - g.langs[a]; });
     V.$('.lang-stats', body).innerHTML = 'In your lists: ' + langs.slice(0, 20).map(function (l) { return (l === '?' ? 'unknown' : V.esc(V.langName(l))) + ' ' + g.langs[l].toLocaleString(); }).join(' · ');

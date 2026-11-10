@@ -99,12 +99,17 @@ V.boot = function () {
   V.on('signedout', function () { location.replace('/'); });
   // A new catalogue on the server: loaded again. (The light one — a TV, a console — is loaded whole each time, so not
   // while something's playing, and not more than every 20 minutes: when you're next moving between pages.)
-  var staleReload = function () { S.catStale = false; S.catLoadedAt = Date.now(); V.loadCatalog().then(function () { V.renderShell(); if (!V.watch.it || V.watch.mini) V.router.refresh(); }).catch(function () {}); };
+  var staleReload = function () { S.catStale = false; S.catNow = false; S.catLoadedAt = Date.now(); V.loadCatalog().then(function () { V.renderShell(); if (!V.watch.it || V.watch.mini) V.router.refresh(); }).catch(function () {}); };
+  // (`now`: the admin took something out for everyone — adult content — so it isn't left for later, only until
+  // what's playing is closed.)
+  var staleNow = false;
+  V.on('catalog-stale', function (d) { if (d && d.now) staleNow = true; });
   V.on('catalog-stale', V.debounce(function () {
-    if (S.catLite && ((V.watch.it && !V.watch.mini) || Date.now() - (S.catLoadedAt || 0) < 20 * 60e3)) { S.catStale = true; return; }
+    if (staleNow) { staleNow = false; S.catNow = true; }
+    if (S.catLite && ((V.watch.it && !V.watch.mini) || (!S.catNow && Date.now() - (S.catLoadedAt || 0) < 20 * 60e3))) { S.catStale = true; return; }
     staleReload();
   }, 4000));
-  V.on('route', function () { if (S.catStale && !(V.watch.it && !V.watch.mini) && Date.now() - (S.catLoadedAt || 0) >= 20 * 60e3) setTimeout(staleReload, 1500); });
+  V.on('route', function () { if (S.catStale && !(V.watch.it && !V.watch.mini) && (S.catNow || Date.now() - (S.catLoadedAt || 0) >= 20 * 60e3)) setTimeout(staleReload, 1500); });
   V.on('profiles', function () { if (!S.profile) V.api('/api/boot').then(function (b) { S.boot = b; if (!V.$('#profiles').hidden) V.showProfiles(); }); });
   V.on('settings', function () { V.renderShell(); V.applyBrand(); });
   V.on('data', function (f) { if (f === 'list' || f === 'favs' || f === '*') { if (document.body.dataset.page === 'mine') V.router.refresh(); } });
