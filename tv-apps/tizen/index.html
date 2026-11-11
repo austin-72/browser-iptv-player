@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPTV Player</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main id="ask" hidden>
+  <h1>Where is your server?</h1>
+  <p>The address you open it at in a browser, for example <b>http://192.168.1.20:8080</b> or <b>https://tv.example.com</b></p>
+  <div class="row"><input id="addr" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.20:8080" aria-label="Server address"><button id="go">Open</button></div>
+  <p id="err" role="alert"></p>
+</main>
+<main id="wait" hidden>
+  <h1>Opening <span id="where"></span>…</h1>
+  <p>Press <b>Up</b> on the remote now to change the address.</p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

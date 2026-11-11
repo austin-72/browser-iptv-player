@@ -1,0 +1,4 @@
+// Android TV / Fire TV app: one screen with a WebView that opens your server. No libraries.
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}

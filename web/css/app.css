@@ -26,7 +26,7 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
   :root { --top: 56px; --tab: calc(60px + env(safe-area-inset-bottom)); }
   .mainnav { display: none; }
   .brand { margin-right: auto; }
-  .brand-name { font-size: 1.1rem; max-width: 12rem; }
+  .brand-name { font-size: 1.17rem; max-width: 12rem; } /* (18.7px bold: big enough that the accent colour on the dark bar counts as readable) */
   /* (Search and Messages sit in the top bar on phones; the tab bar has the sections.) */
   #tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; height: var(--tab); padding-bottom: env(safe-area-inset-bottom); background: var(--bg2); border-top: 1px solid var(--line); }
   #tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; color: var(--dim); font-size: .7rem; font-weight: 600; position: relative; }

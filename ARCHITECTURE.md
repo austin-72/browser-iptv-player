@@ -73,6 +73,10 @@ with a `.bak` of the last good one): `accounts.json`, `settings.json`, `lists.js
 thrown away (`cache/`, `tmp/`, `catalog.snapshot`). A backup (Admin → Backups) is all of it except what can be
 downloaded again.
 
+## TV apps (`tv-apps/`)
+
+Three thin wrappers — Android TV / Fire TV, Samsung (Tizen), LG (webOS) — that remember the server's address and open it full screen. None holds any of the app: they load the pages above. Their one link to this code is the way out: `V.leaveApp` in `web/js/tv.js` calls whichever wrapper it is in. See `tv-apps/README.md`.
+
 ## Working on it
 
 ```bash

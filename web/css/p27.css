@@ -181,3 +181,11 @@ body.off-themes [data-area~="themes"] { display: none !important; }
 .os-gen:empty { display: none; }
 .os-gen-h { font-size: 1rem; margin: 0 0 .4rem; }
 .os-gen-st { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+
+/* Light looks (Daylight, Paper, Arctic…): the status colours were chosen for dark backgrounds and came out at about
+   2:1 on white — notes, "online", failures and warnings in tables were hard to read. Darker ones there (5:1 or
+   better); the player and the pictures behind a title stay dark whatever the look, so they keep the bright ones. */
+html.theme-light { --ok: #0e6b35; --warn: #7d4e00; --danger: #b01e24; }
+html.theme-light #player-layer, html.theme-light .hero, html.theme-light .tp-hero { --ok: #3ccf7a; --warn: #f5a524; --danger: #ff5a5f; }
+/* A table wider than a phone scrolls sideways: reachable with the keyboard too (web/js/adminstats.js, adminconc.js). */
+.tbl-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

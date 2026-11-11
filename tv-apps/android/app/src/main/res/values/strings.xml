@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IPTV Player</string>
+    <string name="ask_title">Where is your server?</string>
+    <string name="ask_message">The address you open it at in a browser, for example http://192.168.1.20:8080 or https://tv.example.com</string>
+    <string name="ask_hint">http://192.168.1.20:8080</string>
+    <string name="ask_open">Open</string>
+    <string name="ask_leave">Leave</string>
+    <string name="err_address">That doesn’t look like an address. It starts with http:// or https://</string>
+    <string name="err_unreachable">Nothing answered at %1$s. Check the address, and that this device is on the same network as the server.</string>
+</resources>

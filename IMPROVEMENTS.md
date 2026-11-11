@@ -35,7 +35,7 @@ This is the list of improvements planned for version 2, and what became of each.
 16. ✅ Netflix-style "Who's watching?" screen.
 17. ✅ 142 original profile pictures in 7 categories.
 18. ✅ Unlimited profiles.
-19. ✅ The first profile is the only admin and must have a PIN; admin can be handed over.
+19. ✅ The first profile is the only admin and must have a PIN; admin can be handed over. (Since 2.2 the admin can also make another profile a *manager*: channels, list refreshes, error reports and screen-time requests, nothing else.)
 20. ✅ The admin can manage, restrict or delete profiles and reset PINs.
 21. ✅ The admin can choose who may add profiles.
 22. ✅ Optional PIN per profile, remembered for 30 min per device, with a lockout after wrong guesses.

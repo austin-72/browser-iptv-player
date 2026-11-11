@@ -13,7 +13,7 @@
 .bms.bare li span:empty { display: none; }
 
 /* ---- Live TV: what's on next is labelled as such */
-.chr-nl { font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .7; margin-right: .2rem; }
+.chr-nl { font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .88; margin-right: .2rem; } /* (.7 left it under the 4.5:1 that small text needs) */
 
 /* ---- the guide on phones: the colour key on one line (it scrolls), so the grid starts higher */
 @media (max-width: 600px) {

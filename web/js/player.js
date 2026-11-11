@@ -2451,9 +2451,9 @@ PP._openMenu = function (page, kind) {
   var radio = this._menuPage !== 'main' && this._menuPage !== 'adjust';
   var from = (pages[parent] || pages.main || []).filter(function (x) { return x.page === page; })[0];
   var title = this._menuPage === 'main' ? (kind === 'cc' ? 'Subtitles & audio' : 'Settings') : from ? from.label : 'Settings';
-  var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '" aria-label="Back">' + V.icon('back') + '</button>' : '';
+  var back = this._menuPage !== 'main' ? '<button class="mi back" data-back="' + parent + '" role="menuitem" aria-label="Back">' + V.icon('back') + '</button>' : '';
   var head = '<div class="mh">' + back + '<span class="mh-t">' + (from && radio ? '<span class="mh-ic">' + V.icon(menuIcon(from)) + '</span>' : '') + V.esc(title) + '</span>' +
-    '<button class="mh-x" data-close aria-label="Close" title="Close">' + V.icon('x') + '</button></div>';
+    '<button class="mh-x" data-close role="menuitem" aria-label="Close" title="Close">' + V.icon('x') + '</button></div>';
   // A line that does nothing when pressed (Audio sync's "Sound in sync", say) just says how things are.
   var inert = function (it) { return it.inert ? ' data-inert' : ''; };
   var row = function (it, i) {

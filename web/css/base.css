@@ -108,7 +108,7 @@ input[type=color] { width: 3rem; height: 2.4rem; border: 1px solid var(--line); 
 .chip.on, .chip[aria-pressed=true] { background: var(--text); color: var(--bg); border-color: var(--text); }
 .chip.sm { padding: .12rem .55rem; font-size: .78rem; }
 .chip.ok { color: var(--ok); }
-.chip.pri { color: var(--accent); border-color: var(--accent); }
+.chip.pri { color: var(--text); border-color: var(--accent); } /* (the accent as small text on a card is too faint to read: the border carries it) */
 .chip small { opacity: .8; }
 .chip .x { border: 0; background: none; padding: 0; display: inline-flex; color: inherit; }
 .chip .x .i { width: .9rem; height: .9rem; }

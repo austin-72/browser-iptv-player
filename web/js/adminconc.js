@@ -37,7 +37,7 @@
       '<p class="dim">Streams each provider served at the same time, counted every minute (each device and multiview tile, a watch party once, recordings too). Compare it with each account’s connection limit to see when you’re running out.</p>';
     if (!anyData) html += '<p class="dim">Counting started ' + esc(new Date(d.since).toLocaleString()) + ' — check back after people have watched for a while.</p>';
     // The table: every provider.
-    html += '<div class="tbl-wrap"><table class="st-table cc-table"><thead><tr><th>Provider</th><th class="r">Now</th><th class="r hide-sm">Limit</th><th class="r">Busiest</th><th class="r hide-sm">On average</th><th class="r">At the limit</th><th class="r">Turned away</th></tr></thead><tbody>' +
+    html += '<div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table cc-table"><thead><tr><th>Provider</th><th class="r">Now</th><th class="r hide-sm">Limit</th><th class="r">Busiest</th><th class="r hide-sm">On average</th><th class="r">At the limit</th><th class="r">Turned away</th></tr></thead><tbody>' +
       ps.map(function (p) {
         var full = p.limit && p.fullMins;
         var pctFull = p.mins ? p.fullMins / p.mins : 0;
@@ -54,7 +54,7 @@
     // The stream relay: the times it couldn't keep up with the films being watched (relay 5).
     if (d.strain && d.strain.length) {
       var mbit = function (b) { return b > 0 ? (Math.round(b * 8 / 1e5) / 10) + ' Mbit/s' : '?'; };
-      html += '<h3>When the stream relay couldn’t keep up</h3><div class="tbl-wrap"><table class="st-table cc-strain"><thead><tr><th>When</th><th>Provider</th><th class="r">Watching</th><th class="r">Connections</th><th class="r hide-sm">Least ready</th><th class="r hide-sm">Needed / got</th></tr></thead><tbody>' +
+      html += '<h3>When the stream relay couldn’t keep up</h3><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table cc-strain"><thead><tr><th>When</th><th>Provider</th><th class="r">Watching</th><th class="r">Connections</th><th class="r hide-sm">Least ready</th><th class="r hide-sm">Needed / got</th></tr></thead><tbody>' +
         d.strain.map(function (e) {
           return '<tr><td>' + esc(when(e.t)) + '</td><td class="truncate">' + esc(e.name) + '</td><td class="r num">' + e.viewers + (e.stalled ? '<br><small class="dim">' + e.stalled + ' waiting to start</small>' : '') + '</td>' +
             '<td class="r num">' + e.runs + (e.budget ? ' of ' + e.budget : '') + '</td><td class="r num hide-sm">' + (e.least >= 0 ? (e.least < 60 ? e.least + ' s' : Math.round(e.least / 60) + ' min') : '–') + '</td>' +
@@ -97,12 +97,12 @@
         var g = p.grid[day][h], peak = g[0], av = g[1], full = g[2];
         var a = peak ? 0.18 + 0.82 * Math.min(1, peak / top) : 0;
         var tip = DAYS[day] + ' ' + hourName(h) + ': ' + (peak ? 'up to ' + peak + ' at once, ' + avg(av) + ' on average' + (full ? ', at the limit for ' + dur(full) : '') : 'nobody');
-        cells += '<div class="cc-c' + (full ? ' full' : '') + '" style="' + (peak ? '--a:' + a.toFixed(2) : '') + '" title="' + esc(tip) + '" aria-label="' + esc(tip) + '"></div>';
+        cells += '<div class="cc-c' + (full ? ' full' : '') + '" style="' + (peak ? '--a:' + a.toFixed(2) : '') + '" title="' + esc(tip) + '" role="img" aria-label="' + esc(tip) + '"></div>';
       }
     }
     var hours = '<div></div>';
     for (var hh = 0; hh < 24; hh++) hours += '<div class="cc-gh">' + (hh % 6 === 0 ? esc(hourName(hh)) : '') + '</div>';
-    return '<h4 class="cc-sub">When it’s busiest <span class="dim">(your time; outlined: at the limit)</span></h4><div class="tbl-wrap"><div class="cc-grid">' + hours + cells + '</div></div>';
+    return '<h4 class="cc-sub">When it’s busiest <span class="dim">(your time; outlined: at the limit)</span></h4><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><div class="cc-grid">' + hours + cells + '</div></div>';
   }
 
   /** Bars: the most at once per hour (or per day for long periods); a line for the average; the limit dashed. */

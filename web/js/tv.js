@@ -99,6 +99,18 @@
     var q = rectOf(el);
     last = { x: q.left + q.width / 2, y: q.top + q.height / 2 + window.pageYOffset, hash: location.hash, root: scope() };
   }, true);
+  /**
+   * The TV apps in tv-apps/ are this same site opened inside a thin wrapper. Each gives the page a way out:
+   * Android TV / Fire TV: TvApp.exit() (its own bridge); Samsung: tizen.application; LG: PalmSystem.
+   * (A TV's ordinary browser has none of them, and there Back at Home does nothing, as before.)
+   */
+  var leaveAt = 0;
+  V.inTvApp = function () { return !!((window.TvApp && window.TvApp.exit) || (window.tizen && window.tizen.application) || (window.PalmSystem && window.PalmSystem.platformBack)); };
+  V.leaveApp = function () {
+    try { if (window.TvApp && window.TvApp.exit) return window.TvApp.exit(); } catch (e) {}
+    try { if (window.tizen && window.tizen.application) return window.tizen.application.getCurrentApplication().exit(); } catch (e2) {}
+    try { if (window.PalmSystem && window.PalmSystem.platformBack) return window.PalmSystem.platformBack(); } catch (e3) {}
+  };
   V.reduceMotion = function () { return document.documentElement.classList.contains('reduce-motion') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); };
   document.addEventListener('keydown', function (e) {
     var k = e.key;
@@ -119,6 +131,11 @@
       e.preventDefault();
       // (Opened straight on this page, with nothing of the app's to go back to: Home, rather than leaving the app.)
       if (location.hash && location.hash !== '#/home') V.router.back('#/home');
+      // At Home inside one of the TV apps (tv-apps/): Back twice leaves, as TV apps do.
+      else if (V.inTvApp()) {
+        if (Date.now() - leaveAt < 2500) V.leaveApp();
+        else { leaveAt = Date.now(); V.toast('Press Back again to leave', { ms: 2400 }); }
+      }
       return;
     }
     if (k === '/' && !t.closest('input, textarea, select, [contenteditable]') && S.profile && V.$('#player-layer').hidden !== false) { e.preventDefault(); V.router.go('#/search'); return; }

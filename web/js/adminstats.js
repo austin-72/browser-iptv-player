@@ -84,7 +84,7 @@
         (showTable ? dayTable(d) : '') + '</section>';
 
       // Routes
-      html += '<section class="card-sec"><h2>Routes</h2><div class="tbl-wrap"><table class="st-table"><thead><tr><th>Route</th><th class="r">Plays</th><th class="r">Watch time</th><th class="r">Share</th></tr></thead><tbody>' +
+      html += '<section class="card-sec"><h2>Routes</h2><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table"><thead><tr><th>Route</th><th class="r">Plays</th><th class="r">Watch time</th><th class="r">Share</th></tr></thead><tbody>' +
         ROUTES.filter(function (r) { return plays[r[0]] || secs[r[0]]; }).map(function (r) {
           var gi = GROUPS.map(function (g) { return g.id; }).indexOf(r[3]) + 1;
           return '<tr><td><i class="sw s' + gi + '"></i><b>' + V.esc(r[1]) + '</b><br><small class="dim">' + V.esc(r[2]) + '</small></td><td class="r num">' + (plays[r[0]] || 0).toLocaleString() + '</td><td class="r num">' + dur(secs[r[0]]) + '</td><td class="r num">' + pct(secs[r[0]] || 0, allSecs) + '</td></tr>';
@@ -97,7 +97,7 @@
         var slowHosts = (d.hosts || []).filter(function (h) { return h.starts >= 3; }).sort(function (a, b) { return b.startMs / b.starts - a.startMs / a.starts; }).slice(0, 12);
         html += '<section class="card-sec"><h2>Time to start</h2><p>From pressing Play to the picture: <b>' + secOf(stt.ms, stt.n) + '</b> on average over ' + stt.n.toLocaleString() + ' plays. ' +
           pct(stt.n - (stt.s5 || 0), stt.n) + ' started within 5 seconds; ' + (stt.s15 || 0).toLocaleString() + ' took over 15 seconds' + (stt.s30 ? ', ' + stt.s30.toLocaleString() + ' over 30' : '') + '.</p>' +
-          (slowHosts.length ? '<div class="tbl-wrap"><table class="st-table"><thead><tr><th>Provider</th><th class="r">Plays</th><th class="r">Average start</th><th class="r">Over 15 s</th></tr></thead><tbody>' +
+          (slowHosts.length ? '<div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table"><thead><tr><th>Provider</th><th class="r">Plays</th><th class="r">Average start</th><th class="r">Over 15 s</th></tr></thead><tbody>' +
             slowHosts.map(function (h) { return '<tr><td>' + V.esc(h.name) + '</td><td class="r num">' + h.starts.toLocaleString() + '</td><td class="r num">' + secOf(h.startMs, h.starts) + '</td><td class="r num">' + (h.slow || 0).toLocaleString() + '</td></tr>'; }).join('') + '</tbody></table></div>' : '') +
           (stt.cn ? '<p>Where a converted start’s time goes (average of ' + stt.cn.toLocaleString() + '): <b>' + secOf(stt.c_pre || 0, stt.cn) + '</b> before the server is asked (finding the copy, trying to play it directly) · <b>' + secOf(stt.c_look || 0, stt.cn) + '</b> the server looking inside the file · <b>' + secOf(stt.c_conv || 0, stt.cn) + '</b> getting the conversion going · <b>' + secOf(stt.c_net || 0, stt.cn) + '</b> the answer travelling back · <b>' + secOf(stt.c_play || 0, stt.cn) + '</b> the device loading and showing the first picture.</p>' : '') +
           '<p class="dim small">Slow starts are also in Admin → Error reports (as “Slow to start”), with what each step took.</p></section>';
@@ -106,21 +106,21 @@
       // Why through the server
       var reasons = Object.keys(d.reasons).sort(function (a, b) { return d.reasons[b] - d.reasons[a]; });
       if (reasons.length) {
-        html += '<section class="card-sec"><h2>Why streams went through this server</h2><div class="tbl-wrap"><table class="st-table"><thead><tr><th>Reason</th><th class="r">Plays</th></tr></thead><tbody>' +
+        html += '<section class="card-sec"><h2>Why streams went through this server</h2><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table"><thead><tr><th>Reason</th><th class="r">Plays</th></tr></thead><tbody>' +
           reasons.map(function (k) { return '<tr><td>' + V.esc(REASONS[k] || k) + '</td><td class="r num">' + d.reasons[k].toLocaleString() + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           (d.reasons.blocked || d.reasons['direct-failed'] ? '<p class="dim small">Viewers on a computer can make these direct with the direct-streams helper (Settings → Direct streaming).</p>' : '') +
           (d.reasons.https ? '<p class="dim small">Opening the site by its home address (<code>http://</code> + this computer’s IP) at home lets these go direct.</p>' : '') + '</section>';
       }
 
       // Data
-      html += '<section class="card-sec"><h2>Data sent by this server</h2><div class="tbl-wrap"><table class="st-table"><thead><tr><th>What</th><th class="r">Data</th><th class="r">Share</th></tr></thead><tbody>' +
+      html += '<section class="card-sec"><h2>Data sent by this server</h2><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table"><thead><tr><th>What</th><th class="r">Data</th><th class="r">Share</th></tr></thead><tbody>' +
         BYTES.filter(function (b) { return d.bytes[b[0]]; }).map(function (b) { return '<tr><td>' + V.esc(b[1]) + '</td><td class="r num">' + size(d.bytes[b[0]]) + '</td><td class="r num">' + pct(d.bytes[b[0]], served) + '</td></tr>'; }).join('') +
         '<tr class="tot"><td>Total</td><td class="r num">' + size(served) + '</td><td></td></tr></tbody></table></div><p class="dim small">Video that went straight from the provider never touches this server, so it isn’t counted here.</p></section>';
 
       // Breakdowns
       var breakdown = function (title, rows, first, note) {
         if (!rows.length) return '';
-        return '<section class="card-sec"><h2>' + title + '</h2><div class="tbl-wrap"><table class="st-table"><thead><tr><th>' + first + '</th><th class="r hide-sm">Plays</th><th class="r">Watch time</th><th class="r">Direct</th></tr></thead><tbody>' +
+        return '<section class="card-sec"><h2>' + title + '</h2><div class="tbl-wrap" tabindex="0" role="group" aria-label="Table (scrolls sideways when it doesn’t fit)"><table class="st-table"><thead><tr><th>' + first + '</th><th class="r hide-sm">Plays</th><th class="r">Watch time</th><th class="r">Direct</th></tr></thead><tbody>' +
           rows.map(function (r) {
             var share = r.secs ? r.dsecs / r.secs : r.plays ? r.direct / r.plays : 0;
             return '<tr><td class="truncate">' + V.esc(r.name) + '</td><td class="r num hide-sm">' + r.plays.toLocaleString() + '</td><td class="r num">' + dur(r.secs) + '</td><td class="r num"><span class="st-bar" aria-hidden="true"><i style="width:' + Math.round(share * 100) + '%"></i></span>' + Math.round(share * 100) + '%</td></tr>';

@@ -112,7 +112,7 @@ Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./
 docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/browser-iptv-player:latest
 ```
 
-Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.1.0` stays on that version.
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.2.0` stays on that version.
 </details>
 
 <details>
@@ -229,12 +229,14 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Your remote, your buttons:** Settings → *Remote and keyboard* sets what the coloured buttons, number keys, Menu/Info, media keys and a few spare keyboard keys do (guide, Live TV, last channel, subtitles, sleep timer, multiview, a favourite channel…). A *Press a button* tester shows what any button is called. Each device keeps its own; your profile's default follows you.
 - **Quick launcher:** <kbd>Ctrl</kbd>+<kbd>K</kbd> (<kbd>⌘</kbd>+<kbd>K</kbd> on a Mac), a held OK on Search, a remote button, the profile menu or the button on the Search page. Type to jump to any page, admin tab or setting, switch profile, play a channel ("ch 101"), open a title, or do something ("sleep timer 30 min"). Typos are forgiven and recent picks come first.
 - Installable as an app (PWA). Media keys and lock-screen controls work, and the screen stays on while playing.
+- **An icon on the TV's home screen** (optional): [`tv-apps/`](tv-apps/README.md) has three thin apps — Android TV / Fire TV, Samsung (Tizen) and LG (webOS) — that ask once for your server's address and open it full screen, with the remote's Back button handled. They are wrappers around the same pages, not second players, and haven't been tried on real TVs yet. There is no Roku app: Roku doesn't run web pages.
 
 ### Look and accessibility
 
 <img src="docs/screenshots/themes.jpg" alt="The Look settings: 25 themes, including dark, OLED black, high contrast and light themes" width="560">
 
 - 25 themes (dark, OLED black, high contrast, light and more), or match the device.
+- **Checked for accessibility:** 47 pages and states (every main page, every Admin section, a title, the player and its menu, sign-in and the profile picker) are run through the axe checker against WCAG 2.2 A and AA in dark and light looks, on a desktop, a phone and a TV layout, and come back clean. What that covers: names for every control, roles and states a screen reader can follow, contrast, and keyboard reach. What it can't: how it actually sounds in a screen reader, which hasn't been tested with one.
 - **Posters with a little life:** a poster settles in with a small rock when its picture arrives, and the posters in a row lean gently as you scroll it left or right, then nod back when it stops. Settings → *Reduce motion* (or the system's reduced-motion setting) turns it off.
 - **A moving background:** soft glows in the theme's colours drift slowly behind the posters, taking a minute or more to cross the screen. It's turned off on the player and the guide. Settings → Look → *Moving background* switches it off, and *Reduce motion* holds it still. TVs, games consoles and very small devices get neither the background nor the poster animations unless you turn them on there, so they stay quick.
 - **Light catalogue for TVs and games consoles:** a PlayStation's browser runs out of memory on a big catalogue and the page just dies. So TVs, consoles, and any device where loading didn't finish twice in a row get a lighter one: the same titles at about half the size, sent in small pieces. Films' stream addresses are fetched when you press play, and nothing is kept on the device between visits. Settings → Look → *Light catalogue on this device* turns it on or off for that device. On these devices a catalogue update doesn't reload while something is playing, and reloads at most every 20 minutes.

@@ -1,0 +1,23 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.iptvplayer.tv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.iptvplayer.tv'
+        minSdk 22        // Fire OS 5 and Android TV 5.1 onwards
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lint {
+        abortOnError false
+    }
+}
