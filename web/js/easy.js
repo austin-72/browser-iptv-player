@@ -83,7 +83,7 @@
     var link = remoteLink();
     return V.dialog({
       title: 'Use your phone as a remote',
-      body: '<div class="pr-dlg"><img class="pr-qr" alt="" src="/api/qr?text=' + encodeURIComponent(link) + '" onerror="this.remove()">' +
+      body: '<div class="pr-dlg"><img class="pr-qr" alt="" src="/api/qr?text=' + encodeURIComponent(link) + '" data-rm>' +
         '<div class="pr-txt"><ol class="pr-steps"><li>Point your phone’s camera at the code' + ' <span class="dim">(or open <b>' + V.esc(location.host) + '</b> on it)</span>.</li>' +
         '<li>Sign in and pick <b>' + V.esc(S.profile.name) + '</b>.</li>' +
         '<li>Your phone shows the remote for <b>' + V.esc(V.device.name || 'this TV') + '</b>: play, pause, skip, channels, subtitles and volume. Anything you pick on the phone can play here too.</li></ol>' +

@@ -1,7 +1,7 @@
 /* Service worker: keeps the app itself available offline (so downloads can be watched without a connection).
    API calls always go to the network. */
 const CACHE = 'app-__VERSION__';
-const SHELL = ['/', '/app.js', '/app.css', '/vendor/hls.min.js', '/vendor/mpegts.js', '/brand-icon.svg', '/manifest.webmanifest'];
+const SHELL = ['/', '/app.js', '/app.css', '/early.js', '/vendor/hls.min.js', '/vendor/mpegts.js', '/brand-icon.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map((u) => fetch(u, { credentials: 'same-origin' }).then((r) => (r.ok && !r.redirected ? c.put(u, r) : null)).catch(() => null)))).then(() => self.skipWaiting()));
 });

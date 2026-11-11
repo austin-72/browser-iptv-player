@@ -235,7 +235,9 @@
     var t = e.target;
     // A script or stylesheet that didn't load (not pictures: posters are often missing at the provider).
     if (t && t !== window && t.tagName) {
-      if (/^(SCRIPT|LINK)$/.test(t.tagName)) report('resource', { message: t.tagName.toLowerCase() + ' didn’t load: ' + scrub(t.src || t.href || '') });
+      // (Not a script the proxy in front added to the page — Cloudflare's analytics, its bot check: the page's
+      // security policy stops those, see below.)
+      if (/^(SCRIPT|LINK)$/.test(t.tagName) && !/cloudflareinsights\.com|\/cdn-cgi\//i.test(t.src || t.href || '')) report('resource', { message: t.tagName.toLowerCase() + ' didn’t load: ' + scrub(t.src || t.href || '') });
       return;
     }
     var err = e.error;
@@ -245,6 +247,24 @@
     if (err && err instanceof Error) report('error', err);
     else report('error', { message: e.message || 'Unknown error', source: { file: e.filename, line: e.lineno, col: e.colno } });
   }, true);
+  // Something the page's security policy stopped (server.js CSP) — it shouldn't happen: reported, so a part of the app
+  // the policy doesn't know about is found out rather than quietly not working. (Not a browser extension's doing, and
+  // only where it came from, never a whole address.)
+  var cspSeen = 0;
+  document.addEventListener('securitypolicyviolation', function (e) {
+    var from = String(e.sourceFile || '');
+    if (/^(chrome|moz|safari-web|ms-browser)-extension:/i.test(from) || cspSeen >= 5) return;
+    var what = String(e.blockedURI || '');
+    // (Nor a proxy in front adding scripts of its own to the page — Cloudflare's analytics and bot checks do: those
+    // are stopped too, which the app doesn't mind. Noted, not reported.)
+    var proxys = /cloudflareinsights\.com|\/cdn-cgi\//i.test(what);
+    if (!proxys && what === 'inline') { try { var ss = document.scripts, si; for (si = 0; si < ss.length; si++) if (!ss[si].src && /cdn-cgi|__CF\$/.test(ss[si].textContent || '')) proxys = true; } catch (x) {} }
+    if (proxys) { crumb('log', 'security policy stopped a script the proxy in front added'); return; }
+    var m = /^(https?|wss?):\/\/[^/?#]+/i.exec(what);
+    what = m ? m[0] : what.slice(0, 20);
+    cspSeen++;
+    report('resource', { message: 'Stopped by the page’s security policy: ' + String(e.effectiveDirective || e.violatedDirective || '').slice(0, 40) + ' ' + what + (from ? ' (from ' + from.split(/[?#]/)[0].split('/').slice(-1)[0].slice(0, 40) + ':' + (e.lineNumber || 0) + ')' : '') });
+  });
   window.addEventListener('unhandledrejection', function (e) {
     var r = e.reason;
     if (r && (r.offline || r.proxy)) return; // (the server couldn't be reached, or the proxy in front of it answered: not a bug)

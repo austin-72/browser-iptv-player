@@ -401,10 +401,15 @@ V.loadScript = (function () {
 V.art = function (src, name, cls) {
   return '<div class="' + (cls || 'art') + '">' + (src ? '<img src="' + V.esc(src) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="' + V.esc(V.initials(name)) + '">' : '<span class="ini">' + V.esc(V.initials(name)) + '</span>') + '</div>';
 };
+// (A text box marked data-selall selects its text when it's entered: an address or key to copy.)
+document.addEventListener('focusin', function (e) { var t = e.target; if (t && t.hasAttribute && t.hasAttribute('data-selall') && t.select) { try { t.select(); } catch (x) {} } });
 // A picture that doesn't load: try the other source (TMDB ↔ provider), then a tinted tile with the title.
 document.addEventListener('error', function (e) {
   var img = e.target;
   if (!img || img.tagName !== 'IMG') return;
+  // (data-rm: taken out altogether. Marked that way, not with a handler written into the HTML: the page's security
+  // policy doesn't run those.)
+  if (img.hasAttribute('data-rm')) { if (img.parentNode) img.parentNode.removeChild(img); return; }
   // Any other picture that doesn't load (backdrops, episode stills): hide it rather than show a broken-image icon.
   if (img.dataset.fallback === undefined) { img.style.visibility = 'hidden'; img.setAttribute('data-hid', ''); return; }
   if (img.dataset.alt) { var a = img.dataset.alt; img.removeAttribute('data-alt'); img.src = a; return; }

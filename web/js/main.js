@@ -140,7 +140,9 @@ V.boot = function () {
     if (e.status === 401) return location.replace('/');
     if (e.offline) return V.offlineMode();
     V.$('#profiles').hidden = false;
-    V.$('#profiles').innerHTML = V.empty('Can’t reach the server', V.esc(e.message), '<button class="btn primary" onclick="location.reload()">Try again</button>');
+    V.$('#profiles').innerHTML = V.empty('Can’t reach the server', V.esc(e.message), '<button class="btn primary" data-reload>Try again</button>');
+    var again = V.$('#profiles [data-reload]');
+    if (again) again.onclick = function () { location.reload(); };
   }); };
   load();
 };

@@ -154,7 +154,7 @@
       var pct = it.t === 'movie' || it.t === 'episode' ? V.pctOf(it.k) : 0;
       var t = titleOf(it);
       return '<li class="q-row" data-k="' + V.esc(q.k) + '"><span class="q-n num">' + (i + 1) + '</span>' +
-        '<span class="q-slot"><span class="q-art ' + (wide ? 'wide' : 'tall') + '" style="--tint:' + V.tint(t) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '<span class="ini">' + V.esc(V.initials(t)) + '</span>') + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + Math.round(pct * 100) + '%"></i></span>' : '') + '</span></span>' +
+        '<span class="q-slot"><span class="q-art ' + (wide ? 'wide' : 'tall') + '" style="--tint:' + V.tint(t) + '">' + (img ? '<img src="' + V.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-rm>' : '<span class="ini">' + V.esc(V.initials(t)) + '</span>') + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + Math.round(pct * 100) + '%"></i></span>' : '') + '</span></span>' +
         '<span class="q-b"><b class="truncate">' + V.esc(t) + '</b><span class="dim small truncate">' + V.esc(subOf(it, q)) + '</span></span>' +
         '<span class="q-acts"><button class="icon-btn" data-q="play" aria-label="Play ' + V.esc(t) + '" title="Play now">' + V.icon('play') + '</button>' +
         '<button class="icon-btn" data-q="up" aria-label="Move ' + V.esc(t) + ' up" title="Move up"' + (i ? '' : ' disabled') + '>' + V.icon('next', 'q-up') + '</button>' +

@@ -1,0 +1,6 @@
+/* If the app can't start on this device (a browser too old to read it, a file that didn't load), tell the server: Admin → Error reports.
+   (A file of its own, not a script written into the page: the page's security policy only runs scripts that come from this server.) */
+(function(){var V0='';try{var me=document.currentScript||document.getElementsByTagName('script')[0];V0=(/[?&]v=([\w.-]+)/.exec((me&&me.src)||'')||[])[1]||''}catch(q){}
+var E=[];window.onerror=function(m,f,l,c,e){if(E.length<5)E.push({message:String(m),stack:(e&&e.stack)||'',source:{file:f,line:l,col:c}})};
+setTimeout(function(){if(window.V&&window.V._errorsReady)return;try{var r=[],i,e,x=new XMLHttpRequest();for(i=0;i<(E.length||1);i++){e=E[i]||{message:'The app didn\u2019t start in 30 seconds (no error was reported)'};r.push({kind:'startup',v:V0,message:e.message,stack:e.stack,source:e.source,page:location.hash,count:1,ctx:{ua:navigator.userAgent,screen:screen.width+'x'+screen.height,viewport:window.innerWidth+'x'+window.innerHeight,state:document.readyState},crumbs:[],extra:{appRan:!!window.V}})}
+x.open('POST','/api/client-errors');x.setRequestHeader('X-App','1');x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify({reports:r}))}catch(z){}},30000)})();

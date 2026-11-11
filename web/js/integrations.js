@@ -464,7 +464,7 @@
       focusBack(body, refocus);
       // A key or secret to copy (V.copy also works on plain-http addresses, where the clipboard API doesn't).
       var showSecret = function (title, intro, value, copy) {
-        return V.dialog({ title: title, body: (intro ? '<p>' + intro + '</p>' : '') + '<input class="input mono" readonly value="' + V.esc(value) + '" onfocus="this.select()">', actions: (copy ? [{ label: 'Copy', fn: function () { V.copy(value); return false; } }] : []).concat([{ label: 'Done', primary: true }]) });
+        return V.dialog({ title: title, body: (intro ? '<p>' + intro + '</p>' : '') + '<input class="input mono" readonly value="' + V.esc(value) + '" data-selall>', actions: (copy ? [{ label: 'Copy', fn: function () { V.copy(value); return false; } }] : []).concat([{ label: 'Done', primary: true }]) });
       };
       // One request per button at a time.
       var once = function (b, req) { if (b.disabled) return; b.disabled = true; req().catch(V.fail).then(function () { if (b.isConnected) b.disabled = false; }); };

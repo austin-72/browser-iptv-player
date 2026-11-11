@@ -246,7 +246,7 @@ V.drawCollection = function (box, it) {
         var x = p.k && V.entry(p.k);
         var cur = x && x.k === it.k;
         var pct = x ? V.pctOf(x.k) : 0;
-        var body = '<span class="cp-art" style="--tint:' + V.tint(p.title) + '">' + (p.poster || (x && x.i) ? '<img src="' + V.esc((x && x.i) || p.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + (pct >= 1 ? '<span class="cp-done">' + V.icon('check') + '</span>' : '') + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span>' +
+        var body = '<span class="cp-art" style="--tint:' + V.tint(p.title) + '">' + (p.poster || (x && x.i) ? '<img src="' + V.esc((x && x.i) || p.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-rm>' : '') + (pct >= 1 ? '<span class="cp-done">' + V.icon('check') + '</span>' : '') + (pct > 0 && pct < 1 ? '<span class="bar"><i style="width:' + pct * 100 + '%"></i></span>' : '') + '</span>' +
           '<span class="cp-n num">' + (i + 1) + '</span><span class="cp-t">' + V.esc(p.title) + '</span><span class="dim small">' + (p.year || (p.released ? '' : 'Coming soon')) + (x ? '' : (p.released ? ' · not in your lists' : '')) + '</span>';
         return '<li class="' + (x ? 'have' : 'missing') + (cur ? ' cur' : '') + '">' + (x ? '<a href="' + V.hrefOf(x) + '">' + body + '</a>' : '<div>' + body + '</div>') + '</li>';
       }).join('') + '</ol>';
@@ -263,7 +263,7 @@ V.fixDetails = function (it, d) {
     V.api('/api/item/' + encodeURIComponent(it.k) + '/matches' + (q ? '?q=' + encodeURIComponent(q) : '')).then(function (r) {
       if (!r.options.length) { list.innerHTML = '<p class="dim">Nothing found. Try another title below.</p>'; return; }
       list.innerHTML = r.options.map(function (o, i) {
-        return '<button class="fix-opt' + (o.current ? ' cur' : '') + '" data-i="' + i + '"><span class="fo-art">' + (o.poster ? '<img src="' + V.esc(o.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + '</span><span class="fo-b"><b>' + V.esc(o.title) + '</b> <span class="dim">' + (o.year || '') + ' · ' + (o.type === 'tv' ? 'Series' : 'Movie') + (o.current ? ' · shown now' : '') + '</span>' +
+        return '<button class="fix-opt' + (o.current ? ' cur' : '') + '" data-i="' + i + '"><span class="fo-art">' + (o.poster ? '<img src="' + V.esc(o.poster) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-rm>' : '') + '</span><span class="fo-b"><b>' + V.esc(o.title) + '</b> <span class="dim">' + (o.year || '') + ' · ' + (o.type === 'tv' ? 'Series' : 'Movie') + (o.current ? ' · shown now' : '') + '</span>' +
           (o.original && o.original !== o.title ? '<span class="dim small">' + V.esc(o.original) + '</span>' : '') + '<span class="small clamp3">' + V.esc(o.plot || 'No description.') + '</span></span></button>';
       }).join('');
       list.onclick = function (e) {

@@ -3131,7 +3131,7 @@ function restoreFiles(data) {
 }
 
 // ---- updates: new code dropped into the app folder (or uploaded here as a .zip) takes effect without a rebuild
-const CODE_FILES = /^(server\.js|package\.json|Dockerfile|docker-entrypoint\.sh|README\.md|IMPROVEMENTS\.md|LICENSE|defaults\.example\.json|\.dockerignore|(lib|web|public|extension|test)\/.+)$/;
+const CODE_FILES = /^(server\.js|package\.json|Dockerfile|docker-entrypoint\.sh|README\.md|IMPROVEMENTS\.md|VENDOR\.md|SECURITY\.md|LICENSE|defaults\.example\.json|\.dockerignore|(lib|web|public|extension|test)\/.+)$/;
 const inDocker = fs.existsSync('/.dockerenv');
 function codeSignature() {
   const h = crypto.createHash('sha1');
@@ -3337,6 +3337,32 @@ function appHtml() {
 }
 const LOGIN_HTML = () => fs.readFileSync(path.join(WEB, 'login.html'), 'utf8');
 
+/**
+ * What the pages may load and run — the backstop if a title, a channel name or a guide entry from a provider ever
+ * got written into a page unescaped: script only from this server (and Google's Cast library), never written into
+ * the page or its HTML. Pictures, video and requests go anywhere — that's the providers, and the browser plays
+ * straight from them. Workers from blob: addresses are hls.js's and mpegts.js's; WebAssembly is the in-browser
+ * converter's sound decoder; the frames are trailers. And no other site may show these pages in a frame.
+ * (web/index.html and web/login.html therefore carry no script of their own: web/early.js, web/login.js.)
+ */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval' blob: https://www.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  'img-src * data: blob:',
+  'media-src * data: blob:',
+  'connect-src * data: blob:',
+  "font-src 'self' data:",
+  "worker-src 'self' blob:",
+  "child-src 'self' blob: https://www.youtube-nocookie.com",
+  "frame-src 'self' https://www.youtube-nocookie.com",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
 // ---------------------------------------------------------------- server
 const HOSTNAME = os.hostname().toLowerCase();
 function hostAllowed(hostHeader) {
@@ -3363,6 +3389,7 @@ async function handle(req, res) {
     }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
+    if (cfg.csp) { res.setHeader('Content-Security-Policy', CSP); res.setHeader('X-Frame-Options', 'SAMEORIGIN'); }
     // Just started: the page loads straight away; what needs the catalogue waits for it to be ready.
     // (At most 40 s — with the catalogue's own wait, under 100 s in all: a huge catalogue can take longer after a restart than a proxy waits — Cloudflare gives up after
     // 100 s and the page gets its error page. "Starting up" instead, and the page asks again by itself.)
@@ -3468,12 +3495,15 @@ async function handle(req, res) {
     // Signed out: the sign-in page and a neutral icon are all there is.
     if (!ctx.sess) {
       if (pathname === '/favicon.ico' || pathname === '/icon.svg') return serveFile(req, res, path.join(PUBLIC, 'icon.svg'), { cache: 'max-age=86400' });
+      if (pathname === '/login.js') return serveFile(req, res, path.join(WEB, 'login.js'), { type: 'text/javascript; charset=utf-8' });
       if (pathname !== '/') { res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' }); return res.end(); }
       return sendText(res, 200, LOGIN_HTML(), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
     }
     const b = getBundle();
     if (pathname === '/app.js') return sendGz(req, res, b.js.raw, b.js.gz, 'text/javascript; charset=utf-8', b.js.etag);
     if (pathname === '/app.css') return sendGz(req, res, b.css.raw, b.css.gz, 'text/css; charset=utf-8', b.css.etag);
+    // (The page's two small scripts that used to be written into it: see CSP.)
+    if (pathname === '/early.js' || pathname === '/login.js') return serveFile(req, res, path.join(WEB, pathname.slice(1)), { type: 'text/javascript; charset=utf-8' });
     if (pathname === '/sw.js') return sendGz(req, res, b.sw.raw, b.sw.gz, 'text/javascript; charset=utf-8', b.sw.etag);
     if (pathname === '/manifest.webmanifest') {
       const s = settings();
