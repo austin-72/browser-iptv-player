@@ -72,7 +72,7 @@ test('a backup put back into an empty server brings everything back', { timeout:
     assert.strictEqual(r.status, 200);
     const backup = Buffer.from(await r.arrayBuffer());
     const inside = JSON.parse(zlib.gunzipSync(backup).toString('utf8'));
-    assert.strictEqual(inside.app, 'browser-iptv-player');
+    assert.strictEqual(inside.app, 'superstation-iptv');
     assert.ok(Object.keys(inside.files).some((f) => /accounts\.json$/.test(f)) && Object.keys(inside.files).some((f) => /settings\.json$/.test(f)));
     a.stop(); await a.exited();
 
@@ -91,7 +91,11 @@ test('a backup put back into an empty server brings everything back', { timeout:
     assert.strictEqual((await b.raw('POST', '/api/admin/restore', backup, { 'X-Admin-Pin': '1111' })).status, 403, 'nor with a wrong one');
     assert.strictEqual((await b.raw('POST', '/api/admin/update', Buffer.from('PK'), {})).status, 403, 'an update neither');
     assert.strictEqual((await b.req('GET', '/api/boot')).json.profiles.length, 1, 'nothing changed');
-    const put = await b.raw('POST', '/api/admin/restore', backup, { 'Content-Type': 'application/gzip', 'X-Admin-Pin': '0000' });
+    // (The one put back says it's from "browser-iptv-player", as every backup made before the project was renamed does:
+    // those are still taken. One from some other program isn't.)
+    const fromBefore = zlib.gzipSync(Buffer.from(JSON.stringify({ ...inside, app: 'browser-iptv-player' })));
+    assert.strictEqual((await b.raw('POST', '/api/admin/restore', zlib.gzipSync(Buffer.from(JSON.stringify({ ...inside, app: 'something-else' }))), { 'X-Admin-Pin': '0000' })).status, 400);
+    const put = await b.raw('POST', '/api/admin/restore', fromBefore, { 'Content-Type': 'application/gzip', 'X-Admin-Pin': '0000' });
     assert.strictEqual(put.status, 200, await put.text());
     assert.strictEqual(await b.exited(), 0, 'it restarts itself after a restore');
 

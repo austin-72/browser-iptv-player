@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "IPTV Player – Direct Streams",
+  "name": "Superstation IPTV – Direct Streams",
   "version": "1.0.0",
-  "description": "Lets your self-hosted IPTV Player play streams straight from the provider, even when the provider doesn't allow web players.",
+  "description": "Lets your self-hosted Superstation IPTV play streams straight from the provider, even when the provider doesn't allow web players.",
   "permissions": ["declarativeNetRequest", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "bg.js", "scripts": ["bg.js"] },

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Samsung (Tizen) TV app: opens your server's address. Tizen Studio writes its own package id into the two
      "AbCdEfGhIj" places when you create the project and sign it with your certificate: keep the ones it gives you. -->
-<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://example.org/IptvPlayer" version="1.0.0" viewmodes="maximized">
-  <tizen:application id="AbCdEfGhIj.IptvPlayer" package="AbCdEfGhIj" required_version="2.3"/>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://example.org/Superstation" version="1.0.0" viewmodes="maximized">
+  <tizen:application id="AbCdEfGhIj.Superstation" package="AbCdEfGhIj" required_version="2.3"/>
   <content src="index.html"/>
   <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
   <icon src="icon.png"/>
-  <name>IPTV Player</name>
+  <name>Superstation</name>
   <!-- The server's pages are opened inside the app, wherever the server is. -->
   <access origin="*" subdomains="true"/>
   <tizen:allow-navigation>*</tizen:allow-navigation>

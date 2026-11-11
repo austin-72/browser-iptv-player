@@ -32,7 +32,7 @@ async function pretendSd() {
       const send = (code, j) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(j)); };
       let j = null; try { j = JSON.parse(body); } catch {}
       if (p === '/token') {
-        if (!/browser-iptv-player/.test(req.headers['user-agent'] || '')) return send(400, { code: 1005, message: 'Unknown client' });
+        if (!/superstation-iptv/.test(req.headers['user-agent'] || '')) return send(400, { code: 1005, message: 'Unknown client' });
         if (!j || j.username !== 'viewer' || j.password !== sha1('the-right-password')) return send(400, { code: 4003, message: 'Invalid username or password.' });
         sd.token = 'tok-' + (++sd.n);
         return send(200, { code: 0, message: 'OK', token: sd.token, tokenExpires: Math.round(Date.now() / 1000) + 86400 });
@@ -74,7 +74,7 @@ test('Schedules Direct: one sign-in, a lineup’s listings, only what changed as
   try {
     const cred = { user: 'viewer', hash: SchedulesDirect.hash('the-right-password') };
     assert.match(cred.hash, /^[0-9a-f]{40}$/);
-    let sd = new SchedulesDirect({ dataDir: dir, base: pv.base, ua: 'browser-iptv-player/test' });
+    let sd = new SchedulesDirect({ dataDir: dir, base: pv.base, ua: 'superstation-iptv/test' });
     assert.deepStrictEqual(await sd.lineups(cred), [{ id: 'USA-OTA-90210', name: 'Local Over the Air Broadcast', transport: 'Antenna', location: '90210' }]);
 
     const g = await sd.guide(cred, 'USA-OTA-90210', { days: 2 });
@@ -92,7 +92,7 @@ test('Schedules Direct: one sign-in, a lineup’s listings, only what changed as
     assert.strictEqual(pv.programs, 4);
 
     // Again — after a restart too (the token and the details were kept): no sign-in, and only the one still waiting is asked for.
-    sd = new SchedulesDirect({ dataDir: dir, base: pv.base, ua: 'browser-iptv-player/test' });
+    sd = new SchedulesDirect({ dataDir: dir, base: pv.base, ua: 'superstation-iptv/test' });
     await sd.guide(cred, 'USA-OTA-90210', { days: 2 });
     assert.strictEqual(pv.count('POST /token'), 1, 'the token is kept for its day');
     assert.strictEqual(pv.programs, 5);

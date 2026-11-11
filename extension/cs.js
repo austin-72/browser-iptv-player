@@ -1,4 +1,4 @@
-// Runs on every page but only acts on the IPTV Player app (it carries <meta name="iptv-direct-streams">).
+// Runs on every page but only acts on the Superstation IPTV app (it carries <meta name="iptv-direct-streams">).
 (function () {
   if (!document.querySelector('meta[name="iptv-direct-streams"]')) return;
   var api = typeof browser !== 'undefined' ? browser : chrome;

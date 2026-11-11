@@ -1,4 +1,4 @@
-// Adds "Access-Control-Allow-Origin: *" to responses for requests made BY the IPTV Player app pages only,
+// Adds "Access-Control-Allow-Origin: *" to responses for requests made BY the Superstation IPTV app pages only,
 // so the app's web player can read streams from providers that don't allow web players. Nothing else is touched.
 var api = typeof browser !== 'undefined' ? browser : chrome;
 

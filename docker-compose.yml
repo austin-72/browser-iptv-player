@@ -2,7 +2,7 @@
 services:
   iptv:
     build: .
-    image: browser-iptv-player:latest
+    image: superstation-iptv:latest
     container_name: iptv
     restart: unless-stopped
     ports:

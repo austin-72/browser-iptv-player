@@ -1,5 +1,11 @@
-# Browser IPTV Player — Node.js + ffmpeg, nothing else.
+# Superstation IPTV — Node.js + ffmpeg, nothing else.
 FROM node:22-alpine
+
+# (What a registry shows beside the image.)
+LABEL org.opencontainers.image.title="Superstation IPTV" \
+      org.opencontainers.image.description="Self-hosted IPTV player, TV guide and DVR for your household, in any browser. M3U and Xtream Codes lists, profiles, no app to install." \
+      org.opencontainers.image.source="https://github.com/austin-72/superstation-iptv" \
+      org.opencontainers.image.licenses="MIT"
 
 # ffmpeg converts formats browsers can't play; tini forwards stop signals; su-exec drops root after fixing the
 # data folder's owner. The VAAPI drivers are for optional Intel/AMD hardware transcoding (pass /dev/dri through).

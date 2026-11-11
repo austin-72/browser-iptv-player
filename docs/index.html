@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Superstation IPTV: self-hosted IPTV player, TV guide and DVR in your browser</title>
+<meta name="description" content="Superstation IPTV is a free, self-hosted IPTV player for your household. M3U playlists and Xtream Codes accounts become a Netflix-style app with a TV guide, DVR and profiles, in any web browser. Nothing to install on any device.">
+<link rel="canonical" href="https://austin-72.github.io/superstation-iptv/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Superstation IPTV: self-hosted IPTV player, TV guide and DVR">
+<meta property="og:description" content="Your M3U playlists and Xtream Codes accounts, turned into a Netflix-style app for the whole household. Runs in any browser. Free and open source.">
+<meta property="og:url" content="https://austin-72.github.io/superstation-iptv/">
+<meta property="og:image" content="https://austin-72.github.io/superstation-iptv/screenshots/home.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0b0d12">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Superstation IPTV",
+  "alternateName": "Browser IPTV Player",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Docker, Linux, Windows, macOS",
+  "description": "A self-hosted IPTV player, TV guide and DVR for a household, used from any web browser. Plays M3U playlists and Xtream Codes accounts.",
+  "url": "https://austin-72.github.io/superstation-iptv/",
+  "codeRepository": "https://github.com/austin-72/superstation-iptv",
+  "license": "https://opensource.org/licenses/MIT",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<style>
+  :root { --bg: #0b0d12; --bg2: #141720; --card: #1b1f2a; --line: #2a2f3d; --text: #eef0f5; --dim: #a3abbd; --accent: #e50914; --max: 68rem; }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+  a { color: inherit; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.25rem; }
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.1rem 0; }
+  .brand { font-weight: 850; font-size: 1.3rem; letter-spacing: -.01em; color: #ff3b45; text-decoration: none; }
+  .brand span { color: var(--text); font-weight: 600; }
+  nav a { color: var(--dim); text-decoration: none; margin-left: 1.3rem; font-weight: 600; font-size: .95rem; }
+  nav a:hover, nav a:focus-visible { color: var(--text); }
+  .hero { padding: 3.5rem 0 2rem; text-align: center; }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.6rem); line-height: 1.08; letter-spacing: -.03em; margin: 0 auto 1.1rem; max-width: 18ch; }
+  .lede { font-size: clamp(1.05rem, 2.1vw, 1.3rem); color: var(--dim); max-width: 46rem; margin: 0 auto 1.8rem; }
+  .lede b { color: var(--text); font-weight: 600; }
+  .cta { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: .8rem 1.4rem; border-radius: 10px; font-weight: 700; text-decoration: none; border: 1px solid var(--line); background: var(--card); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:hover, .btn:focus-visible { filter: brightness(1.12); }
+  .shot { margin: 2.6rem auto 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .55); max-width: 62rem; }
+  .shot img, .pair img { display: block; width: 100%; height: auto; }
+  .note { color: var(--dim); font-size: .92rem; max-width: 46rem; margin: 1.4rem auto 0; }
+  section { padding: 3.6rem 0 0; }
+  h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -.02em; line-height: 1.2; margin: 0 0 .5rem; }
+  .sub { color: var(--dim); margin: 0 0 1.8rem; max-width: 44rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.2rem 1.3rem; }
+  .card h3 { margin: 0 0 .35rem; font-size: 1.08rem; }
+  .card p { margin: 0; color: var(--dim); font-size: .97rem; }
+  .pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+  .pair figure { margin: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg2); }
+  .pair figcaption { padding: .7rem .9rem; color: var(--dim); font-size: .92rem; }
+  pre { background: #06070a; border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; overflow-x: auto; font: .95rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #dfe5f2; margin: 0 0 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .96rem; }
+  .tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--dim); font-weight: 600; background: var(--bg2); }
+  td:first-child { color: var(--dim); white-space: nowrap; }
+  details { border-bottom: 1px solid var(--line); padding: .9rem 0; }
+  summary { cursor: pointer; font-weight: 650; }
+  details p { color: var(--dim); margin: .6rem 0 0; max-width: 48rem; }
+  footer { margin-top: 4rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .92rem; }
+  footer a { color: var(--text); }
+  :focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 6px; }
+  @media (max-width: 700px) { .pair { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { nav a:not(.keep) { display: none; } .hero { padding-top: 2rem; } body { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./">Superstation <span>IPTV</span></a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="#compare">Compare</a>
+      <a href="#faq">FAQ</a>
+      <a class="keep" href="https://github.com/austin-72/superstation-iptv">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Your IPTV, as one app for the whole house</h1>
+      <p class="lede">Superstation IPTV is a free, <b>self-hosted IPTV player</b>. Your M3U playlists and Xtream Codes accounts become a Netflix-style app with a <b>TV guide</b>, a <b>DVR</b> and a profile for everyone, in <b>any web browser</b>. Nothing to install on any device.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install with Docker</a>
+        <a class="btn" href="https://github.com/austin-72/superstation-iptv">See it on GitHub</a>
+      </div>
+      <div class="shot"><img src="screenshots/home.jpg" width="1440" height="900" alt="The Superstation IPTV home screen: a featured title, a Continue watching row and rows of films and series"></div>
+      <p class="note"><b>Bring your own content.</b> This is a player. It comes with no channels, films or accounts: you add the playlists or provider logins you are entitled to use. Everything in these pictures is made up.</p>
+    </div>
+
+    <section id="features">
+      <h2>One small server at home, every screen in the house</h2>
+      <p class="sub">Add your lists once. Everyone opens the site, picks their profile and watches.</p>
+      <div class="grid">
+        <div class="card"><h3>Works on any device with a browser</h3><p>Computers, phones, tablets, smart TVs and games consoles, with a layout and remote-control navigation for each. Installable as an app, with thin TV wrappers if you want an icon on the TV.</p></div>
+        <div class="card"><h3>Live TV with a real guide</h3><p>Channel numbers, a full TV guide from XMLTV or Schedules Direct, catch-up, rewind and pause, multiview, and reminders for what's on later.</p></div>
+        <div class="card"><h3>Films and series that look the part</h3><p>Posters, plots, cast and trailers. Several providers are merged into one tidy catalogue with the duplicates folded together, sorted the way a streaming service would.</p></div>
+        <div class="card"><h3>DVR</h3><p>Record a programme, or every episode of a series, straight from the guide. Keep rules stop it filling the disk.</p></div>
+        <div class="card"><h3>Made for households</h3><p>Profiles with PINs, kids profiles, age limits, screen time and bedtime, parental locks, and a manager role for a second grown-up.</p></div>
+        <div class="card"><h3>Video goes direct when it can</h3><p>Streams play straight from the provider to the viewer wherever possible. The server only steps in to convert what a device can't play, and it knows your provider's connection limit.</p></div>
+        <div class="card"><h3>Plays almost anything</h3><p>HLS, MPEG-TS, MP4, MKV and DASH; M3U, Xtream Codes, Stalker portals, and Jellyfin, Emby or Plex libraries. Subtitles from the file, found online, or picture subtitles.</p></div>
+        <div class="card"><h3>Works with the apps you have</h3><p>An Xtream Codes login per profile for TiviMate and friends, and an HDHomeRun tuner for Plex, Jellyfin and Emby.</p></div>
+        <div class="card"><h3>Simple to run</h3><p>One Docker container. No database, no npm packages: Node.js and ffmpeg are all it needs. Free and open source under the MIT licence.</p></div>
+      </div>
+    </section>
+
+    <section aria-label="Screenshots">
+      <div class="pair">
+        <figure><img src="screenshots/guide.jpg" width="1440" height="900" loading="lazy" alt="The TV guide: channels down the side and programmes across a timeline"><figcaption>The TV guide</figcaption></figure>
+        <figure><img src="screenshots/title.jpg" width="1440" height="900" loading="lazy" alt="A film's page with its poster, plot, cast and a Play button"><figcaption>A title's page</figcaption></figure>
+        <figure><img src="screenshots/phones.jpg" width="1700" height="900" loading="lazy" alt="The app on phones: home, live TV and the player"><figcaption>On a phone</figcaption></figure>
+        <figure><img src="screenshots/tv.jpg" width="2004" height="596" loading="lazy" alt="The app on a television, with big remote-friendly rows"><figcaption>On a TV</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <p class="sub">With Docker, on anything from a Raspberry Pi to a NAS (amd64 and arm64):</p>
+<pre>docker run -d --name iptv -p 8080:8080 \
+  -v "$PWD/data:/data" --restart unless-stopped \
+  ghcr.io/austin-72/superstation-iptv:latest</pre>
+      <p class="sub">Then open <b>http://&lt;that computer's address&gt;:8080</b>, set a password and add a playlist. The <a href="https://github.com/austin-72/superstation-iptv#quick-start">quick start</a> has Docker Compose, running it without Docker, and the first five minutes.</p>
+    </section>
+
+    <section id="compare">
+      <h2>How it compares</h2>
+      <p class="sub">Most IPTV players are an app you set up again on every device. Media servers are built around your own files, with IPTV on the side.</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th></th><th>Superstation IPTV</th><th>IPTV apps (TiviMate, IPTV Smarters)</th><th>Media servers (Jellyfin, Plex)</th></tr></thead>
+          <tbody>
+            <tr><td>Where it runs</td><td>Any browser, from one server at home</td><td>An app on each device</td><td>A server plus an app on each device</td></tr>
+            <tr><td>Setting up</td><td>Once, for everyone</td><td>On every device</td><td>Once, mostly for your own files</td></tr>
+            <tr><td>IPTV lists</td><td>What it is built for</td><td>What they are built for</td><td>An add-on</td></tr>
+            <tr><td>Household</td><td>Profiles, kids, screen time, shared history</td><td>Per device</td><td>Profiles</td></tr>
+            <tr><td>Cost</td><td>Free, open source</td><td>Often paid</td><td>Free or paid tiers</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="faq">
+      <h2>Questions</h2>
+      <details><summary>Does it come with channels or films?</summary><p>No. It is a player. You add M3U playlists, Xtream Codes accounts or your own media folders that you are entitled to use.</p></details>
+      <details><summary>Do I need to install an app on my TV or phone?</summary><p>No. Open the address in the device's browser. It can be added to the home screen as an app, and there are optional thin wrappers for Android TV, Fire TV, Samsung and LG.</p></details>
+      <details><summary>Does all the video go through my server?</summary><p>Only when it has to. Streams go straight from the provider to the viewer whenever the device can play them, and the server converts the rest with ffmpeg.</p></details>
+      <details><summary>Can I keep using TiviMate, Plex or Jellyfin?</summary><p>Yes. Each profile can have an Xtream Codes login for other apps, and the server can appear as an HDHomeRun tuner to Plex, Jellyfin and Emby.</p></details>
+      <details><summary>Wasn't this called Browser IPTV Player?</summary><p>Yes, until version 2.3. It is the same project; old links, backups and installs keep working.</p></details>
+    </section>
+  </main>
+
+  <footer>
+    <p>Superstation IPTV is free and open source (MIT). <a href="https://github.com/austin-72/superstation-iptv">Source and documentation on GitHub</a> · <a href="https://github.com/austin-72/superstation-iptv/blob/main/SECURITY.md">Security</a></p>
+    <p>Not affiliated with any TV provider or broadcaster. Film and series details, where shown, come from TMDB.</p>
+  </footer>
+</div>
+</body>
+</html>

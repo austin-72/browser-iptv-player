@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">IPTV Player</string>
+    <string name="app_name">Superstation</string>
     <string name="ask_title">Where is your server?</string>
     <string name="ask_message">The address you open it at in a browser, for example http://192.168.1.20:8080 or https://tv.example.com</string>
     <string name="ask_hint">http://192.168.1.20:8080</string>

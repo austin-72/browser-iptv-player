@@ -68,7 +68,7 @@ test('the address page: tidies what was typed, opens only what answers, and Up c
 });
 
 test('Android TV: what the pages ask of the app is there, and Back goes to the pages', () => {
-  const java = read('android', 'app', 'src', 'main', 'java', 'org', 'iptvplayer', 'tv', 'MainActivity.java');
+  const java = read('android', 'app', 'src', 'main', 'java', 'org', 'superstation', 'tv', 'MainActivity.java');
   const tv = fs.readFileSync(path.join(__dirname, '..', 'web', 'js', 'tv.js'), 'utf8');
   // The bridge the pages look for (web/js/tv.js: V.inTvApp, V.leaveApp).
   assert.match(java, /addJavascriptInterface\(new Bridge\(\), "TvApp"\)/);

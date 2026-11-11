@@ -1,10 +1,12 @@
-# Browser IPTV Player
+# Superstation IPTV
 
-**Your IPTV playlists, turned into a Netflix-style app for the whole household. It runs in any web browser: computer, phone, tablet or smart TV.**
+**A self-hosted IPTV player, TV guide and DVR for your whole household. Your M3U playlists and Xtream Codes accounts become a Netflix-style app that runs in any web browser: computer, phone, tablet or smart TV.**
 
-You run one small server at home and add your playlists or provider accounts once. Everyone in the house opens the site, picks their profile and watches live TV, films and series. Nothing needs installing on any device.
+You run one small server at home (Docker or Node.js) and add your playlists or provider accounts once. Everyone in the house opens the site, picks their profile and watches live TV, films and series. Nothing needs installing on any device.
 
-![The home screen: a big "picked for you" title, mood buttons and a Continue watching row](docs/screenshots/home.jpg)
+<sub>Called *Browser IPTV Player* until version 2.3. Old links, backups and installs keep working.</sub>
+
+![The Superstation IPTV home screen: a big featured title, mood buttons and a Continue watching row](docs/screenshots/home.jpg)
 
 <p align="center">
   <a href="#why-this-one">Why this one?</a> ·
@@ -38,7 +40,7 @@ Most IPTV players are an app you install and set up again on every device. Media
 
 ### How it compares
 
-|  | **Browser IPTV Player** | IPTV apps (e.g. TiviMate, IPTV Smarters) | Media servers (e.g. Jellyfin, Plex) |
+|  | **Superstation IPTV** | IPTV apps (e.g. TiviMate, IPTV Smarters) | Media servers (e.g. Jellyfin, Plex) |
 |---|---|---|---|
 | Install on each device | No, any browser | Yes, one app per device (TiviMate is Android-only) | Server plus apps (Jellyfin and Plex also have web players) |
 | Add playlists once for the whole household | ✅ | ❌ (set up per device) | ✅ |
@@ -98,8 +100,8 @@ Most IPTV players are an app you install and set up again on every device. Media
 ### With Docker (recommended)
 
 ```bash
-git clone https://github.com/austin-72/browser-iptv-player.git
-cd browser-iptv-player
+git clone https://github.com/austin-72/superstation-iptv.git
+cd superstation-iptv
 docker compose up -d
 ```
 
@@ -109,18 +111,18 @@ Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./
 <summary>The ready-made image, without cloning</summary>
 
 ```bash
-docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/browser-iptv-player:latest
+docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/superstation-iptv:latest
 ```
 
-Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.2.0` stays on that version.
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.3.0` stays on that version.
 </details>
 
 <details>
 <summary>Without Compose</summary>
 
 ```bash
-docker build -t browser-iptv-player .
-docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped browser-iptv-player
+docker build -t superstation-iptv .
+docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped superstation-iptv
 ```
 
 The image includes ffmpeg. It runs as an unprivileged user and fixes the owner of `/data` on start-up. Set `PUID`/`PGID` to run as a specific host user instead.

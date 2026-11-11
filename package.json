@@ -1,7 +1,10 @@
 {
-  "name": "browser-iptv-player",
-  "version": "2.2.0",
-  "description": "A self-hosted IPTV and media player for your household: profiles, Netflix-style browsing, live TV guide, watch parties and messaging — in any browser. No dependencies besides Node.js and ffmpeg.",
+  "name": "superstation-iptv",
+  "version": "2.3.0",
+  "description": "Superstation IPTV: a self-hosted IPTV player, TV guide and DVR for your household, in any browser. M3U and Xtream Codes lists, profiles, Netflix-style browsing, watch parties. No dependencies besides Node.js and ffmpeg.",
+  "keywords": ["iptv", "iptv-player", "self-hosted", "m3u", "xtream-codes", "epg", "xmltv", "dvr", "live-tv", "hdhomerun", "media-server", "smart-tv", "docker"],
+  "homepage": "https://github.com/austin-72/superstation-iptv",
+  "repository": { "type": "git", "url": "git+https://github.com/austin-72/superstation-iptv.git" },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

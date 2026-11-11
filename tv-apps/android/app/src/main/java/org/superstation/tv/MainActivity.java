@@ -1,4 +1,4 @@
-package org.iptvplayer.tv;
+package org.superstation.tv;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
         // (An https server with plain-http streams from a provider: allowed, as the page asks a desktop browser to.)
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         // (So the pages know it's a TV and use their big, remote-friendly layout.)
-        s.setUserAgentString(s.getUserAgentString() + " Android TV IPTVPlayerTV/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " Android TV SuperstationTV/1.0");
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 

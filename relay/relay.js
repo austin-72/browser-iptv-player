@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stream relay for Browser IPTV Player — run it on a small internet machine (a VPS) so viewers' devices fetch their
+// Stream relay for Superstation IPTV — run it on a small internet machine (a VPS) so viewers' devices fetch their
 // streams through it instead of straight from the provider. The provider only ever sees this machine's address, and
 // your home server carries none of the video. One file, Node 18+, no packages.
 //

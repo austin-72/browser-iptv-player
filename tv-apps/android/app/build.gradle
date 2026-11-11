@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'org.iptvplayer.tv'
+    namespace 'org.superstation.tv'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'org.iptvplayer.tv'
+        applicationId 'org.superstation.tv'
         minSdk 22        // Fire OS 5 and Android TV 5.1 onwards
         targetSdk 34
         versionCode 1

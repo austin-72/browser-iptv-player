@@ -70,7 +70,7 @@ const reports = new ErrorReports({ dataDir: D, log, version: cfg.version, root: 
 fs.mkdirSync(D, { recursive: true });
 const preset = cfg.presets || {};
 const DEFAULT_SETTINGS = {
-  brand: { name: (preset.brand && preset.brand.name) || 'IPTV Player', logo: (preset.brand && preset.brand.logo) || '', accent: (preset.brand && preset.brand.accent) || '' },
+  brand: { name: (preset.brand && preset.brand.name) || 'Superstation', logo: (preset.brand && preset.brand.logo) || '', accent: (preset.brand && preset.brand.accent) || '' },
   userAgent: 'VLC/3.0.21 LibVLC/3.0.21',
   routing: 'direct-first', // 'direct-first' | 'server' | 'direct-only'
   defaultLangs: Array.isArray(preset.defaultLangs) ? preset.defaultLangs : [],
@@ -1859,7 +1859,7 @@ route('GET', '/api/admin/stats/concurrency', (req, res, p, q, ctx) => {
 });
 // The optional browser helper for desktop Chrome/Edge (extension/), named after this site.
 route('GET', '/api/direct-helper.zip', (req, res) => {
-  const name = `${settings().brand.name || 'IPTV Player'} – Direct Streams`.slice(0, 75);
+  const name = `${settings().brand.name || 'Superstation'} – Direct Streams`.slice(0, 75);
   const buf = zipFolder(path.join(cfg.root, 'extension'), 'direct-streams-helper', (file, data) => {
     if (file !== 'manifest.json') return data;
     const m = JSON.parse(data.toString('utf8'));
@@ -3147,6 +3147,9 @@ route('GET', '/api/admin/fs', async (req, res, p, q, ctx) => {
  * Everything worth keeping in the data folder, as one gzipped file. Provider downloads (Xtream/M3U copies) are left
  * out — they're fetched again after a restore — except uploaded playlist files, which can't be.
  */
+// What a backup says it is from. (The project was called browser-iptv-player until 2.3: its backups are still taken.)
+const APP_ID = 'superstation-iptv';
+const APP_IDS = [APP_ID, 'browser-iptv-player'];
 function makeBackup() {
   JsonFile.flushAll();
   const files = {};
@@ -3159,7 +3162,7 @@ function makeBackup() {
     }
   };
   walk(D, '');
-  return zlib.gzipSync(Buffer.from(JSON.stringify({ app: 'browser-iptv-player', version: cfg.version, createdAt: new Date().toISOString(), files })));
+  return zlib.gzipSync(Buffer.from(JSON.stringify({ app: APP_ID, version: cfg.version, createdAt: new Date().toISOString(), files })));
 }
 route('GET', '/api/admin/backup', (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -3207,7 +3210,7 @@ route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
   return { ok: true, restart: true };
 });
 function restoreFiles(data) {
-  if (!data || data.app !== 'browser-iptv-player' || !data.files || typeof data.files !== 'object') throw new HttpError(400, 'That isn’t a backup file from this app.');
+  if (!data || !APP_IDS.includes(data.app) || !data.files || typeof data.files !== 'object') throw new HttpError(400, 'That isn’t a backup file from this app.');
   // (Checked whole before anything is written: a file that's wrong part-way through used to leave half the old data
   // and half the new.)
   for (const [rel, b64] of Object.entries(data.files)) if (typeof rel !== 'string' || typeof b64 !== 'string') throw new HttpError(400, 'That backup file is damaged — nothing was changed.');
@@ -3294,7 +3297,7 @@ route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
   const buf = await readBody(req, 100 * 1024 * 1024);
   let files;
   try { files = unzip(buf); } catch (e) { throw new HttpError(400, e.message); }
-  // A zip of the folder ("browser-iptv-player/server.js") or of its contents ("server.js").
+  // A zip of the folder ("superstation-iptv/server.js") or of its contents ("server.js").
   const prefix = files.some((f) => f.name === 'server.js') ? '' : ((files.find((f) => /(^|\/)server\.js$/.test(f.name)) || {}).name || '').replace(/server\.js$/, '');
   const picked = files.map((f) => ({ ...f, rel: f.name.startsWith(prefix) ? f.name.slice(prefix.length) : '' })).filter((f) => f.rel && CODE_FILES.test(f.rel) && !f.rel.includes('..'));
   if (!picked.some((f) => f.rel === 'server.js') || !picked.some((f) => f.rel === 'package.json')) throw new HttpError(400, 'That zip doesn’t contain this app (no server.js / package.json).');
@@ -3390,7 +3393,7 @@ function exportM3U(req, res, key) {
 }
 function exportXmltv(req, res) {
   const now = Date.now();
-  const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="browser-iptv-player">'];
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="superstation-iptv">'];
   const live = catalog.items.filter((it) => it.epg && !it.adult && p4.exportable(it));
   for (const it of live) out.push(`<channel id="${xmlEsc(it.k)}"><display-name>${xmlEsc(it.n)}</display-name>${it.logo ? `<icon src="${xmlEsc(it.logo)}"/>` : ''}</channel>`);
   for (const it of live) {

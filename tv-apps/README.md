@@ -30,7 +30,7 @@ language, which is a second player to maintain, not a wrapper. Apple TV is the s
 A plain Android project with one screen and no libraries.
 
 **With GitHub (no tools on your computer):** on your copy of this repository, open *Actions* → *Android TV app* →
-*Run workflow*. When it finishes, download `iptv-player-tv` from the run's page and unzip it: that is the APK.
+*Run workflow*. When it finishes, download `superstation-tv` from the run's page and unzip it: that is the APK.
 
 **With Android Studio:** open the `android` folder, let it sync, then *Build → Build APK(s)*.
 
@@ -68,7 +68,7 @@ An app installed this way stays on the TV; Samsung's developer certificates are 
    ares-setup-device            (add: a name such as tv, the TV's IP address, port 9922, user prisoner)
    ares-novacom --device tv --getkey      (asks for the passphrase shown in the Developer Mode app)
    ares-package webos
-   ares-install --device tv org.iptvplayer.tv_1.0.0_all.ipk
+   ares-install --device tv org.superstation.tv_1.0.0_all.ipk
    ```
 
 LG's developer mode lasts a limited time. The Developer Mode app shows how long is left and has an *Extend* button;
