@@ -1555,6 +1555,7 @@ async function copyCodecs(it, alt = -1) {
   const info = await lists.xtVod(lid, id);
   const v = (info && info.video) || {}, au = (info && info.audio) || {};
   const cx = v.codec_name ? { v: String(v.codec_name).toLowerCase(), a: String(au.codec_name || '').toLowerCase(), pix: String(v.pix_fmt || '') } : null;
+  if (cx && v.color_transfer) cx.tr = String(v.color_transfer).slice(0, 20); // (HDR or not, when the provider says)
   if (codecMemo.size > 5000) codecMemo.clear();
   codecMemo.set(key, cx);
   return cx;
@@ -1829,6 +1830,20 @@ route('POST', '/api/play/warm', async (req, res, p, q, ctx) => {
   return { ok: true };
 }, 'site');
 
+/** What a device said about itself beyond its codecs, tidied (see /api/play/session and lib/media.js needsVideoTranscode). */
+function convCaps(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  const out = {};
+  if (Array.isArray(c.fmp4)) out.fmp4 = c.fmp4.slice(0, 6).map(String).filter((x) => ['av1', 'vp9'].includes(x));
+  if (c.hevcMp4 === true) out.hevcMp4 = true;
+  if (c.hevc10 === false) out.hevc10 = false;
+  if (c.keyed === true) out.keyed = true; // (a copy started part-way may keep the file's clock: lib/media.js _start)
+  if (c.maxH && typeof c.maxH === 'object') {
+    out.maxH = {};
+    for (const k of ['h264', 'hevc', 'av1', 'vp9']) { const n = clampInt(c.maxH[k], 0, 4320, 0); if (n >= 240) out.maxH[k] = n; }
+  }
+  return out;
+}
 route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const b = await readJSON(req);
@@ -1844,10 +1859,14 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const film = it.t === 'movie' || it.t === 'episode' || b.live === false;
   const codecs = Array.isArray(b.codecs) ? b.codecs.map(String) : ['h264'];
   const height = clampInt(b.height, 0, 2160, 0);
+  // What else the device said about itself (web/js/player.js convCaps): which formats it takes in MP4 pieces, whether
+  // its HEVC is 8-bit only, the tallest picture it decodes. Only ever used to choose how to convert.
+  const caps = convCaps(b.caps);
+  const capH = caps && caps.maxH && caps.maxH.h264 && caps.maxH.h264 < (Number(settings().transcodeMaxHeight) || 1080) ? caps.maxH.h264 : 0;
   // How to convert it, from the look inside (ffprobe: codecs, length, audio tracks).
   const decide = (pr) => {
     const finite = (film || !!(pr && pr.duration > 0)) && b.live !== true;
-    const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs) || !!(height && pr && pr.height && pr.height > height);
+    const transcode = b.mode === 'transcode' || media.needsVideoTranscode(pr, codecs, caps) || !!(height && pr && pr.height && pr.height > height);
     // (b.audioOnly: the viewer chose "sound only" for a live channel — the player's listening mode.)
     const audioOnly = !!(pr && !pr.vcodec && pr.acodec) || it.t === 'radio' || b.audioOnly === true;
     // The viewer's preferred audio language picks the track, unless they chose one.
@@ -1857,9 +1876,26 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
       const hit = pr.audio.find((a) => String(a.lang || '').toLowerCase().startsWith(want) || (L.code && L.code(a.lang) === want));
       if (hit) audioTrack = hit.i;
     }
-    return { finite, live: !finite, transcode, audioOnly, audioTrack, seek: finite ? Math.max(0, Number(b.seek) || 0) : 0, duration: finite ? (pr && pr.duration > 0 ? pr.duration : Number(it.d) || 0) : 0 };
+    // Sound this ffmpeg can't decode (AC-4 on some broadcast channels): another track that it can, else the picture
+    // without sound, said to the viewer — rather than a stream that fails altogether.
+    let noAudio = false, noSound = '';
+    const tracks = pr && pr.audio ? pr.audio : [];
+    const cur = tracks.find((a) => a.i === audioTrack) || tracks[0];
+    if (cur && !audioOnly && !media.canDecode(cur.codec)) {
+      const other = tracks.find((a) => media.canDecode(a.codec));
+      if (other) audioTrack = other.i; else { noAudio = true; noSound = String(cur.codec || 'unknown').slice(0, 20); }
+    }
+    // A picture this ffmpeg can't decode (H.266 on an older ffmpeg) can't be converted: said plainly.
+    const cant = transcode && !audioOnly && pr && pr.vcodec && !media.canDecode(pr.vcodec) ? String(pr.vcodec).slice(0, 20) : '';
+    // (MP4 pieces for a copy of AV1 or VP9 — MPEG-TS can't carry them — and of HEVC for Apple's own player.)
+    const seg = !transcode && !audioOnly && media.segmentsFor(pr, caps) === 'fmp4' ? 'fmp4' : 'ts';
+    return {
+      finite, live: !finite, transcode, audioOnly, audioTrack, seek: finite ? Math.max(0, Number(b.seek) || 0) : 0, duration: finite ? (pr && pr.duration > 0 ? pr.duration : Number(it.d) || 0) : 0,
+      seg, hdr: media.hdrKind(pr), interlaced: !!(pr && pr.field), noAudio, noSound, cant, vcodec: pr ? pr.vcodec || '' : '',
+    };
   };
-  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height, label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority });
+  const cantConvert = (d) => new HttpError(415, `This video’s format (${d.cant.toUpperCase()}) is one the server’s ffmpeg can’t convert${media.version ? ` (ffmpeg ${media.version})` : ''}. A newer ffmpeg may.`);
+  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height: height || (d.transcode ? capH : 0), label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority, fmp4: d.seg === 'fmp4', hdr: d.hdr, interlaced: d.interlaced, noAudio: d.noAudio, vcodec: d.vcodec, keyed: !!(caps && caps.keyed) });
   // Quicker: when the format is already known (the provider's details for a film or episode; a live channel is almost
   // always H.264) and the account has room for two connections, the conversion starts straight away with the look
   // inside alongside, instead of one after the other — a few seconds sooner. If the look finds it needs something
@@ -1872,7 +1908,8 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     if (lim === 0 || others + 2 <= lim) {
       const cx = film && b.mode !== 'transcode' ? await copyCodecs(it, alt).catch(() => null) : null;
       if (b.mode === 'transcode' || !film || (cx && cx.v)) {
-        guess = decide(cx && cx.v ? { vcodec: cx.v, pixfmt: cx.pix || '', acodec: cx.a || 'aac', duration: 0 } : null);
+        guess = decide(cx && cx.v ? { vcodec: cx.v, pixfmt: cx.pix || '', acodec: cx.a || 'aac', duration: 0, transfer: cx.tr || '' } : null);
+        if (guess.cant) throw cantConvert(guess);
         if (!film && b.live !== false) { guess.live = true; guess.finite = false; guess.seek = 0; guess.duration = 0; }
       }
     }
@@ -1889,8 +1926,9 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     t.look = Date.now() - t0 - t.conv;
     d = decide(pr);
     if (!pr) d = guess; // (the look inside didn't answer: what's running stays)
-    else if (d.transcode !== guess.transcode || d.audioOnly !== guess.audioOnly || d.audioTrack !== guess.audioTrack || d.live !== guess.live) {
-      log(`Session ${s.id}: the stream needs ${d.transcode !== guess.transcode ? (d.transcode ? 'converting' : 'no converting') : d.live !== guess.live ? 'playing as a film' : 'another audio track'} — starting again`);
+    else if (d.cant) { media.stopSession(s.id); throw cantConvert(d); }
+    else if (d.transcode !== guess.transcode || d.audioOnly !== guess.audioOnly || d.audioTrack !== guess.audioTrack || d.live !== guess.live || d.seg !== guess.seg || d.noAudio !== guess.noAudio || (d.transcode && d.hdr && !guess.hdr && media.canTonemap)) {
+      log(`Session ${s.id}: the stream needs ${d.transcode !== guess.transcode ? (d.transcode ? 'converting' : 'no converting') : d.live !== guess.live ? 'playing as a film' : d.seg !== guess.seg ? 'another kind of pieces' : d.noAudio !== guess.noAudio ? 'its sound left out' : d.hdr && !guess.hdr ? 'its HDR colours brought down' : 'another audio track'} — starting again`);
       media.stopSession(s.id);
       const t1 = Date.now();
       s = await start(d);
@@ -1902,6 +1940,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     // One-connection accounts: let the provider free the slot the look-inside used before the real connection.
     if (!wasCached && !src.local && oneConnection(it, alt)) await new Promise((ok) => setTimeout(ok, 1500));
     d = decide(pr);
+    if (d.cant) throw cantConvert(d);
     t.look = Date.now() - t0;
     s = await start(d);
     t.conv = Date.now() - t0 - t.look;
@@ -1912,6 +1951,9 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const signed = b.sign === true ? castSign(`/api/session/${s.id}/index.m3u8`, 24) : '';
   return {
     url: `/api/session/${s.id}/index.m3u8`, signed, quick: !!guess, t, sessionId: s.id, offset: s.offset, audioTrack, duration, mode: transcode ? 'transcode' : 'remux',
+    // (seg: the kind of pieces — 'fmp4' needs a player that takes them; noSound: the sound's format couldn't be
+    // decoded and it plays without; tone: HDR was brought down to ordinary colours.)
+    seg: s.seg || 'ts', noSound: d.noSound || undefined, tone: s.tone || undefined,
     audio: pr ? pr.audio : [], subs: pr ? pr.subs.filter((x) => x.text || x.pic) : [], chapters: pr ? pr.chapters : [], height: pr ? pr.height : 0, vcodec: pr ? pr.vcodec : '',
   };
 });
@@ -1941,7 +1983,7 @@ route('GET', '/api/dash', async (req, res, p, q, ctx) => {
   Readable.fromWeb(up.body).on('error', () => res.destroy()).pipe(res);
 });
 route('GET', '/api/session/:sid/:file', async (req, res, p) => {
-  if (!/^(index\.m3u8|seg\d+\.ts)$/.test(p.file)) throw new HttpError(400, 'Bad file');
+  if (!/^(index\.m3u8|seg\d+\.(ts|m4s)|init\.mp4)$/.test(p.file)) throw new HttpError(400, 'Bad file');
   const s = media.touch(p.sid);
   if (!s) throw new HttpError(410, 'Playback session ended');
   const file = path.join(s.dir, p.file);
@@ -1960,7 +2002,7 @@ route('GET', '/api/session/:sid/:file', async (req, res, p) => {
     if (text === null) { res.writeHead(503, { 'Retry-After': '2', 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end('The conversion hasn’t started yet'); }
     return sendText(res, 200, text, 'application/vnd.apple.mpegurl', req.cast ? { 'Access-Control-Allow-Origin': '*' } : {});
   }
-  serveFile(req, res, file, { type: 'video/mp2t', cache: 'max-age=3600', headers: req.cast ? { 'Access-Control-Allow-Origin': '*' } : {} });
+  serveFile(req, res, file, { type: /\.ts$/.test(p.file) ? 'video/mp2t' : 'video/mp4', cache: 'max-age=3600', headers: req.cast ? { 'Access-Control-Allow-Origin': '*' } : {} });
 }, 'site');
 // (The player's check of the connection between a device and here, when a video keeps buffering.)
 route('GET', '/api/ping', () => ({ t: Date.now() }), 'site');
@@ -2466,7 +2508,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
     devices: accounts.sessionsList(),
     me: ctx.sess ? ctx.sess.id : null,
     status: {
-      version: cfg.version, ffmpeg: media.available, ffmpegVersion: media.version, hw: media.hw, hwCheck: media.hwCheck, encoders: [...media.encoders].filter((e) => /h264_/.test(e)),
+      version: cfg.version, ffmpeg: media.available, ffmpegVersion: media.version, hw: media.hw, hwCheck: media.hwCheck, tonemap: media.canTonemap, encoders: [...media.encoders].filter((e) => /h264_/.test(e)),
       sessions: [...media.sessions.values()].map((x) => ({ id: x.id, label: x.label, owner: x.owner, transcode: x.transcode, hw: x.hw, height: x.height, startedAt: x.startedAt })),
       catalog: { version: catalog.version, total: catalog.items.length, counts, shows: catalog.shows.size },
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,

@@ -604,7 +604,11 @@ V.chromecast = function () {
   };
   var go = function (pq, type) { return V.api('/api/cast/link', { body: { path: pq } }).then(function (r) { return send(location.origin + r.url, type); }); };
   var viaServer = function () {
-    if (p.sessionId) return go('/api/session/' + p.sessionId + '/index.m3u8', 'application/x-mpegURL');
+    // (The conversion that's running is passed on when it's one any Chromecast plays: H.264 in MPEG-TS pieces. A copy
+    // of an HEVC, AV1 or VP9 picture made for this device isn't — the Chromecast gets a conversion of its own.)
+    var si = p.sessionInfo || {};
+    var plain = si.seg !== 'fmp4' && (si.mode === 'transcode' || !si.vcodec || si.vcodec === 'h264');
+    if (p.sessionId && plain) return go('/api/session/' + p.sessionId + '/index.m3u8', 'application/x-mpegURL');
     var convert = function () { return V.api('/api/play/session', { body: { k: it.k, alt: p.alt, mode: 'remux', seek: p.vod ? p.position : 0, live: !p.vod, codecs: ['h264'] } }).then(function (s) { return go(s.url, 'application/x-mpegURL'); }); };
     // A media-folder or recorded file: the Chromecast opens it from this server, or a converted copy if it can't
     // (the server doesn't relay its own files).

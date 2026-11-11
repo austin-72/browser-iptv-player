@@ -93,6 +93,8 @@ V.boot = function () {
   // (TV mode from the start — it was only switched on once a profile was open, so on "Who's watching?" and the PIN
   // pad a TV's arrow keys couldn't leave a text box.)
   try { if (V.applyLook) V.applyLook(); } catch (e) {}
+  // (What this device decodes, asked of the browser ahead of the first play: web/js/player.js decodeLimits.)
+  try { if (V.decodeLimits) setTimeout(function () { try { V.decodeLimits(); } catch (e) {} }, 3000); } catch (e) {}
   V.initWatch();
   V.player.onUserAction = function () { V.party.onUserAction(); };
   V.$('#me-btn').onclick = function (e) { V.profileMenu(e.currentTarget); };

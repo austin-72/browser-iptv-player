@@ -44,6 +44,104 @@ V.codecs = (function () {
 })();
 
 /**
+ * The tallest picture this device decodes, per format ({ h264: 1080, … }; nothing for a format with no limit found):
+ * asked of the browser once (MediaCapabilities) and kept for a week. A phone or stick whose decoder stops at 1080p
+ * says so, and the server brings a 4K film down for it instead of sending something it can't show.
+ */
+V.decodeLimits = (function () {
+  var memo = null, asked = false;
+  var STEPS = [
+    [2160, 3840, 20e6, { h264: 'avc1.640033', hevc: 'hvc1.1.6.L153.B0', av1: 'av01.0.12M.08', vp9: 'vp09.00.50.08' }],
+    [1440, 2560, 12e6, { h264: 'avc1.640032', hevc: 'hvc1.1.6.L150.B0', av1: 'av01.0.12M.08', vp9: 'vp09.00.41.08' }],
+    [1080, 1920, 8e6, { h264: 'avc1.640028', hevc: 'hvc1.1.6.L120.B0', av1: 'av01.0.08M.08', vp9: 'vp09.00.40.08' }],
+    [720, 1280, 4e6, { h264: 'avc1.64001f', hevc: 'hvc1.1.6.L93.B0', av1: 'av01.0.05M.08', vp9: 'vp09.00.31.08' }],
+  ];
+  var f = function () {
+    if (memo) return memo;
+    var kept = V.ls.get('decLimits', null);
+    if (kept && kept.ua === navigator.userAgent && Date.now() - kept.at < 7 * 86400e3 && kept.v) { memo = kept.v; return memo; }
+    if (asked) return null;
+    asked = true;
+    var mc = navigator.mediaCapabilities;
+    // (Not on TVs and consoles: their browsers' answers here aren't to be relied on, and they play as they always have.)
+    if (!mc || !mc.decodingInfo || !window.Promise || (V.device && V.device.tv)) return null;
+    var type = window.ManagedMediaSource || window.MediaSource ? 'media-source' : 'file';
+    var ask = function (codec, i) {
+      var st = STEPS[i];
+      try {
+        return mc.decodingInfo({ type: type, video: { contentType: 'video/mp4; codecs="' + st[3][codec] + '"', width: st[1], height: st[0], bitrate: st[2], framerate: 30 } })
+          .then(function (r) { return r && r.supported === true ? 1 : r && r.supported === false ? 0 : -1; }, function () { return -1; });
+      } catch (e) { return Promise.resolve(-1); }
+    };
+    // (Per format: the first height it says yes to, after a plain "no" to a taller one. Never a "can't tell".)
+    var one = function (codec) {
+      var step = function (i, sawNo) {
+        if (i >= STEPS.length) return Promise.resolve(0);
+        return ask(codec, i).then(function (r) {
+          if (r < 0) return 0;
+          if (r === 1) return sawNo ? STEPS[i][0] : 0;
+          return step(i + 1, true);
+        });
+      };
+      return step(0, false);
+    };
+    var cs = V.codecs().slice();
+    Promise.all(cs.map(one)).then(function (hs) {
+      var out = {};
+      cs.forEach(function (c, i) { if (hs[i]) out[c] = hs[i]; });
+      memo = out;
+      V.ls.set('decLimits', { ua: navigator.userAgent, at: Date.now(), v: out });
+    }, function () {});
+    return null;
+  };
+  f.forget = function () { memo = null; asked = false; V.ls.set('decLimits', null); };
+  return f;
+})();
+/**
+ * What this device says about itself beyond its codecs, for the server's conversions (server.js convCaps) — so it
+ * converts only what it must:
+ *   fmp4 — the formats played from MP4 pieces (AV1 and VP9 can't travel in MPEG-TS; with this they're passed on as
+ *     they are instead of being re-encoded);
+ *   hevcMp4 — Apple's own player will play it (an iPhone or Mac without hls.js, an Apple TV by AirPlay), which only
+ *     takes HEVC in MP4 pieces;
+ *   hevc10 — false where HEVC is 8-bit only (older graphics chips): 10-bit films are converted, 8-bit ones still copied;
+ *   keyed — a copy started part-way may keep the film's own clock (the server then says where its picture starts);
+ *   maxH — the tallest picture it decodes (V.decodeLimits).
+ * `a`: the way of playing it's for (an AirPlay one goes to the Apple TV's player).
+ */
+V.convCaps = function (a) {
+  var c = {};
+  if (/PlayStation/i.test(navigator.userAgent)) return c;
+  var MS = window.ManagedMediaSource || window.MediaSource;
+  var v = document.createElement('video');
+  var mse = function (t) { try { return !!(MS && MS.isTypeSupported(t)); } catch (e) { return false; } };
+  var own = function (t) { try { return v.canPlayType(t) === 'probably'; } catch (e) { return false; } };
+  var airplay = !!(a && a.airplay);
+  var hlsjs = !!(window.Hls && Hls.isSupported && Hls.isSupported());
+  var nativeFirst = V.ls.get('hlsWay', '') === 'native' && V.nativePlays('hls');
+  var apple = !!(V.device && V.device.ios) || (/Macintosh/.test(navigator.userAgent) && /Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent));
+  var viaHlsjs = hlsjs && !nativeFirst && !airplay;
+  var off = function (k) { var t = +V.ls.get('noCopy.' + k, 0); return t > 1e12 && Date.now() - t < 14 * 86400e3; };
+  // (keyed: a copy started part-way may keep the film's own clock, from which the server reads where its picture
+  // really starts — for hls.js and Apple's player; a TV's or console's own player gets its copies as it always has.)
+  if (viaHlsjs || apple || airplay) c.keyed = true;
+  if (viaHlsjs) {
+    c.fmp4 = [];
+    if (!off('av1') && mse('video/mp4; codecs="av01.0.05M.08"')) c.fmp4.push('av1');
+    if (!off('vp9') && mse('video/mp4; codecs="vp09.00.10.08"')) c.fmp4.push('vp9');
+  } else if (apple || airplay) {
+    c.hevcMp4 = true;
+    c.fmp4 = !airplay && !off('av1') && own('video/mp4; codecs="av01.0.05M.08"') ? ['av1'] : [];
+  }
+  // (Only where MediaSource answers — a TV's "maybe" to a codec string says nothing either way.)
+  if (MS && V.codecs().indexOf('hevc') >= 0 && (mse('video/mp4; codecs="hvc1.1.6.L93.B0"') || mse('video/mp4; codecs="hev1.1.6.L93.B0"')) &&
+    !mse('video/mp4; codecs="hvc1.2.4.L120.B0"') && !mse('video/mp4; codecs="hev1.2.4.L120.B0"') && !own('video/mp4; codecs="hvc1.2.4.L120.B0"')) c.hevc10 = false;
+  var lim = airplay ? null : V.decodeLimits();
+  if (lim) { var any = false, k; for (k in lim) if (lim.hasOwnProperty(k)) any = true; if (any) c.maxH = lim; }
+  return c;
+};
+
+/**
  * Does this device's own video player fetch the stream without the page's sign-in? A PlayStation's does (its media
  * player runs apart from the page and sends no cookies), and so may other TVs': this server's own stream addresses
  * (conversions, the relay, media folders) then answer it with "sign in first" — "can't play this format", or a
@@ -823,6 +921,8 @@ PP._attach = function (a, token, startAt, over) {
       self._ph = { at: Date.now(), pre: Math.max(0, askedAt - (self._clickAt || askedAt)), look: tt.look || 0, conv: tt.conv || 0, net: Math.max(0, round - (tt.look || 0) - (tt.conv || 0)) };
       if (self.audioTrack === undefined && s.audioTrack !== undefined) self.audioTrack = s.audioTrack;
       self.sessionInfo = s;
+      // (Sound in a format the server can't decode — AC-4 on some broadcast channels: the picture plays without.)
+      if (s.noSound && self._noSoundSaid !== it.k) { self._noSoundSaid = it.k; V.toast('This one’s sound is in a format (' + ({ ac4: 'AC-4', mpegh_3d_audio: 'MPEG-H', eac3: 'E-AC-3' }[s.noSound] || String(s.noSound).toUpperCase()) + ') that can’t be converted here, so it plays without sound.', { ms: 9000 }); }
       self.offset = s.offset || 0;
       self.sessionDuration = s.duration || 0;
       if (s.duration) self.vod = true;
@@ -849,6 +949,7 @@ PP._sessionBody = function (a, startAt) {
   var it = this.it;
   var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: it.t === 'catchup' ? it.u : undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
   if (a.audioOnly) body.audioOnly = true;
+  body.caps = V.convCaps(a);
   if (V.signMedia()) body.sign = true; // (signed in the same answer: server.js)
   return body;
 };
@@ -877,6 +978,10 @@ PP._attachMedia = function (a, token, startAt, kind, url, gone) {
   var self = this, v = this.video, it = this.it;
   if (!gone) gone = function () { return token !== self.token; };
   var rel = Math.max(0, (startAt || 0) - this.offset - (it.startOffset || 0));
+  // (A server copy started part-way begins at the key frame before the point asked for, a few seconds early, and the
+  // player moves up to the point. A TV's or console's own player is left to start at the copy's beginning, as it
+  // always has: the position it shows is right either way.)
+  if (a.via === 'session' && rel > 0 && rel < 15 && V.device && V.device.tv) rel = 0;
   var bufGoal = V.tune ? V.tune.bufGoal(this) : V.pref('dataSaver') ? 15 : 30;
   if (kind === 'hls' && a.native) {
     v.src = url;
@@ -950,7 +1055,10 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
       this._hlsWay = 'hlsjs';
       var q = this._quality();
       var hcfg = {
-        enableWorker: true, maxBufferLength: bufGoal, backBufferLength: 60, startPosition: this.vod && rel > 0 ? rel : -1,
+        // (A film always starts where it was asked to — at its beginning too. Left to itself hls.js takes the server's
+        // copy, whose playlist is still growing, for a live stream and starts near its end: a film began however far
+        // the server had got by then, some seconds in — minutes for a file on the server's own disk.)
+        enableWorker: true, maxBufferLength: bufGoal, backBufferLength: 60, startPosition: this.vod ? Math.max(0, rel || 0) : -1,
         manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6, capLevelToPlayerSize: true,
         lowLatencyMode: false, abrEwmaDefaultEstimate: V.pref('dataSaver') ? 800000 : 3000000,
       };
@@ -1122,7 +1230,7 @@ PP._hlsError = function (d) {
   if (code === 410 && this.sessionId) msg = 'The conversion session ended.';
   else if (code === 502 && this.attemptVia === 'relay') msg = 'The server couldn’t reach the stream. It may be offline.';
   else if (code) msg = V.httpStreamMsg(code);
-  else if (/Incompatible|codec/i.test(d.details)) msg = 'This browser can’t decode this stream’s video or audio.';
+  else if (/Incompatible|codec/i.test(d.details)) { msg = 'This browser can’t decode this stream’s video or audio.'; if (this.attempt && this.attempt.via === 'session' && this.attempt.mode === 'remux' && this.sessionInfo && this.sessionInfo.seg === 'fmp4') this._copyFailed(); }
   else if (/manifestParsingError/i.test(d.details)) msg = 'That address doesn’t point to a playable stream.';
   else if (d.type === Hls.ErrorTypes.NETWORK_ERROR) msg = this.attemptVia === 'direct' ? 'The provider doesn’t allow direct playback in a browser.' : 'Couldn’t load the stream.';
   else msg = 'Playback error (' + d.details + ').';
@@ -1369,6 +1477,19 @@ PP._watchPicture = function () {
 };
 
 /** What to do about a picture that isn't there (see _watchPicture). */
+/**
+ * A copy from the server (the picture as it is, repackaged) didn't show here: this device can't decode that format
+ * after all, whatever it said. Remembered for two weeks — such pictures are converted meanwhile — then tried again:
+ * a browser or graphics driver update often fixes it.
+ */
+PP._copyFailed = function () {
+  var si = this.sessionInfo || {};
+  var vc = { hevc: 'hevc', h265: 'hevc', av1: 'av1', vp9: 'vp9' }[si.vcodec] || '';
+  if (si.mode && si.mode !== 'remux') return;
+  if (vc === 'av1' || vc === 'vp9') { V.ls.set('noCopy.' + vc, Date.now()); if (V.crumb) V.crumb('player', vc + ' copies don’t show here: converted from now on'); return; }
+  // (HEVC, or a server that didn't say: as before — it's HEVC more often than not.)
+  if ((vc === 'hevc' || !si.vcodec) && V.codecs().indexOf('hevc') >= 0) { V.ls.set('noHevc', Date.now()); V.codecs.forget(); }
+};
 PP._badPicture = function (why) {
   var it = this.it, tok = this.token, self = this;
   if (!it) return;
@@ -1390,7 +1511,7 @@ PP._badPicture = function (why) {
     this._picConverted = true;
     // (A conversion that only repackaged the picture: this browser can't decode that picture — it's HEVC more often
     // than not. From now on this device has such pictures converted.)
-    if (a.via === 'session' && a.mode === 'remux' && V.codecs().indexOf('hevc') >= 0) { V.ls.set('noHevc', Date.now()); V.codecs.forget(); }
+    if (a.via === 'session' && a.mode === 'remux') this._copyFailed();
     this._healthFail(err, true);
     this.osd('No picture from this copy — converting it on the server…', 3500);
     setTimeout(function () { if (tok === self.token) self.load(it, { force: 'transcode', quiet: true, alt: self.alt, startAt: at0 || undefined }); }, 400);
@@ -2394,7 +2515,7 @@ PP._statsTick = function () {
   }
   if (this.mts) { var mi = this.mts.mediaInfo || {}, st = this.mts.statisticsInfo || {}; rows.push(['Codecs', [mi.videoCodec, mi.audioCodec].filter(Boolean).join(', ') || '–']); rows.push(['Download', st.speed ? V.fmtBits(st.speed * 8 * 1024) : '–']); }
   if (this.shaka) { var s2 = this.shaka.getStats(); var act = this.shaka.getVariantTracks().filter(function (t) { return t.active; })[0] || {}; rows.push(['Codecs', [act.videoCodec, act.audioCodec].filter(Boolean).join(', ') || '–']); rows.push(['Bitrate', V.fmtBits(s2.streamBandwidth)]); rows.push(['Bandwidth', V.fmtBits(s2.estimatedBandwidth)]); }
-  if (this.sessionInfo) rows.push(['Source', [this.sessionInfo.vcodec, this.sessionInfo.height ? this.sessionInfo.height + 'p' : ''].filter(Boolean).join(' · ') || '–']);
+  if (this.sessionInfo) rows.push(['Source', [this.sessionInfo.vcodec, this.sessionInfo.height ? this.sessionInfo.height + 'p' : '', this.sessionInfo.mode === 'remux' ? (this.sessionInfo.seg === 'fmp4' ? 'passed on in MP4 pieces' : 'passed on') : this.sessionInfo.mode === 'transcode' ? (this.sessionInfo.tone ? 'converted, HDR brought down' : 'converted') : '', this.sessionInfo.noSound ? 'no sound (' + this.sessionInfo.noSound + ')' : ''].filter(Boolean).join(' · ') || '–']);
   var b = v.buffered, ahead = 0;
   for (var i = 0; i < b.length; i++) if (b.start(i) <= v.currentTime + 0.5 && b.end(i) > v.currentTime) ahead = b.end(i) - v.currentTime;
   rows.push(['Buffer', ahead.toFixed(1) + ' s']);

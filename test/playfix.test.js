@@ -116,7 +116,7 @@ test('the server: a film whose look inside failed is still converted as a film (
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'playfix-srv-'));
   const film = path.join(dir, 'film.ts');
-  const g = spawnSync(cfg.ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '25', '-c:a', 'aac', '-f', 'mpegts', film]);
+  const g = spawnSync(cfg.ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '25', '-c:a', 'aac', '-f', 'mpegts', film]);
   assert.strictEqual(g.status, 0, String(g.stderr));
   // The provider: the first look at the film is refused (as if ffprobe had timed out), later connections get it.
   let filmHits = 0;
@@ -162,9 +162,18 @@ test('the server: a film whose look inside failed is still converted as a film (
     assert.strictEqual(ss.status, 200, ss.text);
     assert.strictEqual(filmHits, 2, 'the look inside failed, then one connection for the conversion');
     assert.strictEqual(ss.json.offset, 5, 'a film can start part-way');
+    assert.strictEqual(ss.json.seg, 'ts');
     const pl = await req('GET', ss.json.url);
     assert.match(pl.text, /#EXT-X-PLAYLIST-TYPE:EVENT/, 'converted as a film, not a live stream');
     await req('DELETE', `/api/session/${ss.json.sessionId}`);
+    // A player that asks (hls.js, Apple's) is told where the copy's picture really starts and counts from there: at
+    // the key frame before the point — or, as here, at the film's beginning: this provider can't start part-way.
+    const sk = await req('POST', '/api/play/session', { k: it.k, mode: 'remux', seek: 5, codecs: ['h264'], caps: { keyed: true, fmp4: ['av1'], maxH: { h264: 99999 }, junk: 1 } });
+    assert.strictEqual(sk.status, 200, sk.text);
+    assert.ok(sk.json.offset >= 0 && sk.json.offset < 1, 'from the key frame: ' + sk.json.offset);
+    assert.strictEqual(sk.json.mode, 'remux');
+    assert.strictEqual(sk.json.seg, 'ts');
+    await req('DELETE', `/api/session/${sk.json.sessionId}`);
   } finally {
     app.kill('SIGKILL');
     pv.close();
