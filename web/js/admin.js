@@ -1,8 +1,12 @@
 /* Admin: lists, guides, profiles, languages, playback, recommendations, brand, security, backup. */
 'use strict';
 V.route('admin', function (view, r) {
-  if (!S.profile.admin) { view.innerHTML = V.empty('Admin only', 'Only the admin profile can open this.'); return; }
-  var tab = r.args[0] || 'overview';
+  // A manager (a role the admin gives a profile: Profiles) gets four sections of this and no more.
+  var mgr = !S.profile.admin && V.canManage();
+  var MGR_TABS = ['manage', 'channels', 'health', 'errors'];
+  if (!S.profile.admin && !mgr) { view.innerHTML = V.empty('Admin only', 'Only the admin profile can open this.'); return; }
+  var tab = r.args[0] || (mgr ? 'manage' : 'overview');
+  if (mgr && MGR_TABS.indexOf(tab) < 0) tab = 'manage';
   var names = { overview: 'Overview', stats: 'Statistics', lists: 'Lists', guides: 'TV guides', profiles: 'Profiles', content: 'Languages & content', categories: 'Categories', playback: 'Playback', network: 'Network & proxies', recs: 'Recommendations', brand: 'Brand', security: 'Security', mychannels: 'My channels', outputs: 'Other apps', integrations: 'Integrations', api: 'API & automations', apps: 'Backups & updates' };
   // The sections, in groups (a sidebar on big screens; group chips and sub-tabs on phones).
   var groups = [
@@ -21,13 +25,14 @@ V.route('admin', function (view, r) {
     var i = g[2].indexOf(t[2]);
     g[2].splice(i < 0 ? g[2].length : i + 1, 0, t[0]);
   });
+  if (mgr) { names.manage = 'Requests and lists'; groups = [['manage', 'Managing', MGR_TABS.slice()]]; }
   groups.forEach(function (g) { g[2] = g[2].filter(function (id) { return names[id] && (V.adminTabs[id] || id === 'overview'); }); });
   // (Pages reached from inside another, like "Find guides": shown under that one's group.)
   var within = { findguides: 'guides' };
   var cur = within[tab] || tab;
   var group = groups.filter(function (g) { return g[2].indexOf(cur) >= 0; })[0] || groups[0];
   var link = function (id, cls) { return '<a class="' + cls + (id === cur ? ' on' : '') + '"' + (id === cur ? ' aria-current="page"' : '') + ' href="#/admin/' + id + '">' + V.esc(names[id]) + '</a>'; };
-  view.innerHTML = V.pageHead('Admin') + '<div class="adm">' +
+  view.innerHTML = V.pageHead(mgr ? 'Manage' : 'Admin') + '<div class="adm' + (mgr ? ' is-mgr' : '') + '">' +
     '<nav class="adm-nav" aria-label="Admin sections">' + groups.map(function (g) { return '<div class="adm-g"><div class="adm-gh">' + V.esc(g[1]) + '</div>' + g[2].map(function (id) { return link(id, 'adm-l'); }).join('') + '</div>'; }).join('') + '</nav>' +
     '<div class="adm-main">' +
     '<div class="adm-groups" role="tablist" aria-label="Admin groups">' + groups.map(function (g) { return '<a role="tab" class="chip' + (g === group ? ' on' : '') + '" aria-selected="' + (g === group) + '" href="#/admin/' + g[2][0] + '">' + V.esc(g[1]) + '</a>'; }).join('') + '</div>' +
@@ -41,7 +46,7 @@ V.route('admin', function (view, r) {
     S.admin = A;
     // Left the page before this came back: don't draw (or start timers) into it — its clean-up has already run.
     if (!document.documentElement.contains(body)) return;
-    (V.adminTabs[tab] || V.adminTabs.overview)(body, A);
+    (V.adminTabs[tab] || (mgr ? V.adminTabs.manage : V.adminTabs.overview))(body, A);
     // "Add a list" from an empty home page: straight to the form.
     if (tab === 'lists' && r.q.get('add') && /^#\/admin\/lists/.test(location.hash)) {
       try { history.replaceState(null, '', '#/admin/lists'); } catch (e) {}
@@ -61,6 +66,58 @@ V.adminNum = function (el, saved) {
   var v = String(el.value).trim();
   if (v === '' || isNaN(+v)) { el.value = saved === undefined || saved === null ? '' : saved; V.toast('Enter a number', { error: true }); return null; }
   return +v;
+};
+
+/* A manager's first page: requests for more time, and fetching a list or guide again. (What a manager may ask the
+   server for: MANAGER_API in server.js.) */
+V.adminTabs.manage = function (body, A) {
+  var when = function (s) { return s && s.at ? 'fetched ' + V.fmtAgo(s.at) : 'not fetched yet'; };
+  var row = function (kind, x) {
+    var s = x.status || {};
+    return '<li class="mg-row" data-kind="' + kind + '" data-id="' + V.esc(x.id) + '"><div class="grow"><b>' + V.esc(x.name || 'Unnamed') + '</b>' + (x.enabled === false ? ' <span class="chip sm">Off</span>' : '') +
+      '<div class="dim small">' + (s.error ? '<span class="err">' + V.esc(s.error) + '</span> · ' : '') + (kind === 'lists' && s.count ? s.count.toLocaleString() + ' entries · ' : '') + when(s) + '</div></div>' +
+      '<button class="btn sm" data-refresh' + (x.enabled === false ? ' disabled' : '') + '>' + V.icon('refresh') + ' Fetch again</button></li>';
+  };
+  body.innerHTML = '<section class="card-sec"><h2>Asking for more time</h2><div data-mg-reqs><div class="spinner"></div></div></section>' +
+    '<section class="card-sec"><h2>Lists</h2><p class="dim">Channels missing, or a film that should be there by now? Fetch the list again.</p>' + ((A.lists || []).length ? '<ul class="mg-list">' + A.lists.map(function (l) { return row('lists', l); }).join('') + '</ul>' : '<p class="dim">No lists yet.</p>') + '</section>' +
+    ((A.guides || []).length ? '<section class="card-sec"><h2>TV guides</h2><ul class="mg-list">' + A.guides.map(function (g) { return row('guides', g); }).join('') + '</ul></section>' : '') +
+    '<p class="dim small">' + V.icon('info', 'tiny') + ' As a manager you can also fix channels, look at which channels are failing and deal with error reports — the other sections here. Settings, the lists’ own details, profiles, PINs and locks, backups and updates are the admin’s.</p>';
+  var box = V.$('[data-mg-reqs]', body);
+  var fmt = function (m) { return m >= 60 ? (m % 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m / 60 + (m === 60 ? ' hour' : ' hours')) : m + ' min'; };
+  var draw = function () {
+    return V.api('/api/admin/screentime').then(function (r) {
+      if (!document.documentElement.contains(body)) return;
+      var pend = (r.pending || []).filter(function (x) { return x.pid !== S.profile.id; });
+      var lim = Object.keys(r.profiles || {}).filter(function (id) { var x = r.profiles[id]; return id !== S.profile.id && x.rule && x.rule.on; });
+      var nameOf = function (id) { var p = (A.profiles || []).filter(function (y) { return y.id === id; })[0]; return p ? p.name : 'Someone'; };
+      box.innerHTML = (pend.length ? '<ul class="mg-list">' + pend.map(function (q) {
+        return '<li class="mg-row" data-req="' + V.esc(q.id) + '" data-min="' + (+q.minutes || 0) + '"><div class="grow"><b>' + V.esc(q.name) + '</b> asks for ' + V.esc(fmt(+q.minutes || 0)) + ' more' + (q.note ? '<div class="dim small">“' + V.esc(q.note) + '”</div>' : '') + '</div>' +
+          '<button class="btn sm primary" data-give>Give ' + V.esc(fmt(+q.minutes || 0)) + '</button><button class="btn sm" data-no>Not today</button></li>';
+      }).join('') + '</ul>' : '<p class="dim">Nobody is asking right now. A request also pops up here the moment it’s made.</p>') +
+        (lim.length ? '<h3 class="mg-h">Give extra time today</h3><ul class="mg-list">' + lim.map(function (id) {
+          return '<li class="mg-row" data-pid="' + V.esc(id) + '"><div class="grow"><b>' + V.esc(nameOf(id)) + '</b></div>' + [15, 30, 60].map(function (m) { return '<button class="btn sm" data-grant="' + m + '">+' + fmt(m) + '</button>'; }).join('') + '</li>';
+        }).join('') + '</ul>' : '');
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  draw();
+  body.onclick = function (e) {
+    var b = e.target.closest('button'), li = b && b.closest('.mg-row');
+    if (!b || !li || b.disabled) return;
+    if (b.hasAttribute('data-refresh')) {
+      b.disabled = true;
+      V.api('/api/admin/' + li.dataset.kind + '/' + encodeURIComponent(li.dataset.id) + '/refresh', { method: 'POST' }).then(function (x) {
+        V.toast(x && x.running ? 'Still fetching — it carries on by itself.' : 'Fetched again');
+        if (!(x && x.running)) V.router.refresh(); else b.disabled = false;
+      }).catch(function (er) { b.disabled = false; V.fail(er); });
+    } else if (b.hasAttribute('data-give') || b.hasAttribute('data-no')) {
+      b.disabled = true;
+      var ok = b.hasAttribute('data-give');
+      (V.stAnswer ? V.stAnswer(li.dataset.req, ok, ok ? +li.dataset.min : 0) : Promise.reject(new Error('Screen time isn’t available.'))).then(null, function (er) { b.disabled = false; V.fail(er); });
+    } else if (b.hasAttribute('data-grant')) {
+      b.disabled = true;
+      V.api('/api/admin/screentime/' + encodeURIComponent(li.dataset.pid) + '/grant', { body: { minutes: +b.dataset.grant } }).then(function () { b.disabled = false; V.toast('Done — ' + fmt(+b.dataset.grant) + ' more today.'); }, function (er) { b.disabled = false; V.fail(er); });
+    }
+  };
 };
 
 V.adminTabs.overview = function (body, A) {
@@ -379,7 +436,7 @@ function profLimits(p, A) {
   return bits.join(' · ') || 'No limits';
 }
 function profChips(p) {
-  return (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.priority ? ' <span class="chip sm pri">Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '');
+  return (p.admin ? ' <span class="chip sm">Admin</span>' : '') + (p.kids ? ' <span class="chip sm">Kids</span>' : '') + (p.manager && !p.kids && !p.admin ? ' <span class="chip sm">Manager</span>' : '') + (p.priority ? ' <span class="chip sm pri">Priority</span>' : '') + (p.online ? ' <span class="chip sm ok">online</span>' : '');
 }
 V.adminTabs.profiles = function (body, A) {
   var s = A.settings;
@@ -401,6 +458,7 @@ V.adminTabs.profiles = function (body, A) {
           '<label class="field"><span>Blocked categories (one per line)</span><textarea class="input" rows="2" data-r="blockedGroups">' + V.esc((r.blockedGroups || []).join('\n')) + '</textarea></label></section>') +
         '<div data-st-slot></div>' +
         '<section class="ap-sec"><h4>When every connection is in use</h4><label class="check ap-pri"><input type="checkbox" data-pri' + (p.priority ? ' checked' : '') + '><span>Priority viewer <small class="dim">— takes a connection from someone on a standard profile; standard viewers can’t take one from them. Saved straight away.</small></span></label></section>' +
+        (p.admin ? '' : '<section class="ap-sec"><h4>Helping run things</h4><label class="check ap-mgr"><input type="checkbox" data-mgr' + (p.manager && !p.kids ? ' checked' : '') + (p.kids ? ' disabled' : '') + '><span>Manager <small class="dim">— can fix channels, fetch lists and guides again, deal with error reports and answer requests for more screen time. Can’t see or change settings, lists’ sign-in details, profiles, PINs and locks, backups or updates. ' + (p.kids ? 'Not for a kids profile.' : p.hasPin ? 'Saved straight away.' : 'Needs a PIN on this profile first.') + '</small></span></label></section>') +
         '<div class="ap-foot">' + (p.admin ? '<span></span>' : '<div class="btn-row"><button class="btn sm primary" data-save>Save changes</button></div>') +
           '<div class="btn-row ap-acct"><button class="btn sm" data-pin>' + (p.hasPin ? 'Change PIN' : 'Set a PIN') + '</button>' + (p.admin ? '' : '<button class="btn sm" data-make>Make admin</button><button class="btn sm danger" data-del>Delete profile</button>') + '</div></div>' +
       '</div></details></li>';
@@ -429,6 +487,12 @@ V.adminTabs.profiles = function (body, A) {
       gp[t.dataset.guest] = t.type === 'checkbox' ? t.checked : t.value;
       if (t.dataset.guest === 'guestProfile') V.$('.adm-guest', body).hidden = !t.checked;
       V.adminSave(gp).then(function (ns) { if (ns) Object.assign(A.settings, gp); }).catch(function () {});
+    } else if (t.hasAttribute('data-mgr')) {
+      var mOn = t.checked, mp = byId(li.dataset.id);
+      V.put('/api/admin/profiles/' + li.dataset.id, { manager: mOn }).then(function () {
+        if (mp) { mp.manager = mOn; V.$('[data-chips]', li).innerHTML = profChips(mp); }
+        V.toast(mOn ? (mp ? mp.name : 'They') + ' is now a manager' : (mp ? mp.name : 'They') + ' is no longer a manager');
+      }).catch(function (err) { t.checked = !mOn; V.fail(err); });
     } else if (t.hasAttribute('data-pri')) {
       // Saved straight away (it isn't one of the limits).
       var on = t.checked, p = byId(li.dataset.id);
@@ -560,12 +624,37 @@ V.adminTabs.playback = function (body, A) {
     '<label class="field"><span>Quality (CRF, lower = better)</span><input class="input" type="number" min="16" max="35" data-s="transcodeCrf" value="' + s.transcodeCrf + '"></label>' +
     '<label class="field"><span>Most conversions at once (0 = no limit)</span><input class="input" type="number" min="0" max="32" data-s="maxTranscodes" value="' + s.maxTranscodes + '"></label>' +
     '<label class="field"><span>Most server streams at once</span><input class="input" type="number" min="1" max="64" data-s="maxSessions" value="' + s.maxSessions + '"></label></div></section>' +
-    '<section class="card-sec"><h2>Features</h2>' + [['allowDownloads', 'Allow downloads for offline viewing'], ['allowParties', 'Allow watch parties'], ['introDetection', 'Detect intros and end credits automatically (compares episodes’ audio on the server)']].map(function (x) { return '<label class="switch"><input type="checkbox" data-b="' + x[0] + '"' + (s[x[0]] ? ' checked' : '') + '><span class="sw"></span><span>' + x[1] + '</span></label>'; }).join('') + '</section>';
+    areasHtml(s) +
+    '<section class="card-sec"><h2>Features</h2>' + [['introDetection', 'Detect intros and end credits automatically (compares episodes’ audio on the server)']].map(function (x) { return '<label class="switch"><input type="checkbox" data-b="' + x[0] + '"' + (s[x[0]] ? ' checked' : '') + '><span class="sw"></span><span>' + x[1] + '</span></label>'; }).join('') + '</section>';
+  // What's switched on: one press for "just watching", or each part by itself.
+  var areasSave = function (off, extra, msg) {
+    var p = Object.assign({ off: off }, extra || {});
+    return V.adminSave(p, msg).then(function (saved) {
+      S.settings = Object.assign(S.settings, { off: saved.off || {}, allowDownloads: saved.allowDownloads !== false, allowParties: saved.allowParties !== false });
+      V.emit('settings');
+      var sec = V.$('.adm-areas', body);
+      if (sec) { var f = document.activeElement && document.activeElement.getAttribute && (document.activeElement.getAttribute('data-area-sw') || document.activeElement.getAttribute('data-areas')); sec.outerHTML = areasHtml(saved); var back = f && V.$('.adm-areas [data-area-sw="' + f + '"], .adm-areas [data-areas="' + f + '"]', body); if (back) back.focus(); }
+    });
+  };
+  body.addEventListener('click', function (e) {
+    var pb = e.target.closest('[data-areas]');
+    if (!pb) return;
+    var off = {};
+    if (pb.dataset.areas === 'simple') AREA_SW.forEach(function (x) { if (!x[3]) off[x[0]] = true; });
+    areasSave(off, { allowDownloads: pb.dataset.areas !== 'simple', allowParties: pb.dataset.areas !== 'simple' }, pb.dataset.areas === 'simple' ? 'Simple: the extras are off for everyone' : 'Everything is switched on');
+  });
   body.onchange = function (e) {
     var t = e.target, p = {};
     if (t.name === 'routing') p.routing = t.value;
     else if (t.dataset.s && t.type === 'number') { p[t.dataset.s] = V.adminNum(t, S.admin.settings[t.dataset.s]); if (p[t.dataset.s] === null) return; }
     else if (t.dataset.s) p[t.dataset.s] = t.dataset.s === 'transcodeMaxHeight' ? +t.value : t.value;
+    else if (t.dataset.areaSw) {
+      var cur = Object.assign({}, S.admin.settings.off || {}), sw = AREA_SW.filter(function (x) { return x[0] === t.dataset.areaSw; })[0];
+      if (sw && sw[3]) { var ex = {}; ex[sw[0]] = t.checked; areasSave(cur, ex).catch(function () { t.checked = !t.checked; }); return; }
+      if (t.checked) delete cur[t.dataset.areaSw]; else cur[t.dataset.areaSw] = true;
+      areasSave(cur).catch(function () { t.checked = !t.checked; });
+      return;
+    }
     else if (t.dataset.b) p[t.dataset.b] = t.checked;
     else return;
     V.adminSave(p).then(function (saved) {
@@ -573,6 +662,33 @@ V.adminTabs.playback = function (body, A) {
       if (p.routing || t.dataset.b) S.settings = Object.assign(S.settings, { routing: p.routing || S.settings.routing }, 'smartFailover' in p ? { smartFailover: p.smartFailover } : {}); });
   };
 };
+
+/* Admin → Playback → What's switched on. [setting or area, name, what it is, true = its own older setting (on = true)]
+   The areas are V.AREAS (core.js) and AREAS (server.js). */
+var AREA_SW = [
+  ['messages', 'Messages', 'Chat between profiles and “Send to someone”. Alerts for new episodes stay.'],
+  ['allowParties', 'Watch parties', 'Watching the same thing together, in step.', true],
+  ['allowDownloads', 'Downloads', 'Saving films and episodes on a device to watch offline.', true],
+  ['multiview', 'Multiview', 'Several channels on the screen at once.'],
+  ['trailers', 'Trailers', 'The trailers page and “Watch the trailer”.'],
+  ['moods', 'Pick something for me', '“Surprise me”, the moods and “Pick for several of us” on Home.'],
+  ['queue', 'Play queue', '“Play next” and “Add to queue”.'],
+  ['wishlist', 'Wishlist', 'Asking to be told when a film or series arrives.'],
+  ['follow', 'Teams and competitions', 'Following teams to get their games on Home, with reminders.'],
+  ['viewing', 'Viewing statistics', 'Your viewing, Your week and Year in review.'],
+  ['themes', 'A choice of looks', 'All 25 colour themes. Off: Midnight, Daylight and High contrast only.'],
+];
+function areasHtml(s) {
+  var off = s.off || {};
+  var isOn = function (x) { return x[3] ? s[x[0]] !== false : off[x[0]] !== true; };
+  var nOff = AREA_SW.filter(function (x) { return !isOn(x); }).length;
+  return '<section class="card-sec adm-areas"><h2>What’s switched on</h2>' +
+    '<p class="dim">Switch off the parts this household doesn’t use. They go from every menu and page, for everyone, and the server stops answering for them. Nothing is deleted: switch a part back on and it’s as it was.</p>' +
+    '<div class="btn-row"><button class="btn sm" data-areas="simple"' + (nOff === AREA_SW.length ? ' disabled' : '') + '>Simple: just watching</button><button class="btn sm" data-areas="all"' + (nOff ? '' : ' disabled') + '>Everything on</button><span class="dim small">' + (nOff ? nOff + ' of ' + AREA_SW.length + ' switched off' : 'Everything is on') + '</span></div>' +
+    '<div class="areas">' + AREA_SW.map(function (x) {
+      return '<label class="switch"><input type="checkbox" data-area-sw="' + x[0] + '"' + (isOn(x) ? ' checked' : '') + '><span class="sw"></span><span><b>' + x[1] + '</b><small class="dim">' + x[2] + '</small></span></label>';
+    }).join('') + '</div></section>';
+}
 
 V.adminTabs.recs = function (body, A) {
   var s = A.settings;

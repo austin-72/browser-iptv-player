@@ -33,6 +33,7 @@
   };
   /** The first queued thing that isn't what's playing (marked queued: true, for watch.js). */
   Q.after = function (it) {
+    if (V.areaOff('queue')) return null; // (switched off: what's queued doesn't decide what plays next)
     var l = list();
     for (var i = 0; i < l.length; i++) {
       var q = l[i];
@@ -100,7 +101,7 @@
   var nameOf = function (it) { return it.t === 'episode' ? ((V.showOf(it) || {}).n || it.n) + ' ' + V.epLabel(it) : it.n; };
   /** "Play next" and "Add to queue" (or "Remove from queue") for a … menu. */
   Q.menuItems = function (it) {
-    if (!queueable(it)) return [];
+    if (!queueable(it) || V.areaOff('queue')) return [];
     var inQ = Q.has(it.k);
     return [
       { label: 'Play next', icon: 'skipnext', fn: function () { Q.add(it, true); } },
@@ -125,7 +126,7 @@
   var prevPlayerExtras = V.playerMenuExtras;
   V.playerMenuExtras = function (p, main, pages) {
     if (prevPlayerExtras) prevPlayerExtras(p, main, pages);
-    if (!p.it || p.it.t === 'catchup') return;
+    if (!p.it || p.it.t === 'catchup' || V.areaOff('queue')) return;
     var n = list().length;
     // (Opened once the menu has closed and given the focus back, so the focus can go into the panel.)
     main.push({ label: 'Your queue', value: n ? V.plural(n, 'title') : 'Empty', fn: function () { setTimeout(Q.openSide, 0); } });

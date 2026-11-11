@@ -320,8 +320,30 @@ V.prompt = function (title, o) {
 };
 
 /** A small popup menu next to a button. items: [{label, icon, fn, danger, checked, sep}] */
+/**
+ * Whole areas of the app the admin has switched off (Admin → Playback → Features): S.settings.off = { messages: true, … }.
+ * One place decides what that hides: an area's pages (the router sends them Home), links to those pages and anything
+ * marked data-area="…" (hidden by a class on <body>: web/css), and menu items tagged `area`. Each area's own file
+ * checks V.areaOff() for what it adds to other pages.
+ */
+/** The admin, or a profile the admin gave the manager role (channels, list refreshes, error reports, screen-time requests). */
+V.canManage = function () { return !!(S.profile && (S.profile.admin || (S.profile.manager && !S.profile.kids))); };
+V.AREAS = { messages: [], multiview: ['multiview'], trailers: ['trailers'], moods: ['mood', 'together'], viewing: ['viewing', 'review'], wishlist: ['wishlist'], queue: [], follow: ['follow'], themes: [] };
+V.areaOff = function (area) { var o = S.settings && S.settings.off; return !!(o && o[area] === true); };
+V.pageOff = function (name) { for (var a in V.AREAS) if (V.AREAS.hasOwnProperty(a) && V.AREAS[a].indexOf(name) >= 0 && V.areaOff(a)) return true; return false; };
+V.applyAreas = function () {
+  var b = document.body, a;
+  for (a in V.AREAS) if (V.AREAS.hasOwnProperty(a)) b.classList.toggle('off-' + a, V.areaOff(a));
+  // (Looks: a look outside the short list gives way to the standard one, and comes back when they're on again.)
+  if (V.applyTheme && V.themeWanted && V.themeWanted !== 'auto') V.applyTheme(V.themeWanted);
+  // Messages off: the button at the top is for alerts only (new episodes, wishlist arrivals).
+  var mb = V.$('.msg-btn');
+  if (mb) { var mo = V.areaOff('messages'); mb.setAttribute('href', mo ? '#/messages/alerts' : '#/messages'); mb.setAttribute('aria-label', mo ? 'New for you' : 'Messages'); mb.title = mo ? 'New for you' : 'Messages'; }
+  if (V.updateUnread) V.updateUnread();
+};
 V.menu = function (anchor, items, o) {
   o = o || {};
+  items = items.filter(function (it) { return it && !(it.area && V.areaOff(it.area)); });
   V.closeMenus();
   var m = document.createElement('div');
   m.className = 'popmenu';

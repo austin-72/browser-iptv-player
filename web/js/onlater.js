@@ -50,7 +50,7 @@
     var rem = V.hasReminder(c, x);
     return '<li class="ol-i"><button class="ol-b" data-k="' + V.esc(c.k) + '" data-s="' + x.s + '"><span class="ol-time num">' + V.fmtClock(x.s) + '</span>' + V.art(c.i, c.n, 'art sm') +
       '<span class="ol-main"><b class="truncate">' + V.esc(x.t) + '</b><small class="dim truncate">' + V.esc(c.n) + (x.st ? ' · ' + V.esc(x.st) : '') + (x.also ? ' · also on ' + V.plural(x.also, 'channel') : '') + '</small></span></button>' +
-      (x.kind === 'sport' && V.followDialog ? '<button class="icon-btn" data-fol="' + V.esc(c.k) + '" data-s="' + x.s + '" aria-label="Follow the teams in ' + V.esc(x.t) + '">' + V.icon('star') + '</button>' : '') +
+      (x.kind === 'sport' && V.followDialog && !V.areaOff('follow') ? '<button class="icon-btn" data-fol="' + V.esc(c.k) + '" data-s="' + x.s + '" aria-label="Follow the teams in ' + V.esc(x.t) + '">' + V.icon('star') + '</button>' : '') +
       '<button class="icon-btn" data-rem="' + V.esc(c.k) + '" data-s="' + x.s + '" aria-pressed="' + rem + '" aria-label="Remind me about ' + V.esc(x.t) + '">' + V.icon(rem ? 'bellf' : 'bell') + '</button></li>';
   };
   var findItem = function (v, k, s) { return v.items.filter(function (x) { return String(x.s) === String(s) && (x.k === k || (x.ks || []).indexOf(k) >= 0); })[0]; };
@@ -63,7 +63,7 @@
       '<section class="ol-events" aria-label="Events"></section><div class="ol-body"><div class="spinner"></div></div>';
     var body = V.$('.ol-body', view);
     if (chipFocus) { var cf = V.$('[data-kind="' + chipFocus + '"]', view); chipFocus = ''; if (cf) setTimeout(function () { cf.focus({ preventScroll: true }); }, 0); }
-    if (V.eventsSection) V.eventsSection(V.$('.ol-events', view));
+    if (V.eventsSection && !V.areaOff('follow')) V.eventsSection(V.$('.ol-events', view));
     var data = null;
     var draw = function (v) {
       data = v;

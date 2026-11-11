@@ -74,7 +74,7 @@
   var ADMIN_TABS = [['overview', 'Overview'], ['stats', 'Statistics'], ['lists', 'Lists'], ['guides', 'TV guides'], ['profiles', 'Profiles', 'screen time bedtime kids age limit pin'], ['content', 'Languages & content'], ['categories', 'Categories'], ['playback', 'Playback'], ['network', 'Network & proxies'], ['recs', 'Recommendations'], ['brand', 'Brand'], ['security', 'Security', 'password devices'], ['mychannels', 'My channels'], ['outputs', 'Other apps'], ['integrations', 'Integrations', 'subtitles'], ['api', 'API & automations', 'webhooks keys'], ['apps', 'Backups, updates & apps']];
   function staticEntries() {
     var out = [];
-    var page = function (id, label, href, icon, kw) { out.push({ id: 'page:' + id, label: label, hint: 'Page', icon: icon || 'next', kw: kw || '', run: function () { V.router.go(href); } }); };
+    var page = function (id, label, href, icon, kw) { if (V.pageOff(id) || (id === 'queue' && V.areaOff('queue'))) return; out.push({ id: 'page:' + id, label: label, hint: 'Page', icon: icon || 'next', kw: kw || '', run: function () { V.router.go(href); } }); };
     var types = new Set((S.items || []).map(function (i) { return i.t; }));
     page('home', 'Home', '#/home', 'home');
     if (types.has('live')) { page('live', 'Live TV', '#/live', 'tv', 'channels'); page('guide', 'TV guide', '#/guide', 'clock', 'epg listings schedule'); page('favs', 'Favourite channels', '#/live?g=__fav', 'heart'); page('multiview', 'Multiview', '#/multiview', 'multi', 'several channels at once'); page('onlater', 'On later', '#/onlater', 'clock'); }
@@ -89,11 +89,12 @@
     if (V.routes.review) page('review', 'Year in review', '#/review', 'sparkle', 'yearly wrapped looking back');
     if (types.has('live')) page('follow', 'Teams you follow', '#/follow', 'star', 'sport sports events football team competition');
     page('search', 'Search', '#/search', 'search');
-    page('messages', 'Messages', '#/messages', 'chat', 'chat');
+    if (V.areaOff('messages')) page('messages', 'New for you', '#/messages/alerts', 'bell', 'alerts new episodes'); else page('messages', 'Messages', '#/messages', 'chat', 'chat');
     page('downloads', 'Downloads', '#/downloads', 'download', 'offline');
     if (V.dvr && V.dvr.visible()) page('recordings', 'Recordings', '#/recordings', 'rec', 'dvr recorded record tv');
     page('remote', 'Use this as a remote', '#/remote', 'remote', 'phone control tv');
     page('settings', 'Settings', '#/settings', 'gear', 'preferences options');
+    if (S.profile && S.profile.manager && !S.profile.admin && V.canManage()) page('manage', 'Manage', '#/admin', 'shield', 'channels requests errors refresh lists');
     if (S.profile && S.profile.admin) {
       page('admin', 'Admin', '#/admin', 'shield');
       var tabs = ADMIN_TABS.slice();
@@ -125,7 +126,7 @@
     out.push(setting('Remote and keyboard buttons', function () { V.router.go('#/settings?s=remote'); }, 'coloured red green yellow blue keys mapping'));
     out.push(setting('Sign in a TV', function () { V.pairDialog(); }, 'pair code'));
     out.push(setting('Keyboard shortcuts', function () { V.keyHelp('all'); }, 'keys help'));
-    (V.THEMES || []).forEach(function (t) { out.push({ id: 'theme:' + t.id, label: 'Theme: ' + t.name, hint: 'Look', icon: 'sparkle', run: function () { V.setPref('theme', t.id); V.ls.set('theme', t.id); V.applyTheme(t.id); V.toast('Theme: ' + t.name); if (document.body.dataset.page === 'settings') V.router.refresh(); } }); });
+    (V.themeList ? V.themeList() : []).forEach(function (t) { out.push({ id: 'theme:' + t.id, label: 'Theme: ' + t.name, hint: 'Look', icon: 'sparkle', run: function () { V.setPref('theme', t.id); V.ls.set('theme', t.id); V.applyTheme(t.id); V.toast('Theme: ' + t.name); if (document.body.dataset.page === 'settings') V.router.refresh(); } }); });
     // Profiles.
     ((S.boot && S.boot.profiles) || []).forEach(function (p) {
       if (S.profile && p.id === S.profile.id) return;

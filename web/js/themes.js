@@ -30,7 +30,13 @@ V.THEMES = [
 
 V.theme = function (id) { for (var i = 0; i < V.THEMES.length; i++) if (V.THEMES[i].id === id) return V.THEMES[i]; return V.THEMES[0]; };
 
+/** With "a choice of looks" switched off (Admin → Playback), the three that are about being able to read the screen stay. */
+V.BASIC_THEMES = ['midnight', 'light', 'contrast'];
+V.themeList = function () { return V.areaOff && V.areaOff('themes') ? V.THEMES.filter(function (t) { return V.BASIC_THEMES.indexOf(t.id) >= 0; }) : V.THEMES; };
+
 V.applyTheme = function (id) {
+  V.themeWanted = id; // (kept as chosen: it comes back when the admin switches looks on again)
+  if (id !== 'auto' && V.areaOff && V.areaOff('themes') && V.BASIC_THEMES.indexOf(id) < 0) id = 'midnight';
   V.themeChosen = id;
   var t = V.theme(id === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'midnight') : id);
   var r = document.documentElement;

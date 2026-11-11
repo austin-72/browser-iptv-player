@@ -105,7 +105,7 @@ V.route('home', function (view) {
       '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + (resumeIt ? (resumeNext ? ' Play ' : ' Resume ') + (resumeIt.t === 'episode' ? V.esc(V.epLabel(resumeIt)) : '') : ' Play') + '</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
       '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
   }
-  if (hasVod) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.filter(function (m) { return !(S.profile && S.profile.kids && (m.id === 'scary' || m.id === 'kids')); }).map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') /* (a kids' profile: no "Something scary", and everything is for kids already) */ + '</div>';
+  if (hasVod && !V.areaOff('moods')) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.filter(function (m) { return !(S.profile && S.profile.kids && (m.id === 'scary' || m.id === 'kids')); }).map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') /* (a kids' profile: no "Something scary", and everything is for kids already) */ + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button>' + (V.homeFootExtra ? V.homeFootExtra() : '') + '</div>';
   view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
   if (heroIt) {
@@ -158,10 +158,10 @@ V.route('home', function (view) {
       });
     },
     onlater: function () { push(V.onLaterRow && V.onLaterRow()); },
-    events: function () { push(V.eventsRow && V.eventsRow()); },
+    events: function () { push(V.eventsRow && !V.areaOff('follow') && V.eventsRow()); },
     shared: function () {
       var soc = S.socialCache;
-      if (!soc) return;
+      if (!soc || V.areaOff('messages')) return;
       var seen = new Set(), items = [];
       (S.recentShares || []).forEach(function (m) { var it = V.entry(m.item.k); if (it && !seen.has(it.k)) { seen.add(it.k); items.push(it); } });
       add({ id: 'shared', title: 'Sent to you', items: items.slice(0, 20), more: '#/messages' });

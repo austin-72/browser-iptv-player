@@ -51,7 +51,7 @@
       var pinOpen = !!(V.$('.ce-pin', body) && V.$('.ce-pin', body).open);
       var gl = st.g ? groups.filter(function (x) { return x.name === st.g; })[0] : null;
       body.innerHTML =
-        '<details class="card-sec ce-pin"' + (pinOpen ? ' open' : '') + '><summary><b>' + V.icon('lock') + ' Parental lock</b> <span class="dim">' + (data && data.hasPin ? 'PIN set' : 'No PIN yet') + '</span></summary>' +
+        '<details class="card-sec ce-pin adm-only"' + (pinOpen ? ' open' : '') + '><summary><b>' + V.icon('lock') + ' Parental lock</b> <span class="dim">' + (data && data.hasPin ? 'PIN set' : 'No PIN yet') + '</span></summary>' +
         '<p class="dim">Locked channels and categories ask for this PIN before they play, and what’s on them stays hidden until then. A device stays unlocked for 30 minutes. Kids profiles can’t unlock them.</p>' +
         '<div class="btn-row"><button class="btn" data-pin>' + (data && data.hasPin ? 'Change the parental PIN' : 'Set a parental PIN') + '</button>' + (data && data.hasPin ? '<button class="btn danger" data-nopin>Remove the PIN</button>' : '') + '</div>' +
         '<p class="small">Lock a whole category: pick it below and use “Lock this category”. Lock single channels with Edit, or select several and use Lock.</p></details>' +
@@ -60,8 +60,8 @@
         '<select class="input" data-f="list" aria-label="List"><option value="">All lists</option>' + (data ? data.lists : []).map(function (l) { return '<option value="' + V.esc(l.id) + '"' + (l.id === st.list ? ' selected' : '') + '>' + V.esc(l.name) + '</option>'; }).join('') + '</select>' +
         '<select class="input" data-f="show" aria-label="Show"><option value="">Every channel</option><option value="changed"' + (st.show === 'changed' ? ' selected' : '') + '>Ones you changed' + (data && data.changed ? ' (' + data.changed + ')' : '') + '</option><option value="hidden"' + (st.show === 'hidden' ? ' selected' : '') + '>Hidden ones</option><option value="locked"' + (st.show === 'locked' ? ' selected' : '') + '>Locked ones</option><option value="noguide"' + (st.show === 'noguide' ? ' selected' : '') + '>Without a guide</option></select>' +
         '<select class="input" data-f="type" aria-label="Type"><option value="">TV and radio</option><option value="live"' + (st.type === 'live' ? ' selected' : '') + '>TV</option><option value="radio"' + (st.type === 'radio' ? ' selected' : '') + '>Radio</option></select></div>' +
-        (gl ? '<div class="ce-gbar"><b>' + V.esc(gl.name) + '</b><span class="dim">' + V.plural(gl.n, 'channel') + ' · drag them, or use the arrows, to change their order</span><span class="sp"></span><label class="switch sm"><input type="checkbox" data-glock' + (gl.locked ? ' checked' : '') + '><span class="sw"></span><span>Lock this category</span></label></div>' : '') +
-        '<div class="ce-bulk"' + (sel.size ? '' : ' hidden') + '><b>' + V.plural(sel.size, 'channel') + ' selected</b><button class="btn sm" data-bulk="hide">Hide</button><button class="btn sm" data-bulk="unhide">Show again</button><button class="btn sm" data-bulk="move">Move to…</button><button class="btn sm" data-bulk="renumber">Number from…</button><button class="btn sm" data-bulk="lock">' + V.icon('lock', 'tiny') + ' Lock</button><button class="btn sm" data-bulk="unlock">Unlock</button><button class="btn sm danger" data-bulk="reset">Undo changes</button><button class="btn sm ghost" data-bulk="none">Clear selection</button></div>' +
+        (gl ? '<div class="ce-gbar"><b>' + V.esc(gl.name) + '</b><span class="dim">' + V.plural(gl.n, 'channel') + ' · drag them, or use the arrows, to change their order</span><span class="sp"></span><label class="switch sm adm-only"><input type="checkbox" data-glock' + (gl.locked ? ' checked' : '') + '><span class="sw"></span><span>Lock this category</span></label></div>' : '') +
+        '<div class="ce-bulk"' + (sel.size ? '' : ' hidden') + '><b>' + V.plural(sel.size, 'channel') + ' selected</b><button class="btn sm" data-bulk="hide">Hide</button><button class="btn sm" data-bulk="unhide">Show again</button><button class="btn sm" data-bulk="move">Move to…</button><button class="btn sm" data-bulk="renumber">Number from…</button><button class="btn sm adm-only" data-bulk="lock">' + V.icon('lock', 'tiny') + ' Lock</button><button class="btn sm" data-bulk="unlock">Unlock</button><button class="btn sm danger" data-bulk="reset">Undo changes</button><button class="btn sm ghost" data-bulk="none">Clear selection</button></div>' +
         (data ? '<p class="dim small">' + V.plural(data.total, 'channel') + (st.q || st.g || st.list || st.show || st.type ? ' match' : '') + '. Changes show on every device straight away.</p>' : '') +
         (items.length ? '<ul class="ce-list">' + items.map(row).join('') + '</ul>' : data ? V.empty('No channels here', st.show === 'hidden' ? 'Nothing is hidden.' : 'Try a different search or category.') : '<div class="spinner"></div>') +
         (data && items.length < data.total ? '<div class="btn-row"><button class="btn" data-more>Show more</button></div>' : '');
@@ -163,7 +163,7 @@
       '<h3>TV guide</h3><div class="ce-guide"><p class="small" data-gnow>' + (st.eo ? 'Using the guide channel <b>' + V.esc(st.eo) + '</b> (picked by hand).' : c.epg ? 'Matched automatically to <b>' + V.esc(c.epg) + '</b>.' : 'No guide matched automatically.') + '</p>' +
       '<div class="btn-row"><button class="btn sm" data-gpick>' + V.icon('search') + ' Pick a guide channel</button><button class="btn sm ghost" data-gauto' + (st.eo ? '' : ' hidden') + '>Back to automatic</button></div>' +
       '<label class="field"><span>Time offset for this channel</span><select class="input" data-v="off">' + offOpts(st.off) + '</select></label><div class="ce-peek small" data-peek></div></div>' +
-      '<h3>More</h3><label class="check"><input type="checkbox" data-v="lock"' + (c.locked ? ' checked' : '') + '><span>Locked (asks for the parental PIN)</span></label>' +
+      '<h3>More</h3><label class="check adm-only"><input type="checkbox" data-v="lock"' + (c.locked ? ' checked' : '') + '><span>Locked (asks for the parental PIN)</span></label>' +
       '<label class="check"><input type="checkbox" data-v="hide"' + (c.hidden ? ' checked' : '') + '><span>Hidden from everyone</span></label></div>';
     var peek = function (d) {
       var id = st.eo || c.epg;
@@ -180,6 +180,7 @@
           var v = function (k) { return V.$('[data-v="' + k + '"]', d); };
           // Only what changed: back to the provider's value clears it; the same as now leaves it alone.
           var patch = { eo: st.eo || null, off: +v('off').value || null, hide: v('hide').checked, lock: v('lock').checked };
+          if (!S.profile.admin) delete patch.lock; // (locks are the admin's: a manager's edit leaves them alone)
           var field = function (f, val, orig, cur) { if (val === cur) return; patch[f] = !val || val === orig ? null : val; };
           field('n', v('n').value.trim(), c.n0 || c.n, c.n);
           field('g', v('g').value.trim(), c.g0 || c.g, c.g);

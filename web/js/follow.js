@@ -169,7 +169,7 @@
   }, 180);
   V.paletteExtra = V.paletteExtra || [];
   V.paletteExtra.push(function (q, raw) {
-    if (!S.live.length || q.length < 3) return [];
+    if (!S.live.length || q.length < 3 || V.areaOff('follow')) return [];
     var hits = palCache[q];
     if (!hits) { palFetch(q, raw); return []; }
     return hits.map(function (o, i) {

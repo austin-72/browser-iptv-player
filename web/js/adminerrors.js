@@ -47,7 +47,7 @@
       box.innerHTML = '<div class="btn-row er-acts">' +
         '<button class="btn sm primary" data-copy>' + V.icon('copy') + ' Copy report</button>' +
         (is.status === 'fixed' ? '<button class="btn sm" data-status="open">Reopen</button>' : '<button class="btn sm" data-status="fixed">' + V.icon('check') + ' Mark fixed</button>') +
-        '<button class="btn sm danger" data-del>Delete</button></div>' +
+        '<button class="btn sm danger adm-only" data-del>Delete</button></div>' +
         (Object.keys(is.devices || {}).length ? '<p class="small dim">Devices: ' + Object.keys(is.devices).map(function (d) { return esc(d) + ' (' + is.devices[d] + ')'; }).join(', ') + '</p>' : '') +
         (Object.keys(is.items || {}).length ? '<p class="small dim">Titles: ' + Object.keys(is.items).map(function (d) { return esc(d) + ' (' + is.items[d] + ')'; }).join(', ') + '</p>' : '') +
         (is.samples && is.samples[0] ? sampleHtml(is.samples[0]) : '') +
@@ -70,9 +70,9 @@
       var open = all.filter(function (x) { return x.status === 'open'; }), fixed = all.filter(function (x) { return x.status === 'fixed'; });
       var list = (state.show === 'open' ? open : state.show === 'fixed' ? fixed : all).filter(function (x) { return !state.kind || x.kind === state.kind; });
       var kinds = {}; all.forEach(function (x) { kinds[x.kind] = (kinds[x.kind] || 0) + 1; });
-      body.innerHTML = '<section class="card-sec"><div class="sec-h"><h2>Error reports</h2><a class="btn sm" href="/api/admin/errors-report.txt" download>' + V.icon('download') + ' Download open ones (.txt)</a></div>' +
+      body.innerHTML = '<section class="card-sec"><div class="sec-h"><h2>Error reports</h2><a class="btn sm adm-only" href="/api/admin/errors-report.txt" download>' + V.icon('download') + ' Download open ones (.txt)</a></div>' +
         '<p class="dim">When something goes wrong on a device — a bug in the app, a title that won’t play, a page that freezes — the device tells the server, with what’s needed to fix it: the error and the line of code, the device and browser, what was playing and how, and what happened just before. Server errors are here too. Passwords, PINs and stream logins are never included. The same list is kept in <code>error-reports.txt</code> in the data folder.</p>' +
-        '<label class="switch"><input type="checkbox" data-on' + (R.on ? ' checked' : '') + '><span class="sw"></span><span><b>Collect error reports</b><small>From every device, automatically</small></span></label></section>' +
+        '<label class="switch adm-only"><input type="checkbox" data-on' + (R.on ? ' checked' : '') + '><span class="sw"></span><span><b>Collect error reports</b><small>From every device, automatically</small></span></label></section>' +
         '<div class="chips" role="group" aria-label="Show">' +
         [['open', 'Open', open.length], ['fixed', 'Fixed', fixed.length], ['all', 'All', all.length]].map(function (c) { return '<button class="chip' + (state.show === c[0] ? ' on' : '') + '" data-show="' + c[0] + '" aria-pressed="' + (state.show === c[0]) + '">' + c[1] + ' <small>' + c[2] + '</small></button>'; }).join('') +
         (Object.keys(kinds).length > 1 ? '<select class="input sm er-kind" aria-label="Kind"><option value="">Every kind</option>' + Object.keys(kinds).map(function (k) { return '<option value="' + k + '"' + (state.kind === k ? ' selected' : '') + '>' + esc(R.kinds[k] || k) + ' (' + kinds[k] + ')</option>'; }).join('') + '</select>' : '') +
@@ -87,7 +87,7 @@
             (x.status === 'open' && x.kind !== 'server' && R.current && x.versions && x.versions.length && x.versions.indexOf(R.current) < 0 ? ' · <span class="er-old" title="Every report of this came from an older version of the app">not seen since the last update</span>' : '') + '</span></span></summary>' +
             '<div class="er-body"></div></details>';
         }).join('') + '</div>' : '<p class="dim">' + (all.length ? 'Nothing here.' : 'No problems reported yet.') + '</p>') +
-        (all.length ? '<div class="btn-row">' + (fixed.length ? '<button class="btn sm" data-clear="fixed">Clear fixed</button>' : '') + '<button class="btn sm danger" data-clear="all">Clear all</button></div>' : '');
+        (all.length ? '<div class="btn-row adm-only">' + (fixed.length ? '<button class="btn sm" data-clear="fixed">Clear fixed</button>' : '') + '<button class="btn sm danger" data-clear="all">Clear all</button></div>' : '');
       V.$$('.er-issue', body).forEach(function (d) {
         d.addEventListener('toggle', function () { if (d.open && !d._loaded) { d._loaded = true; detail(V.$('.er-body', d), d.dataset.id); } });
       });

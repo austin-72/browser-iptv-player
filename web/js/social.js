@@ -5,8 +5,11 @@ V.profileById = function (id) { var s = S.socialCache; return s ? s.profiles.fil
 
 V.route('messages', function (view, r) {
   var conv = r.args[0] || '';
+  // Messages switched off (Admin → Playback): this page is the alerts only — new episodes, wishlist arrivals.
+  var msgOff = V.areaOff('messages');
+  if (msgOff) conv = 'alerts';
   var wide = window.innerWidth >= 860;
-  view.innerHTML = '<div class="msg-page' + (conv ? ' has-conv' : '') + '"><aside class="convs"><h1>Messages</h1><div class="presence"></div><div class="conv-list"><div class="spinner"></div></div></aside><section class="thread" aria-live="polite"></section></div>';
+  view.innerHTML = '<div class="msg-page' + (conv ? ' has-conv' : '') + (msgOff ? ' alerts-only' : '') + '"><aside class="convs"><h1>' + (msgOff ? 'New for you' : 'Messages') + '</h1><div class="presence"></div><div class="conv-list"><div class="spinner"></div></div></aside><section class="thread" aria-live="polite"></section></div>';
   var listBox = V.$('.conv-list', view), thread = V.$('.thread', view);
   V.loadSharedLists().then(function (soc) {
     if (!document.contains(view)) return; // (another page by now: nothing to draw, and its clean-up isn't ours)
@@ -14,7 +17,7 @@ V.route('messages', function (view, r) {
       var convs = soc.conversations;
       var byId = {};
       convs.forEach(function (c) { byId[c.id] = c; });
-      var entries = [{ id: 'all', name: 'Everyone', all: true }].concat(soc.profiles.filter(function (p) { return p.id !== S.profile.id; }));
+      var entries = msgOff ? [] : [{ id: 'all', name: 'Everyone', all: true }].concat(soc.profiles.filter(function (p) { return p.id !== S.profile.id; }));
       entries.sort(function (a, b) { var x = byId[a.id], y = byId[b.id]; return (y ? y.last.at : 0) - (x ? x.last.at : 0); });
       // Alerts (new episodes, wishlist arrivals) sit at the top: homelists.js.
       var alertsRow = V.alertsThread ? '<a class="conv' + (conv === 'alerts' ? ' on' : '') + '" href="#/messages/alerts"><span class="avatar sm all">' + V.icon('bell') + '</span><span class="conv-b"><b class="truncate">New for you</b><span class="truncate dim">' + V.esc(V.alertsPreview()) + '</span></span>' + (S.alertsUnread ? '<span class="badge-n">' + S.alertsUnread + '</span>' : '') + '</a>' : '';
@@ -25,12 +28,13 @@ V.route('messages', function (view, r) {
         return '<a class="conv' + (p.id === conv ? ' on' : '') + '" href="#/messages/' + p.id + '">' + (p.all ? '<span class="avatar sm all">' + V.icon('users') + '</span>' : V.avatar(p.avatar, 'sm') + (p.online ? '<i class="online" title="Online"></i>' : '')) +
           '<span class="conv-b"><b class="truncate">' + V.esc(p.name) + '</b><span class="truncate dim">' + V.esc(preview) + '</span></span>' + (c && c.unread ? '<span class="badge-n">' + c.unread + '</span>' : last ? '<small class="dim">' + V.fmtAgo(last.at) + '</small>' : '') + '</a>';
       }).join('');
-      var pres = soc.presence || [];
+      var pres = msgOff ? [] : soc.presence || [];
       V.$('.presence', view).innerHTML = pres.length ? '<h2 class="small dim">Watching now</h2>' + pres.map(function (x) { var p = V.profileById(x.pid); return '<button class="pres" data-k="' + V.esc(x.k) + '">' + V.avatar(p ? p.avatar : 0, 'xs') + '<span class="truncate"><b>' + V.esc(p ? p.name : '') + '</b> ' + V.esc(x.n) + '</span></button>'; }).join('') : '';
     };
     drawList();
     V.$('.presence', view).onclick = function (e) { var b = e.target.closest('[data-k]'); if (b) { var it = V.entry(b.dataset.k); if (it) V.play(it); } };
     if (conv === 'alerts' && V.alertsThread) V.alertsThread(thread, drawList);
+    else if (msgOff) thread.innerHTML = V.empty('Nothing new', '');
     else if (conv) openThread(conv, soc, drawList);
     else if (wide) thread.innerHTML = V.empty('Pick a conversation', 'Send messages, share what you’re watching, or start a watch party.');
     var offs = [
@@ -116,6 +120,7 @@ V.pickItem = function (title) {
 // Incoming messages while elsewhere in the app.
 V.on('message', function (m) {
   if (m.from === S.profile.id) return;
+  if (V.areaOff('messages') && !m.party) return; // (switched off: only a watch-party invite still gets through)
   if (m.item) { S.recentShares = [m].concat(S.recentShares || []).slice(0, 30); }
   if (document.body.dataset.page === 'messages') return;
   S.unread = (S.unread || 0) + 1;

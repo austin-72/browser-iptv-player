@@ -110,7 +110,7 @@ V.route('title', function (view, r) {
     var tb = V.$('[data-trailer]', view);
     if (tb) tb.onclick = function () { V.playTrailer(d.tr, it.n); }; // (here, not on a YouTube tab: web/js/trailers.js)
     // No trailer from the provider: TMDB's, when there's one.
-    else if (S.settings.tmdb && (it.t === 'movie' || it.t === 'show')) V.api('/api/trailers?k=' + encodeURIComponent(it.k)).then(function (t) {
+    else if (S.settings.tmdb && !V.areaOff('trailers') && (it.t === 'movie' || it.t === 'show')) V.api('/api/trailers?k=' + encodeURIComponent(it.k)).then(function (t) {
       var x = t && t[it.k], cr = V.$('.tp-credits', view);
       if (!x || !x.v || !cr || V.$('[data-trailer]', cr)) return;
       var div = document.createElement('div');
@@ -200,10 +200,10 @@ V.route('title', function (view, r) {
           { label: 'Play', icon: 'play', fn: function () { V.play(ep); } },
           p2 ? { label: 'Play from the start', icon: 'restart', fn: function () { V.play(ep, { startAt: 0 }); } } : null,
           { label: p2 && p2.w ? 'Mark as not watched' : 'Mark as watched', icon: 'check', fn: function () { if (p2 && p2.w) { V.del('/api/history?k=' + encodeURIComponent(ep.k)).then(function () { delete S.data.progress[ep.k]; render(ep.s); }); } else { V.saveProgress(ep, ep.d || 1, ep.d || 1, true); render(ep.s); } } },
-          { label: 'Send to someone…', icon: 'send', fn: function () { V.shareDialog(ep); } },
+          { label: 'Send to someone…', icon: 'send', area: 'messages', fn: function () { V.shareDialog(ep); } },
           S.settings.allowDownloads || S.profile.admin ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(ep); } } : null,
           { label: 'Watch together…', icon: 'party', fn: function () { V.party.startDialog(ep); } },
-        ].concat(V.queue ? [{ sep: true }].concat(V.queue.menuItems(ep)) : []));
+        ].concat(V.queue && !V.areaOff('queue') ? [{ sep: true }].concat(V.queue.menuItems(ep)) : []));
       } else V.play(ep);
     };
   }

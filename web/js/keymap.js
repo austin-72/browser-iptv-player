@@ -34,7 +34,7 @@
       for (var i = 0; i < SLEEPS.length - 1; i++) if (left > 0 && left <= SLEEPS[i]) { next = SLEEPS[i + 1]; break; }
       V.setSleep(next);
     } },
-    multiview: { label: 'Multiview', run: function () { if (V.multiview) V.multiview.open(V.watch && V.watch.it && V.watch.it.t === 'live' ? V.watch.it : null); } },
+    multiview: { label: 'Multiview', run: function () { if (V.multiview && !V.areaOff('multiview')) V.multiview.open(V.watch && V.watch.it && V.watch.it.t === 'live' ? V.watch.it : null); } },
     pip: { label: 'Picture-in-picture', run: needPlayer(function (p) { p.togglePip(); }) },
     soundonly: { label: 'Sound only', run: needPlayer(function (p) { if (V.audioOnly && p.it && p.it.t === 'live') V.audioOnly.toggle(p); else p.osd('Sound only is for live channels', 1500); }) },
     info: { label: 'Stream info', run: needPlayer(function (p) { p.toggleStats(); }) },

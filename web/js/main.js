@@ -113,7 +113,11 @@ V.boot = function () {
   }, 4000));
   V.on('route', function () { if (S.catStale && !(V.watch.it && !V.watch.mini) && (S.catNow || Date.now() - (S.catLoadedAt || 0) >= 20 * 60e3)) setTimeout(staleReload, 1500); });
   V.on('profiles', function () { if (!S.profile) V.api('/api/boot').then(function (b) { S.boot = b; if (!V.$('#profiles').hidden) V.showProfiles(); }); });
-  V.on('settings', function () { V.renderShell(); V.applyBrand(); });
+  V.on('settings', function () {
+    V.renderShell(); V.applyBrand();
+    // (The admin has just switched off the area this page belongs to.)
+    if (V.pageOff(document.body.dataset.page)) V.router.go('#/home', true);
+  });
   V.on('data', function (f) { if (f === 'list' || f === 'favs' || f === '*') { if (document.body.dataset.page === 'mine') V.router.refresh(); } });
   setInterval(function () { V.checkReminders(); }, 20000);
   window.addEventListener('scroll', V.throttle(function () { document.body.classList.toggle('scrolled', window.scrollY > 30); }, 100), { passive: true });

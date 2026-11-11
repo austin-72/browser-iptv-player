@@ -19,7 +19,7 @@ V.route('settings', function (view) {
     '<div class="lang-pick"' + (langs ? '' : ' hidden') + '>' + V.langChecks(langs || S.settings.defaultLangs) + '</div>' +
     '<label class="check"><input type="checkbox" data-unknown' + (unknown ? ' checked' : '') + '><span>Also show things whose language isn’t known</span></label><button class="btn primary" data-a="langs">Save languages</button></section>' +
 
-    '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.THEMES.map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto" aria-pressed="' + (pf.theme === 'auto') + '"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
+    '<section class="card-sec"><h2>Look</h2><div class="themes">' + V.themeList().map(function (t) { return '<button class="theme' + (t.id === pf.theme ? ' on' : '') + '" data-theme="' + t.id + '" aria-pressed="' + (t.id === pf.theme) + '">' + V.themePreview(t) + '<span>' + V.esc(t.name) + '</span></button>'; }).join('') + '<button class="theme' + (pf.theme === 'auto' ? ' on' : '') + '" data-theme="auto" aria-pressed="' + (pf.theme === 'auto') + '"><div class="tp auto-tp"></div><span>Match my device</span></button></div>' +
     '<div class="grid2"><label class="field"><span>Text size</span><select class="input" data-pref-sel="uiScale">' + [[0.9, 'Small'], [1, 'Normal'], [1.15, 'Large'], [1.3, 'Extra large'], [1.5, 'Huge']].map(function (o) { return '<option value="' + o[0] + '"' + (+pf.uiScale === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>TV mode (big, remote-friendly)</span><select class="input" data-pref-sel="tvMode">' + [['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(function (o) { return '<option value="' + o[0] + '"' + (pf.tvMode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
     '<label class="switch"><input type="checkbox" data-pref="movingBg"' + (V.movingBg() ? ' checked' : '') + '><span class="sw"></span><span><b>Moving background</b><small>Soft colours drifting slowly behind the posters' + (V.lite() ? ' (off on this device unless you turn it on: it can slow it down)' : '') + '</small></span></label>' +
@@ -43,14 +43,14 @@ V.route('settings', function (view) {
     '<p class="dim small">Alerts also wait in Messages → New for you.</p>' +
     (window.Notification ? '<button class="btn" data-a="notif">' + V.icon('bell') + ' ' + (Notification.permission === 'granted' ? 'Notifications on this device are on' : Notification.permission === 'denied' ? 'Notifications are blocked in this browser' : 'Also notify me when the app isn’t open') + '</button>' : '') + '</section>' +
     '<section class="card-sec"><h2>Privacy</h2>' + sw('presence', 'Let others in the household see what I’m watching') +
-    '<p><a href="#/mine/history">Watch history</a> · pause it or clear it there.</p><p><a href="#/viewing">Your viewing</a> · time watched, favourites and your year in review.</p></section>' +
+    '<p><a href="#/mine/history">Watch history</a> · pause it or clear it there.</p><p data-area="viewing"><a href="#/viewing">Your viewing</a> · time watched, favourites and your year in review.</p></section>' +
 
     '<section class="card-sec"><h2>This device</h2><label class="field"><span>Device name (shown when you use “Play on…”)</span><div class="inline"><input class="input" data-devname value="' + V.esc(V.device.name) + '" maxlength="40"><button class="btn" data-a="devname">Save</button></div></label>' +
     '<label class="check"><input type="checkbox" data-askprofile' + (V.ls.get('askProfile', false) ? ' checked' : '') + '><span>Ask “Who’s watching?” every time the app opens on this device</span></label>' +
     '<div class="btn-row">' + (V.installPrompt ? '<button class="btn" data-a="install">' + V.icon('download') + ' Install as an app</button>' : '') + '<button class="btn" data-a="keys">' + V.icon('help') + ' Keyboard & remote shortcuts</button></div>' +
     (!window.isSecureContext ? '<p class="note">' + V.icon('info') + ' This address isn’t https, so installing as an app, in-app downloads and Chromecast aren’t available here. See the README for https.</p>' : '') + '</section>' +
     V.mixedSection() + V.directHelperSection() +
-    (V.followSettingsHtml ? V.followSettingsHtml() : '') + // Teams and competitions (follow.js)
+    (V.followSettingsHtml && !V.areaOff('follow') ? V.followSettingsHtml() : '') + // Teams and competitions (follow.js)
     (V.settingsExtra ? V.settingsExtra() : '') + // subtitles found online, connection test (integrations.js)
 
     (!pr.admin ? '<section class="card-sec danger-zone"><h2>Remove this profile</h2><p class="dim">Deletes your history, lists and settings.</p><button class="btn danger" data-a="delete">Remove my profile</button></section>' : '') +

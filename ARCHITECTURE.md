@@ -21,6 +21,14 @@ extension/         the optional direct-streams browser helper        docs/    th
    object, `V`, with its state in `S`. **`web/js` is written in ES5** so old TV browsers run it: no arrow functions,
    `let`/`const`, template strings, optional chaining or `??`.
 
+## Who may do what
+
+Three tables in `server.js` decide, at the one place requests are matched to routes:
+
+- `GUEST_DENY`: what a guest can't ask for.
+- `AREAS` / `AREA_API`: the parts of the app the admin can switch off, and the requests refused while one is off. The browser's side of the same list is `V.AREAS` in `web/js/core.js` (pages, links and menu items go).
+- `MANAGER_API`: the admin requests a manager may make too. `requireAdmin()` lets a manager through only for these; anything not listed is the admin's alone, so a new admin route is closed to managers until someone adds it here.
+
 ## The server (`lib/`)
 
 | Area | Files |

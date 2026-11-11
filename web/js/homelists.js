@@ -157,7 +157,7 @@
         '<p class="hl-sum"><b>' + here.length + ' of ' + L.total + ' here</b> <span class="dim">· ' + V.esc(src) + (L.listName && L.listName !== L.name ? ': ' + V.esc(L.listName) : '') + (L.at ? ' · checked ' + V.fmtAgo(L.at) : '') + '</span></p>' +
         (L.err ? '<p class="note warn">' + V.icon('info') + ' The last check failed: ' + V.esc(L.err) + '</p>' : '') +
         V.chips([{ v: 'all', l: 'Everything', n: items.length }, { v: 'here', l: 'Here', n: here.length }, { v: 'missing', l: 'Not here', n: missing.length }], show, 'show') +
-        (missing.length && show !== 'here' ? '<p class="dim small">Titles that aren’t here can go on your <a href="#/wishlist">wishlist</a>: you’ll get an alert when one arrives.</p>' : '') +
+        (missing.length && show !== 'here' ? '<p class="dim small" data-area="wishlist">Titles that aren’t here can go on your <a href="#/wishlist">wishlist</a>: you’ll get an alert when one arrives.</p>' : '') +
         '<div class="grid poster hl-grid" data-list></div>';
       var g = V.$('.hl-grid', box);
       g._items = here.map(function (x) { return x.it; });
@@ -175,7 +175,7 @@
           var x = list[+m.getAttribute('data-miss')];
           var w = wishFor(x);
           // (Off until the answer: a second press would add it twice, or remove it twice.)
-          if (m.disabled) return;
+          if (m.disabled || V.areaOff('wishlist')) return;
           m.disabled = true;
           var undo = function (er) { m.disabled = false; V.fail(er); };
           if (w) V.del('/api/wishlist/' + w.id).then(function () { wishes = wishes.filter(function (y) { return y !== w; }); V.toast('Removed from your wishlist'); redrawMiss(m, x); }).catch(undo);
@@ -189,7 +189,7 @@
       function missCard(x) {
         var i = list.indexOf(x);
         var w = wishFor(x);
-        var label = x.n + (x.y ? ' (' + x.y + ')' : '') + ', not here. ' + (w ? 'On your wishlist — press to remove' : 'Press to add to your wishlist');
+        var label = x.n + (x.y ? ' (' + x.y + ')' : '') + ', not here. ' + (V.areaOff('wishlist') ? '' : w ? 'On your wishlist — press to remove' : 'Press to add to your wishlist');
         return '<button class="card poster hl-miss' + (w ? ' wished' : '') + '" data-miss="' + (i < 0 ? 'i' : i) + '" aria-label="' + V.esc(label) + '" aria-pressed="' + !!w + '">' +
           '<div class="card-art" style="--tint:' + V.tint(x.n) + '"><span class="rank">' + x.rank + '</span>' + (x.p ? '<img src="' + V.esc(x.p) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback="' + V.esc(V.initials(x.n)) + '" data-title="' + V.esc(x.n) + '">' : '<span class="card-tt big">' + V.esc(x.n) + '</span>') +
           '<span class="badges"><span class="badge">Not here</span></span><span class="hl-wish">' + V.icon(w ? 'check' : 'plus') + '<span>' + (w ? 'Wishlist' : 'Wishlist') + '</span></span></div>' +
@@ -288,7 +288,7 @@
   V.on('catalog', function () { if (S.profile) V.loadHomeLists(true); });
   (function (orig) { V.notify = function (d) { orig(d); countAlerts(); }; })(V.notify);
 
-  V.alertsPreview = function () { return S.alertsUnread ? V.plural(S.alertsUnread, 'new alert') : 'New episodes and wishlist arrivals'; };
+  V.alertsPreview = function () { return S.alertsUnread ? V.plural(S.alertsUnread, 'new alert') : V.areaOff('wishlist') ? 'New episodes' : 'New episodes and wishlist arrivals'; };
   V.alertsThread = function (thread, done) {
     thread.innerHTML = '<header class="th-h"><a class="icon-btn back-btn" href="#/messages" aria-label="Back">' + V.icon('back') + '</a><span class="avatar sm all">' + V.icon('bell') + '</span><h2>New for you</h2><span class="sp"></span><a class="btn sm" href="#/wishlist">Wishlist</a></header><div class="msgs al-list" role="list"><div class="spinner"></div></div>';
     var box = V.$('.al-list', thread);
@@ -298,7 +298,7 @@
         var it = a.k && V.entry(a.k);
         return '<div class="al' + (a.read ? '' : ' unread') + '" role="listitem">' + V.art(a.i || (it && it.i), a.title, 'art al-art') + '<div class="grow"><b>' + V.esc(a.title) + '</b>' + (a.body ? '<div class="dim small">' + V.esc(a.body) + '</div>' : '') + '<div class="faint small">' + V.fmtAgo(a.at) + '</div></div>' +
           '<div class="al-acts">' + (it ? '<a class="btn sm primary" href="' + V.hrefOf(it) + '">Open</a>' : '') + '<button class="icon-btn sm" data-al-del="' + a.id + '" aria-label="Delete this alert">' + V.icon('x') + '</button></div></div>';
-      }).join('') : '<p class="dim center">No alerts yet. You get one when a new episode of a series you watch arrives, or something on your <a href="#/wishlist">wishlist</a>.</p>';
+      }).join('') : '<p class="dim center">No alerts yet. You get one when a new episode of a series you watch arrives' + (V.areaOff('wishlist') ? '' : ', or something on your <a href="#/wishlist">wishlist</a>') + '.</p>';
     };
     V.api('/api/alerts').then(function (r) {
       list = r.list; draw();

@@ -165,7 +165,7 @@
   V.on('rt:connected', function () {
     load();
     // The admin: requests that came in while this device was closed.
-    if (S.profile && S.profile.admin) V.api('/api/admin/screentime/pending').then(function (list) { list.forEach(askedAdmin); }).catch(function () {});
+    if (V.canManage()) V.api('/api/admin/screentime/pending').then(function (list) { list.forEach(askedAdmin); }).catch(function () {});
   });
   setInterval(function () { if (limited() && document.visibilityState !== 'hidden') load(); }, 60e3);
   // (A playback refusal from the server says why: show the screen.)
@@ -177,7 +177,7 @@
   // or put off with ×; requests put off come back when the app is next opened.
   var asks = {};
   function askedAdmin(a) {
-    if (!S.profile || !S.profile.admin || asks[a.id] || (V.ls.session('stLater') || []).indexOf(a.id) >= 0) return;
+    if (!V.canManage() || a.pid === S.profile.id || asks[a.id] || (V.ls.session('stLater') || []).indexOf(a.id) >= 0) return;
     var box = V.$('#toasts');
     if (!box) return;
     var t = document.createElement('div');
@@ -207,9 +207,10 @@
   function answer(id, ok, minutes) {
     return V.api('/api/admin/screentime/requests/' + encodeURIComponent(id), { body: { ok: ok, minutes: minutes } }).then(function () {
       V.toast(ok ? 'Done — ' + fmtMin(minutes) + ' more today.' : 'Answered: not today.');
-      if (/^#\/admin\/profiles/.test(location.hash)) V.router.refresh();
+      if (/^#\/admin\/(profiles|manage)/.test(location.hash) || (location.hash === '#/admin' && !S.profile.admin)) V.router.refresh();
     });
   }
+  V.stAnswer = answer; // (Admin → Manage, for a manager: web/js/admin.js)
 
   // ------------------------------------------------------------ Admin → Profiles: screen time for each profile
   var LIMITS = [['', 'No daily limit'], ['0', 'None at all'], ['15', '15 min'], ['30', '30 min'], ['45', '45 min'], ['60', '1 hour'], ['90', '1 h 30 min'], ['120', '2 hours'], ['150', '2 h 30 min'], ['180', '3 hours'], ['240', '4 hours'], ['300', '5 hours'], ['360', '6 hours']];

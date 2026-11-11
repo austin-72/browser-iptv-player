@@ -24,6 +24,8 @@ V.router = {
     var r = V.router.parse();
     var view = V.$('#view');
     if (V.router.current && !keepScroll) V.router.scroll[V.router.current] = window.scrollY;
+    // (A page of an area the admin switched off: Home instead.)
+    if (V.pageOff(r.name)) { V.router.go('#/home', true); return; }
     var fn = V.routes[r.name] || V.routes.home;
     var prevHash = V.router.current;
     V.router.current = r.hash;
@@ -67,7 +69,9 @@ V.renderShell = function () {
   V.$('#brand').innerHTML = logo + '<span class="brand-name">' + V.esc(b.name || '') + '</span>';
   V.$('#brand').setAttribute('aria-label', (b.name || 'Home') + ' — home');
   V.$('#me-btn').innerHTML = V.avatar(S.profile.avatar, 'sm') + '<span class="sr-only">' + V.esc(S.profile.name) + ' — profile menu</span>';
-  V.$$('[data-admin-only]').forEach(function (x) { x.hidden = !S.profile.admin; });
+  // (Admin — or, for a profile the admin made a manager, the few sections that role has.)
+  V.$$('[data-admin-only]').forEach(function (x) { x.hidden = !V.canManage(); var nm = S.profile.admin ? 'Admin' : 'Manage'; x.setAttribute('aria-label', nm); x.title = nm; });
+  V.applyAreas();
   // (Which kinds there are, from the lists already sorted by kind: not a pass over half a million items.)
   var types = new Set();
   if (S.live && S.live.length) types.add('live');
@@ -105,7 +109,7 @@ V.headerSearch = function () {
   inp.addEventListener('keydown', function (e) { if ((e.key === 'Escape' || e.key === 'Esc') && !e.defaultPrevented) { inp.value = ''; inp.blur(); } });
 };
 V.updateUnread = function () {
-  var n = (S.unread || 0) + (S.alertsUnread || 0); // (messages, and alerts in New for you)
+  var n = (V.areaOff('messages') ? 0 : S.unread || 0) + (S.alertsUnread || 0); // (messages, and alerts in New for you)
   V.$$('.unread-badge').forEach(function (x) { x.textContent = n > 99 ? '99+' : n || ''; x.hidden = !n; });
 };
 
@@ -115,11 +119,11 @@ V.profileMenu = function (btn) {
     { label: 'Settings', icon: 'gear', fn: function () { V.router.go('#/settings'); } },
     { label: 'My List & history', icon: 'bookmark', fn: function () { V.router.go('#/mine'); } },
     V.palette ? { label: 'Quick launcher', icon: 'search', hint: V.device.touch || V.tvMode ? '' : 'Ctrl+K', fn: function () { V.palette.open(); } } : null,
-    { label: 'Wishlist', icon: 'star', fn: function () { V.router.go('#/wishlist'); } },
-    { label: 'Your viewing', icon: 'chart', fn: function () { V.router.go('#/viewing'); } },
+    { label: 'Wishlist', icon: 'star', area: 'wishlist', fn: function () { V.router.go('#/wishlist'); } },
+    { label: 'Your viewing', icon: 'chart', area: 'viewing', fn: function () { V.router.go('#/viewing'); } },
     { label: 'Downloads', icon: 'download', fn: function () { V.router.go('#/downloads'); } },
     V.dvr && V.dvr.visible() ? { label: 'Recordings', icon: 'rec', fn: function () { V.router.go('#/recordings'); } } : null,
-    S.profile.admin ? { label: 'Admin', icon: 'shield', fn: function () { V.router.go('#/admin'); } } : null,
+    V.canManage() ? { label: S.profile.admin ? 'Admin' : 'Manage', icon: 'shield', fn: function () { V.router.go('#/admin'); } } : null,
     { sep: true },
     { label: 'Switch profile', icon: 'users', fn: function () { V.leaveProfile(); } },
     S.profile.hasPin ? { label: 'Lock profile', icon: 'shield', hint: 'Ask for the PIN next time', fn: function () { V.leaveProfile(true); } } : null,
@@ -221,9 +225,9 @@ V.itemMenu = function (anchor, it, opts) {
     !isCh ? { label: 'Details', icon: 'info', fn: function () { V.router.go(V.hrefOf(it)); } } : { label: 'Programme guide', icon: 'clock', fn: function () { V.router.go('#/channel/' + encodeURIComponent(it.k)); } },
     isCh ? { label: V.inList('favs', it.k) ? 'Remove from favourites' : 'Add to favourites', icon: V.inList('favs', it.k) ? 'heartf' : 'heart', fn: function () { V.toggle('favs', it.k).then(function (on) { V.toast(on ? 'Added to favourites' : 'Removed from favourites'); }); } }
       : { label: V.inList('list', u.k) ? 'Remove from My List' : 'Add to My List', icon: V.inList('list', u.k) ? 'check' : 'plus', fn: function () { V.toggle('list', u.k).then(function (on) { V.toast(on ? 'Added to My List' : 'Removed from My List'); }); } },
-    { label: 'Send to someone…', icon: 'send', fn: function () { V.shareDialog(it); } },
+    { label: 'Send to someone…', icon: 'send', area: 'messages', fn: function () { V.shareDialog(it); } },
     S.settings.allowParties ? { label: 'Watch together…', icon: 'party', fn: function () { V.party.startDialog(it); } } : null,
-    it.t === 'live' && V.multiview && S.live.length > 1 ? { label: 'Add to multiview', icon: 'grid', fn: function () { V.multiview.open(it); } } : null,
+    it.t === 'live' && V.multiview && S.live.length > 1 ? { label: 'Add to multiview', icon: 'grid', area: 'multiview', fn: function () { V.multiview.open(it); } } : null,
     !isCh && S.settings.allowDownloads && it.t !== 'show' ? { label: 'Download', icon: 'download', fn: function () { V.downloads.start(it); } } : null,
     V.sharedLists && V.sharedLists().length ? { label: 'Add to a shared list…', icon: 'stack', fn: function () { V.addToSharedList(u); } } : null,
     { sep: true },
@@ -339,6 +343,7 @@ V.empty = function (title, text, action) {
 // ---------------------------------------------------------------- sharing
 V.shareDialog = function (it, opts) {
   opts = opts || {};
+  if (V.areaOff('messages')) { V.toast('Messages are switched off on this server.'); return Promise.resolve(); }
   return V.api('/api/social').then(function (soc) {
     var others = soc.profiles.filter(function (p) { return p.id !== S.profile.id; });
     if (!others.length) return V.toast('There’s nobody else to send it to yet. Add more profiles first.');

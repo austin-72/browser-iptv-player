@@ -453,7 +453,7 @@
   V.playerMenuExtras = (function (prev) {
     return function (p, main, pages) {
       if (prev) prev(p, main, pages);
-      if (p.it && p.it.t === 'live' && S.live.length > 1) main.push({ label: 'Add to multiview', value: '', fn: function () { V.multiview.open(p.it); } });
+      if (p.it && p.it.t === 'live' && S.live.length > 1 && !V.areaOff('multiview')) main.push({ label: 'Add to multiview', value: '', fn: function () { V.multiview.open(p.it); } });
     };
   })(V.playerMenuExtras);
 })();

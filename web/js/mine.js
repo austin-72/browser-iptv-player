@@ -2,7 +2,8 @@
 'use strict';
 V.route('mine', function (view, r) {
   var tab = r.args[0] || 'list';
-  var tabs = [{ v: 'list', l: 'My List' }].concat(V.queue ? [{ v: 'queue', l: 'Queue' + (V.queue.list().length ? ' (' + V.queue.list().length + ')' : '') }] : [], [{ v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }, { v: 'week', l: 'Your week' }]);
+  if ((tab === 'queue' && V.areaOff('queue')) || (tab === 'week' && V.areaOff('viewing'))) tab = 'list'; // (switched off by the admin)
+  var tabs = [{ v: 'list', l: 'My List' }].concat(V.queue && !V.areaOff('queue') ? [{ v: 'queue', l: 'Queue' + (V.queue.list().length ? ' (' + V.queue.list().length + ')' : '') }] : [], [{ v: 'favs', l: 'Favourite channels' }, { v: 'bookmarks', l: 'Bookmarks' }, { v: 'shared', l: 'Shared lists' }, { v: 'history', l: 'History' }], V.areaOff('viewing') ? [] : [{ v: 'week', l: 'Your week' }]);
   view.innerHTML = V.pageHead('My stuff') + '<div class="tabs" role="tablist">' + tabs.map(function (t) { return '<a role="tab" class="tab' + (t.v === tab ? ' on' : '') + '" aria-selected="' + (t.v === tab) + '" href="#/mine/' + t.v + '">' + t.l + '</a>'; }).join('') + '</div><div class="tab-body"></div>';
   var body = V.$('.tab-body', view);
   if (tab === 'list') {
@@ -12,13 +13,13 @@ V.route('mine', function (view, r) {
     body.innerHTML = '<div class="page-tools"><label class="sel"><span class="sr-only">Order</span><select class="input" data-lo>' + [['played', 'Recently played'], ['added', 'Recently added'], ['az', 'A–Z']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === lo ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div><div class="grid-host"></div>';
     V.$('[data-lo]', body).onchange = function (e) { V.ls.set('myListOrder', e.target.value); V.router.refresh(); };
     V.grid(V.$('.grid-host', body), items, { empty: '<h2>Your list is empty</h2><p>Use ' + V.icon('plus', 'tiny') + ' on any movie or series to save it here.</p><div class="btn-row empty-acts"><a class="btn" href="#/movies">Browse movies</a><a class="btn" href="#/series">Browse series</a></div>' });
-  } else if (tab === 'queue' && V.queue) {
+  } else if (tab === 'queue' && V.queue && !V.areaOff('queue')) {
     V.queue.render(body);
   } else if (tab === 'favs') {
     var favs = S.data.favs.map(V.entry).filter(Boolean);
     if (!favs.length) body.innerHTML = V.empty('No favourite channels', 'Use the heart on a channel to add it.', '<div class="btn-row empty-acts"><a class="btn" href="#/live">Go to Live TV</a></div>');
     else { body.innerHTML = '<div class="ch-list" data-list></div>'; var box = V.$('.ch-list', body); box._items = favs; box.innerHTML = favs.map(V.channelRow).join(''); box.onclick = function (e) { var f = e.target.closest('[data-fav]'); if (f) { e.preventDefault(); V.toggle('favs', f.dataset.fav).then(function () { V.router.refresh(); }); return; } var row = e.target.closest('[data-k]'); if (row) { e.preventDefault(); V.play(V.entry(row.dataset.k), { list: favs }); } }; }
-  } else if (tab === 'week') {
+  } else if (tab === 'week' && !V.areaOff('viewing')) {
     body.innerHTML = '<div class="spinner"></div>';
     V.api('/api/me/week').then(function (w) {
       var days = w.days.slice(-7), prev = w.days.slice(0, 7);

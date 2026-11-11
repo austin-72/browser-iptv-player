@@ -56,7 +56,7 @@ const { listUsage: usageOf } = require('./lib/usage');
 const P = require('./lib/parse');
 const { xmlEsc, fmtTime } = require('./lib/xmltv');
 const { HttpError, sendJSON, sendText, readBody, readJSON, isUrl, clampInt, log, isGuestId } = require('./lib/util');
-const { ErrorReports } = require('./lib/errors');
+const { ErrorReports, scrub } = require('./lib/errors');
 const { makeRelay, testRelay, testRelayProxy, newSecret, relayDownloads, updateRelay, bundledRelay, playId, acctId } = require('./lib/streamrelay');
 const frontLink = require('./lib/front'); // (telling the front when this server is about to stop)
 
@@ -80,6 +80,8 @@ const DEFAULT_SETTINGS = {
   transcodePreset: 'veryfast', transcodeCrf: 22, transcodeMaxHeight: 1080, maxTranscodes: 3, maxSessions: 10, remuxReadrate: 0, hwaccel: '',
   tmdbKey: '', introDetection: true,
   adminOnlyProfiles: false, allowDownloads: true, allowParties: true,
+  off: {}, // whole areas switched off for everyone: see AREAS
+
   noAdult: false, // (no adult (18+) content for anyone: left out of the catalogue — lib/catalog.js isAdult)
   guestProfile: false, guestKids: false, guestMaxCert: '', guestAdult: false, // (a Guest on "Who's watching?": lib/accounts.js startGuest)
   exportKey: crypto.randomBytes(12).toString('hex'),
@@ -606,9 +608,31 @@ function requireProfile(ctx) {
   }
   return ctx.profile;
 }
+/**
+ * What a manager (a profile the admin gave that role: Admin → Profiles) may ask for besides what everyone can.
+ * Everything else under /api/admin stays the admin's alone — settings, lists and their sign-in details, profiles,
+ * PINs and parental locks, the site password, devices, backups and restores, updates, keys and webhooks.
+ * [method or '*', path]. The routes themselves hold back the few things inside these that aren't a manager's
+ * (locking channels; answering their own request for more time).
+ */
+const MANAGER_API = [
+  ['GET', /^\/api\/admin$/], // (a cut-down view: no settings, no list addresses)
+  ['*', /^\/api\/admin\/channels(?:\/|$)/], // rename, logo, number, category, guide, hide, order
+  ['GET', /^\/api\/admin\/guide-(?:channels|peek)$/], // (choosing a channel's guide)
+  ['POST', /^\/api\/admin\/(?:lists|guides)\/[^/]+\/refresh$/],
+  ['GET', /^\/api\/admin\/health$/],
+  ['*', /^\/api\/admin\/health\/(?:lists\/[^/]+\/check|prefer|forget)$/],
+  ['GET', /^\/api\/admin\/errors(?:\/[^/]+)?$/],
+  ['PUT', /^\/api\/admin\/errors\/[^/]+$/], // (mark fixed or reopen; deleting is the admin's)
+  ['GET', /^\/api\/admin\/screentime(?:\/pending)?$/],
+  ['POST', /^\/api\/admin\/screentime\/(?:requests\/[^/]+|[^/]+\/grant)$/],
+];
+const isManager = (p) => !!(p && p.manager === true && !p.kids && !p.guest && !p.admin);
+const managerMay = (method, pathname) => MANAGER_API.some(([m, re]) => (m === '*' || m === method || (m === 'GET' && method === 'HEAD')) && re.test(pathname));
 function requireAdmin(ctx) {
   const p = requireProfile(ctx);
-  if (!p.admin) throw new HttpError(403, 'Only the admin can do that.');
+  // (ctx.mgrOk: this request is one of MANAGER_API — set where requests are matched to routes.)
+  if (!p.admin && !(ctx.mgrOk && isManager(p))) throw new HttpError(403, 'Only the admin can do that.');
   return p;
 }
 /**
@@ -657,6 +681,7 @@ function publicSettings() {
   return {
     ...p5Public(), ...p8Public(),
     brand: s.brand, routing: s.routing, allowDownloads: s.allowDownloads !== false, allowParties: s.allowParties !== false,
+    off: Object.fromEntries(AREAS.filter((a) => s.off && s.off[a] === true).map((a) => [a, true])),
     ffmpeg: media.available, tmdb: !!s.tmdbKey, version: cfg.version, defaultLangs: s.defaultLangs, showUnknownLang: s.showUnknownLang !== false,
     langNames: L.names || {}, introDetection: s.introDetection !== false && !!markers.detector,
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
@@ -667,6 +692,29 @@ function publicSettings() {
     // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
     relayLists: relayOf.conf() ? lists.all().filter((l) => relayOf.uses(l.id)).map((l) => l.id) : [],
   };
+}
+
+// ---------------------------------------------------------------- areas the admin can switch off
+// (Admin → Playback → What's switched on. The pages and menus go in the browser — web/js/core.js V.AREAS — and the
+// area's own requests are refused here, so an old tab or another app can't keep using it. Watch parties and
+// downloads have their own older switches: allowParties, allowDownloads.)
+const AREAS = ['messages', 'multiview', 'trailers', 'moods', 'viewing', 'wishlist', 'queue', 'follow', 'themes'];
+const AREA_NAMES = { messages: 'Messages are', trailers: 'Trailers are', viewing: 'Viewing statistics are', wishlist: 'The wishlist is', queue: 'The play queue is', follow: 'Following teams is' };
+const AREA_API = [
+  ['messages', /^\/api\/messages(?:-react)?(?:\/|$)/, false],
+  ['trailers', /^\/api\/trailers$/, false],
+  ['viewing', /^\/api\/(?:viewing(?:\/|$)|me\/week$)/, false],
+  ['wishlist', /^\/api\/wishlist(?:\/|$)/, false],
+  ['queue', /^\/api\/queue$/, true], // (changes only: what's queued is still read with the rest of a profile's things)
+  ['follow', /^\/api\/follow(?:\/|$)/, false],
+];
+const areaOff = (a) => { const o = settings().off; return !!(o && o[a] === true); };
+function areaGuard(method, pathname) {
+  const o = settings().off;
+  if (!o) return;
+  for (const [a, re, writesOnly] of AREA_API) {
+    if (o[a] === true && re.test(pathname) && !(writesOnly && (method === 'GET' || method === 'HEAD'))) throw new HttpError(403, `${AREA_NAMES[a]} switched off on this server.`);
+  }
 }
 
 // ---------------------------------------------------------------- routes
@@ -2508,7 +2556,18 @@ route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
 
 // ---- admin
 route('GET', '/api/admin', (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  const who = requireAdmin(ctx);
+  // A manager: names and how each list and guide is doing — no addresses, sign-in details, settings or devices.
+  if (!who.admin) {
+    const st = (x) => ({ ok: !!(x && x.ok), error: x && x.error ? scrub(String(x.error)).slice(0, 300) : null, count: (x && x.count) || 0, at: (x && x.at) || null });
+    return {
+      manager: true, settings: {},
+      lists: lists.all().map((l) => ({ id: l.id, name: l.name, type: l.type, enabled: l.enabled !== false, status: st(l.status), refreshing: lists.running.has(l.id) })),
+      guides: lists.guides().map((g) => ({ id: g.id, name: g.name, enabled: g.enabled !== false, status: st(g.status) })),
+      profiles: accounts.profiles.map((x) => ({ id: x.id, name: x.name, avatar: x.avatar, kids: !!x.kids, admin: !!x.admin })),
+      status: { version: cfg.version, catalog: { version: catalog.version, total: catalog.items.length }, errors: reports.summary() },
+    };
+  }
   const s = settings();
   const counts = {};
   for (const it of catalog.items) counts[it.t] = (counts[it.t] || 0) + 1;
@@ -2542,6 +2601,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     s.userAgent = ua || DEFAULT_SETTINGS.userAgent;
   }
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
+  if (b.off && typeof b.off === 'object' && !Array.isArray(b.off)) s.off = Object.fromEntries(AREAS.filter((a) => b.off[a] === true).map((a) => [a, true]));
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
   for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
@@ -2712,16 +2772,18 @@ function unmaskProxy(typed, saved) {
   try { pw = new URL(saved).password; } catch {}
   return pw ? typed.replace(/:•+@/, ':' + pw + '@') : saved;
 }
+// (A manager gets "done", "still going" or what went wrong with any address taken out — not the list itself.)
+const forManager = (who, job) => (who.admin ? job : job.then((r) => (r && r.running ? { running: true } : { ok: true }), (e) => { throw new HttpError((e && e.status) || 502, scrub(String((e && e.message) || 'That didn’t work.')).slice(0, 300)); }));
 route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  const who = requireAdmin(ctx);
   const job = lists.refresh(p.id);
   const late = new Promise((ok) => setTimeout(() => ok({ running: true }), 45000).unref());
-  return Promise.race([job, late]);
+  return forManager(who, Promise.race([job, late]));
 });
 route('POST', '/api/admin/guides/:id/refresh', async (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  const who = requireAdmin(ctx);
   const late = new Promise((ok) => setTimeout(() => ok({ running: true }), 45000).unref());
-  return Promise.race([lists.refreshGuide(p.id), late]);
+  return forManager(who, Promise.race([lists.refreshGuide(p.id), late]));
 });
 route('POST', '/api/admin/lists-order', async (req, res, p, q, ctx) => { requireAdmin(ctx); lists.reorder((await readJSON(req)).ids || []); return { ok: true }; });
 route('POST', '/api/admin/guides', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.addGuide(await readJSON(req)); });
@@ -3279,7 +3341,7 @@ reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
 require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
 require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
 // [routes:p10] Home rows from TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
-const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, catalog: () => catalog });
+const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, catalog: () => catalog, areaOff });
 followsOf = p10.followsOf;
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p10.publicFlags() }); }
 // [routes:p7] The play queue (per profile, synced between its devices).
@@ -3290,7 +3352,7 @@ require('./lib/routes-p9')({
   fetch: fetchAny, headers: (h) => proxy.headers({ h }), via: viaRelay, connTest, media, p4, hooks: p9Hooks,
 });
 // [routes:p8] Following teams and competitions (Events, automatic reminders); event / PPV channels' listings from their names.
-const p8 = require('./lib/routes-p8')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, epg, lists, userdata, accounts, hub, overrides, chanShift, nowCache });
+const p8 = require('./lib/routes-p8')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, catalog: () => catalog, epg, lists, userdata, accounts, hub, overrides, chanShift, nowCache, areaOff });
 p8Public = p8.publicFlags;
 // [routes:p6] Picture subtitles (PGS, VobSub, DVB) for the player to draw itself.
 require('./lib/routes-p6')({ route, item, inputOf, connLimit, media, lists });
@@ -3493,6 +3555,8 @@ async function handle(req, res) {
         const m = pathname.match(r.re);
         if (!m) continue;
         if (r.level !== 'public' && !ctx.sess) throw new HttpError(401, 'Sign in required');
+        areaGuard(req.method, pathname);
+        ctx.mgrOk = managerMay(req.method, pathname);
         if (r.level === 'profile' && !ctx.profile) throw new HttpError(403, 'Choose a profile first.');
         const params = {};
         r.keys.forEach((k, i) => { params[k] = m[i + 1]; });

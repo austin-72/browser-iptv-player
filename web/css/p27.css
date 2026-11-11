@@ -145,3 +145,29 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
   .ap-h .avatar.lg { width: 2.8rem; height: 2.8rem; }
   .adm-house .adm-guest { margin-left: 0; }
 }
+
+/* ---- Whole areas the admin switched off (Admin → Playback → What's switched on). core.js V.applyAreas puts an
+   off-<area> class on <body>: links to the area's pages and anything marked data-area="<area>" go. ---- */
+body.off-messages [data-area~="messages"], body.off-messages [data-a="share"], body.off-messages [data-bm="share"],
+body.off-multiview [data-area~="multiview"], body.off-multiview a[href^="#/multiview"],
+body.off-trailers [data-area~="trailers"], body.off-trailers a[href^="#/trailers"], body.off-trailers [data-trailer],
+body.off-moods [data-area~="moods"], body.off-moods a[href^="#/mood/"], body.off-moods a[href^="#/together"],
+body.off-viewing [data-area~="viewing"], body.off-viewing a[href^="#/viewing"], body.off-viewing a[href^="#/review"],
+body.off-wishlist [data-area~="wishlist"], body.off-wishlist a[href^="#/wishlist"], body.off-wishlist .hl-wish,
+body.off-queue [data-area~="queue"], body.off-queue a[href^="#/mine/queue"],
+body.off-follow [data-area~="follow"], body.off-follow a[href^="#/follow"],
+body.off-themes [data-area~="themes"] { display: none !important; }
+/* Messages off: that page is the alerts alone. */
+.msg-page.alerts-only { grid-template-columns: 1fr; }
+.msg-page.alerts-only .convs, .msg-page.alerts-only .th-h .back-btn { display: none; }
+/* Admin → Playback → What's switched on */
+.areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .2rem 1.2rem; margin: .6rem 0; }
+.areas .switch small { display: block; }
+
+/* A manager's view of Admin (web/js/admin.js): what's the admin's alone isn't shown. */
+.adm.is-mgr .adm-only { display: none !important; }
+.mg-list { list-style: none; margin: .4rem 0 0; padding: 0; }
+.mg-row { display: flex; align-items: center; gap: .6rem; padding: .55rem 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.mg-row:first-child { border-top: 0; }
+.mg-row .grow { flex: 1 1 12rem; min-width: 0; }
+.mg-h { margin: 1rem 0 0; font-size: 1rem; }
