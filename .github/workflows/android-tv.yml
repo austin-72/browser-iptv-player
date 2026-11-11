@@ -26,6 +26,6 @@ jobs:
         run: gradle --no-daemon -p tv-apps/android assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: iptv-player-tv
+          name: superstation-tv
           path: tv-apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

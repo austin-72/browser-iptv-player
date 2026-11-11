@@ -1,0 +1,32 @@
+# Makes a tagged GitHub release (v2.3.0, v2.4.0 …) whenever the version in package.json changes, with notes written
+# from the commits since the last one. Directories of self-hosted apps follow releases to see a project is alive.
+# Can also be started by hand: Actions → Release → Run workflow (for the first one).
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the version
+        id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Create the release, unless this version already has one
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.v.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag is already there."
+            exit 0
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --title "Superstation IPTV ${{ steps.v.outputs.version }}" --generate-notes
