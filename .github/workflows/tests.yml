@@ -1,0 +1,29 @@
+# Runs the tests on every push and pull request (the same `npm test` as on your own machine, with ffmpeg for the
+# conversion tests).
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # (One file at a time, as they're run before every release: several of them start a server and time things.)
+      - name: Tests
+        run: node --test --test-concurrency=1 test/*.test.js

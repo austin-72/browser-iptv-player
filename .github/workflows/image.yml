@@ -1,0 +1,56 @@
+# Publishes the Docker image to GitHub's registry (ghcr.io/<owner>/<repository>) for amd64 and arm64.
+#
+# When: the version in package.json changes on the main branch (one image per version, also tagged "latest"), or
+# when it's started by hand from the Actions tab. A version that's already published is left alone.
+#
+# The first time, the package is private: make it public once under the repository's Packages → Package settings →
+# Change visibility, and `docker pull` then works for everyone.
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version and image name
+        id: v
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Already published?
+        id: have
+        run: |
+          if docker manifest inspect "${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}" > /dev/null 2>&1; then echo "yes=1" >> "$GITHUB_OUTPUT"; else echo "yes=0" >> "$GITHUB_OUTPUT"; fi
+      - uses: docker/setup-qemu-action@v3
+        if: steps.have.outputs.yes == '0' || github.event_name == 'workflow_dispatch'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.have.outputs.yes == '0' || github.event_name == 'workflow_dispatch'
+      - uses: docker/build-push-action@v6
+        if: steps.have.outputs.yes == '0' || github.event_name == 'workflow_dispatch'
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+            ${{ steps.v.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.licenses=MIT
