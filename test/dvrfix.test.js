@@ -159,3 +159,55 @@ test('HDHomeRun: the tuner’s profile deleted gives no channels (not the admin�
     assert.strictEqual((await get(base, `/live/dad/${dad.password}/${live[0].stream_id}.ts`)).status, 302);
   } finally { f.srv.close(); }
 });
+
+test('keep rules: a series keeps its latest N episodes, watched recordings go some days after, and “keep” beats both', () => {
+  const dir = tmp();
+  const watched = {};
+  const dvr = newDvr(dir, { watchedAt: (pid, id) => watched[pid + ':' + id] || 0 });
+  const DAY = 86400e3;
+  const now = Date.now();
+  const rdir = path.join(dir, 'recordings');
+  fs.mkdirSync(rdir, { recursive: true });
+  const rule = dvr.addRule('p1', { k: 'c1', ch: 'One', t: 'The Show' });
+  const other = dvr.addRule('p1', { k: 'c1', ch: 'One', t: 'Another Show' });
+  let n = 0;
+  /** A finished recording that ended `daysAgo` days ago, with its file. */
+  const made = (name, daysAgo, extra = {}) => {
+    const s0 = now + 3600e3 + (++n) * 600e3; // (each its own airing)
+    const r = dvr.add('p1', { k: 'c1', s: s0, e: s0 + 1800e3, t: name });
+    Object.assign(r, { dir: rdir, state: 'done', ended: now - daysAgo * DAY, file: path.join(rdir, r.id + '.mp4'), size: 1000 }, extra);
+    fs.writeFileSync(r.file, 'x'.repeat(1000));
+    return r;
+  };
+  const there = (r) => fs.existsSync(r.file) && dvr.find(r.id) && dvr.find(r.id).state === 'done';
+  const e1 = made('The Show', 5, { rule: rule.id }), e2 = made('The Show', 4, { rule: rule.id }), e3 = made('The Show', 3, { rule: rule.id, keep: true });
+  const e4 = made('The Show', 2, { rule: rule.id }), e5 = made('The Show', 1, { rule: rule.id });
+  const o1 = made('Another Show', 9, { rule: other.id }), film = made('A Film', 8);
+
+  // Nothing set: everything stays.
+  dvr._cleanup();
+  assert.ok([e1, e2, e3, e4, e5, o1, film].every(there));
+
+  // The latest two of The Show (the one marked "keep" stays besides, and isn't one of the two).
+  assert.strictEqual(dvr.setRule('p1', rule.id, { keepN: 2 }).keepN, 2);
+  assert.deepStrictEqual([e1, e2, e3, e4, e5].map(there), [false, false, true, true, true]);
+  assert.ok(there(o1) && there(film), 'another series and a one-off are left alone');
+  assert.throws(() => dvr.setRule('someone-else', rule.id, { keepN: 1 }), /Not found/);
+  assert.strictEqual(dvr.setRule('admin', rule.id, { keepN: 0 }, true).keepN, undefined, 'back to every episode (an admin may change anyone’s)');
+
+  // Watched ones go a day after they were watched: not sooner, and not unwatched ones.
+  dvr.setConfig({ watchedDays: 1 });
+  watched['p1:' + e4.id] = now - 2 * DAY;      // watched two days ago
+  watched['p1:' + e5.id] = now - 3600e3;       // an hour ago
+  watched['p1:' + e3.id] = now - 9 * DAY;      // long ago, but marked "keep"
+  watched['p2:' + film.id] = now - 9 * DAY;    // by someone else: it's its own profile's watching that counts
+  dvr._cleanup();
+  assert.deepStrictEqual([e3, e4, e5, o1, film].map(there), [true, false, true, true, true]);
+  assert.strictEqual(dvr.setConfig({ watchedDays: 0 }).watchedDays, 0);
+  watched['p1:' + e5.id] = now - 30 * DAY;
+  dvr._cleanup();
+  assert.ok(there(e5), 'off again: watched ones stay');
+  dvr.stop();
+  dvr.store.flush(true); // (nothing left waiting to be written once the folder is gone)
+  fs.rmSync(dir, { recursive: true, force: true });
+});

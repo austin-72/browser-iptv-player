@@ -171,3 +171,7 @@ body.off-themes [data-area~="themes"] { display: none !important; }
 .mg-row:first-child { border-top: 0; }
 .mg-row .grow { flex: 1 1 12rem; min-width: 0; }
 .mg-h { margin: 1rem 0 0; font-size: 1rem; }
+
+/* Wishlist → Import a watchlist; Recordings → how many episodes a series keeps */
+.wl-import { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin: .8rem 0 0; }
+.dvr-keepn .input { width: auto; max-width: 13rem; }

@@ -22,7 +22,7 @@
     bufKind: bufKind,
     // A live window shorter than this isn't worth a seek bar.
     minWindow: 45,
-    bufGoal: function () { return V.pref('dataSaver') ? Math.min(15, buf().goal) : buf().goal; },
+    bufGoal: function () { return V.dataSaver && V.dataSaver() ? Math.min(15, buf().goal) : buf().goal; },
     mbAhead: function () { return buf().mb; },
     hls: function (c, p) {
       var b = buf();

@@ -32,7 +32,7 @@ V.route('settings', function (view) {
     '<label class="field"><span>Subtitle language</span><select class="input" data-pref-sel="subLang">' + langOpts(pf.subLang) + '</select></label></div>' +
     '<label class="field"><span>Subtitles</span><select class="input" data-pref-sel="subsMode">' + [['off', 'Off unless I turn them on'], ['foreign', 'On when what I hear isn’t one of my languages'], ['always', 'Always on (when there are some in my language)']].map(function (o) { var cur = pf.subsMode || (pf.subsDefault ? 'always' : 'off'); return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     sw('stillWatching', 'Ask “Are you still watching?”', 'After 3 episodes in a row, or 4 hours of live TV, with nobody touching anything — so a forgotten TV doesn’t keep the connection busy') +
-    sw('dataSaver', 'Data saver', 'Lower quality to use less data (good on mobile)') +
+    '<label class="field"><span>Data saver</span><select class="input" data-pref-sel="dataSaver">' + [['off', 'Off'], ['on', 'Always on'], ['away', 'Only when I’m away from home']].map(function (o) { var cur = pf.dataSaver === true || pf.dataSaver === 'on' ? 'on' : pf.dataSaver === 'away' ? 'away' : 'off'; return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select><small class="dim">Uses less data: streams that come in several sizes are held to 480p, less is loaded ahead, and anything the server has to convert anyway is made smaller. It never converts something that plays as it is. “Away” is when this device reaches the server from outside the home network, or says it’s on mobile data' + (pf.dataSaver === 'away' ? ' — right now: <b>' + (V.dataSaver() ? 'away, saving' : 'at home, not saving') + '</b>' : '') + '.</small></label>' +
     '<button class="btn" data-a="substyle">' + V.icon('cc') + ' Subtitle style…</button></section>' +
     (V.playerPrefsHtml ? V.playerPrefsHtml() : '') +
 
@@ -84,7 +84,7 @@ V.route('settings', function (view) {
     // (The light catalogue: this device only. Loaded again straight away the new way.)
     if (t.hasAttribute('data-litecat')) { try { V.ls.set('catLite', t.checked ? '1' : '0'); V.ls.set('catLoads', '0'); } catch (x) {} V.toast(t.checked ? 'Light catalogue on — loading it now.' : 'Full catalogue — loading it now.'); V.loadCatalog(true).then(function () { V.renderShell(); }).catch(V.fail); return; }
     if (t.dataset.pref) { V.setPref(t.dataset.pref, t.checked); if (t.dataset.pref === 'reduceMotion' || t.dataset.pref === 'movingBg') V.applyLook(); }
-    else if (t.dataset.prefSel) { var v = t.value; if (t.dataset.prefSel === 'uiScale') v = +v; V.setPref(t.dataset.prefSel, v); V.applyLook(); }
+    else if (t.dataset.prefSel) { var v = t.value; if (t.dataset.prefSel === 'uiScale') v = +v; if (t.dataset.prefSel === 'dataSaver') v = v === 'on' ? true : v === 'away' ? 'away' : false; V.setPref(t.dataset.prefSel, v); V.applyLook(); }
     else if (t.name === 'lmode') V.$('.lang-pick', view).hidden = t.value !== 'own';
     else if (t.dataset.interest !== undefined) V.put('/api/me', { interests: V.$$('[data-interest]:checked', view).map(function (x) { return x.value; }) }).then(function (p) { if (p && p.id) S.profile = p; }).catch(V.fail); // (kept, so the page shows them when opened again)
   });

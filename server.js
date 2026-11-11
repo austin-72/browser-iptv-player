@@ -582,6 +582,16 @@ function cloudflareIp(ip) {
   const n = ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4];
   return CLOUDFLARE.some(([a, size]) => n >= a && n < a + size);
 }
+/**
+ * Did this request come from outside the home network — through a tunnel, a proxy or a forwarded port? (For
+ * "data saver when I'm away": web/js/player.js. Nothing is decided on it but that, so the headers are read whether or
+ * not proxies are trusted: saying you're away only makes your own picture smaller.)
+ */
+function awayFrom(req) {
+  const { privateIp } = require('./lib/outputs');
+  const ips = [req.socket.remoteAddress || '', ...String(req.headers['cf-connecting-ip'] || '').split(','), ...String(req.headers['x-forwarded-for'] || '').split(',')].map((s) => s.trim()).filter(Boolean);
+  return ips.some((ip) => !privateIp(ip) && !cloudflareIp(ip));
+}
 const clientIp = (req) => {
   const peer = req.socket.remoteAddress || '';
   if (!cfg.trustProxy) return peer;
@@ -776,7 +786,7 @@ route('POST', '/api/profiles/leave', async (req, res, p, q, ctx) => {
 // ---- me
 route('GET', '/api/me', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  sendJsonGz(req, res, { profile: accounts.view(prof), data: userdata.snapshot(prof.id), settings: publicSettings(), unread: social.unread(prof.id), catalogVersion: catalog.version, alerts: prof.admin ? accountAlerts() : [] });
+  sendJsonGz(req, res, { profile: accounts.view(prof), data: userdata.snapshot(prof.id), settings: publicSettings(), unread: social.unread(prof.id), catalogVersion: catalog.version, alerts: prof.admin ? accountAlerts() : [], away: awayFrom(req) });
 });
 route('PUT', '/api/me', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
@@ -1919,6 +1929,9 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
   const film = it.t === 'movie' || it.t === 'episode' || b.live === false;
   const codecs = Array.isArray(b.codecs) ? b.codecs.map(String) : ['h264'];
   const height = clampInt(b.height, 0, 2160, 0);
+  // Data saver: a smaller picture when this has to be converted anyway — never a reason to convert (the device
+  // asks for a size itself, `height`, only when the viewer chose one).
+  const saverH = b.saver === true ? 480 : 0;
   // What else the device said about itself (web/js/player.js convCaps): which formats it takes in MP4 pieces, whether
   // its HEVC is 8-bit only, the tallest picture it decodes. Only ever used to choose how to convert.
   const caps = convCaps(b.caps);
@@ -1955,7 +1968,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     };
   };
   const cantConvert = (d) => new HttpError(415, `This video’s format (${d.cant.toUpperCase()}) is one the server’s ffmpeg can’t convert${media.version ? ` (ffmpeg ${media.version})` : ''}. A newer ffmpeg may.`);
-  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height: height || (d.transcode ? capH : 0), label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority, fmp4: d.seg === 'fmp4', hdr: d.hdr, interlaced: d.interlaced, noAudio: d.noAudio, vcodec: d.vcodec, keyed: !!(caps && caps.keyed) });
+  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height: height || (d.transcode ? (saverH && (!capH || saverH < capH) ? saverH : capH) : 0), label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority, fmp4: d.seg === 'fmp4', hdr: d.hdr, interlaced: d.interlaced, noAudio: d.noAudio, vcodec: d.vcodec, keyed: !!(caps && caps.keyed) });
   // Quicker: when the format is already known (the provider's details for a film or episode; a live channel is almost
   // always H.264) and the account has room for two connections, the conversion starts straight away with the look
   // inside alongside, instead of one after the other — a few seconds sooner. If the look finds it needs something
@@ -3339,7 +3352,7 @@ reports.install({ route, requireAdmin, readBody, HttpError, clientIp });
 
 // [routes:p11] Screen time and bedtime for profiles (enforced on the server), the profile's default remote buttons.
 require('./lib/routes-p11')({ route, routes, requireProfile, requireAdmin, readJSON, HttpError, D, accounts, hub, media, social });
-require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
+require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, catalog: () => catalog, epg, chanShift, inputOf, srcList, connLimit, listUsage, accounts, hub, media, lists, item, hooks: dvrHooks, userdata, relayExtra: (id) => relayFinished.extra(id) });
 // [routes:p10] Home rows from TMDB lists, the Wishlist and new-arrival alerts, and "Your viewing".
 const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, catalog: () => catalog, areaOff });
 followsOf = p10.followsOf;

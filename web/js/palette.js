@@ -116,7 +116,7 @@
     out.push(setting('Play the next episode automatically', '[data-pref=autoplayNext]', 'autoplay'));
     out.push(setting('Skip intros automatically', '[data-pref=autoSkipIntro]', 'credits'));
     out.push(setting('Are you still watching?', '[data-pref=stillWatching]'));
-    out.push(setting('Data saver', '[data-pref=dataSaver]', 'mobile data'));
+    out.push(setting('Data saver', '[data-pref-sel=dataSaver]', 'mobile data away from home'));
     out.push(setting('New episode notifications', '[data-pref=newEpisodeAlerts]', 'alerts'));
     out.push(setting('Show others what I’m watching', '[data-pref=presence]', 'privacy'));
     out.push(setting('Profile name', '[data-name]', 'rename'));

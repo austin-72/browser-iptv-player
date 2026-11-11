@@ -174,6 +174,22 @@ test('the server: a film whose look inside failed is still converted as a film (
     assert.strictEqual(sk.json.mode, 'remux');
     assert.strictEqual(sk.json.seg, 'ts');
     await req('DELETE', `/api/session/${sk.json.sessionId}`);
+    // Data saver: never a reason to convert (a copy stays a copy), only a smaller picture when it's converted anyway.
+    const heightOf = async (id) => ((await req('GET', '/api/admin')).json.status.sessions.find((x) => x.id === id) || {}).height;
+    const sv = await req('POST', '/api/play/session', { k: it.k, mode: 'remux', seek: 0, codecs: ['h264'], saver: true });
+    assert.strictEqual(sv.status, 200, sv.text);
+    assert.strictEqual(sv.json.mode, 'remux', 'still passed on as it is');
+    await req('DELETE', `/api/session/${sv.json.sessionId}`);
+    const st = await req('POST', '/api/play/session', { k: it.k, mode: 'transcode', seek: 0, codecs: ['h264'], saver: true });
+    assert.strictEqual(st.status, 200, st.text);
+    assert.strictEqual(await heightOf(st.json.sessionId), 480);
+    await req('DELETE', `/api/session/${st.json.sessionId}`);
+    const sn = await req('POST', '/api/play/session', { k: it.k, mode: 'transcode', seek: 0, codecs: ['h264'] });
+    assert.notStrictEqual(await heightOf(sn.json.sessionId), 480, 'without it: the usual size');
+    await req('DELETE', `/api/session/${sn.json.sessionId}`);
+    assert.strictEqual((await req('GET', '/api/me')).json.away, false, 'this device is on the home network');
+    const far = await fetch(`http://127.0.0.1:${port}/api/me`, { headers: { 'X-App': '1', Cookie: cookie, 'CF-Connecting-IP': '203.0.113.9' } });
+    assert.strictEqual((await far.json()).away, true, 'through a tunnel from somewhere else');
   } finally {
     app.kill('SIGKILL');
     pv.close();

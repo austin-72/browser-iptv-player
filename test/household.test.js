@@ -212,3 +212,40 @@ test('a manager: channels, fetching lists again, error reports and screen-time r
     await no('GET', '/api/admin/channels');
   } finally { srv.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a watchlist exported from Letterboxd or IMDb goes onto the wishlist: not what’s here already, nor twice', { timeout: 60000 }, async () => {
+  const { parseWatchlist, parseCsv } = require('../lib/watchlist-import');
+  // The files themselves.
+  assert.deepStrictEqual(parseCsv('a,"b,1"\r\n"x ""q"" y","l1\nl2"\n'), [['a', 'b,1'], ['x "q" y', 'l1\nl2']]);
+  const lb = '﻿Date,Name,Year,Letterboxd URI\r\n2024-01-02,"Paris, Texas",1984,https://boxd.it/29Sa\r\n2024-01-03,Heat,1995,https://boxd.it/2bg8\r\n2024-01-04,A Film,2019,https://boxd.it/zzzz\r\n2024-01-05,Heat,1995,https://boxd.it/2bg8\r\n';
+  assert.deepStrictEqual(parseWatchlist(lb), { format: 'letterboxd', entries: [{ t: 'movie', n: 'Paris, Texas', y: 1984 }, { t: 'movie', n: 'Heat', y: 1995 }, { t: 'movie', n: 'A Film', y: 2019 }], skipped: 0 });
+  const imdb = 'Position,Const,Created,Modified,Description,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres\n1,tt0903747,2020-01-01,2020-01-01,,Breaking Bad,Breaking Bad,https://www.imdb.com/title/tt0903747/,TV Series,9.5,49,2008,"Crime, Drama"\n2,tt0133093,,,,The Matrix,The Matrix,,Movie,8.7,136,1999,Action\n3,tt0959621,,,,Pilot,Pilot,,TV Episode,9,58,2008,Drama\n';
+  assert.deepStrictEqual(parseWatchlist(imdb), { format: 'imdb', entries: [{ t: 'show', n: 'Breaking Bad', y: 2008, imdb: 'tt0903747' }, { t: 'movie', n: 'The Matrix', y: 1999, imdb: 'tt0133093' }], skipped: 1 });
+  // (A Letterboxd list's own export starts with lines about the list.)
+  assert.deepStrictEqual(parseWatchlist('Letterboxd list export v7\nDate,Name,Tags,URL,Description\n2024-01-01,My list,,https://boxd.it/abc,\n\nPosition,Name,Year,URL,Description\n1,Alien,1979,https://boxd.it/2awY,\n').entries, [{ t: 'movie', n: 'Alien', y: 1979 }]);
+  assert.throws(() => parseWatchlist('just some words\nand more\n'), /doesn’t look like an exported list/);
+  assert.throws(() => parseWatchlist('Title,Year\n'), /No titles/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wlimport-'));
+  const srv = await server(path.join(dir, 'data'), await freePort());
+  try {
+    const { a } = await household(srv);
+    let r = await a.req('POST', '/api/wishlist/import', { csv: lb });
+    assert.strictEqual(r.status, 200, r.text);
+    assert.deepStrictEqual({ format: r.json.format, total: r.json.total, added: r.json.added, here: r.json.here, already: r.json.already }, { format: 'letterboxd', total: 3, added: 2, here: 1, already: 0 });
+    assert.deepStrictEqual(r.json.list.map((w) => w.n).sort(), ['Heat', 'Paris, Texas']);
+    // Again, and IMDb's: nothing twice.
+    r = await a.req('POST', '/api/wishlist/import', { csv: lb });
+    assert.deepStrictEqual([r.json.added, r.json.already, r.json.here], [0, 2, 1]);
+    r = await a.req('POST', '/api/wishlist/import', { csv: imdb });
+    assert.deepStrictEqual([r.json.format, r.json.added, r.json.skipped], ['imdb', 2, 1]);
+    const list = (await a.req('GET', '/api/wishlist')).json.list;
+    assert.strictEqual(list.length, 4);
+    assert.strictEqual(list.find((w) => w.n === 'Breaking Bad').t, 'show');
+    // Not a list; nothing sent; switched off.
+    assert.strictEqual((await a.req('POST', '/api/wishlist/import', { csv: 'hello\nworld' })).status, 400);
+    assert.strictEqual((await a.req('POST', '/api/wishlist/import', {})).status, 400);
+    await a.req('PUT', '/api/admin/settings', { off: { wishlist: true } });
+    assert.strictEqual((await a.req('POST', '/api/wishlist/import', { csv: lb })).status, 403);
+  } finally { srv.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

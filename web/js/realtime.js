@@ -84,6 +84,7 @@ V.refreshMe = function () {
     if (prefs) S.data.prefs = Object.assign({}, j.data.prefs);
     S.settings = j.settings;
     S.unread = j.unread;
+    S.away = !!j.away; // (reached from outside the home network: data saver "when I'm away")
     S.alerts = j.alerts || [];
     V.emit('me');
     V.emit('data', '*');

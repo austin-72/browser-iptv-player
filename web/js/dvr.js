@@ -129,7 +129,7 @@
         : !s.ffmpeg ? '<p class="note warn">' + V.icon('info') + ' <span>Recording needs ffmpeg on the server.</span></p>'
         : '<p class="dim">Record from the <a href="#/guide">TV guide</a> or a channel’s schedule (' + V.icon('recoff', 'tiny') + '), or with “Record this” in the player’s ' + V.icon('gear', 'tiny') + ' menu while you watch a channel.</p>';
       body.innerHTML = note + sec('Recording now', now) + sec('Coming up', next, s.can ? 'Nothing scheduled.' : '') +
-        (s.rules.length ? '<section class="dvr-sec"><h2>Every episode of</h2><ul class="dvr-list">' + s.rules.map(function (x) { return '<li class="dvr-row"><span class="dvr-logo dvr-ph">' + V.icon('refresh') + '</span><div class="grow"><b>' + V.esc(x.t) + '</b><div class="dim small">' + V.esc([x.who, x.ch].filter(Boolean).join(' · ')) + '</div></div><div class="dvr-acts"><button class="icon-btn sm" data-d="rule" data-id="' + V.esc(x.id) + '" aria-label="Stop recording every ' + V.esc(x.t) + '">' + V.icon('x') + '</button></div></li>'; }).join('') + '</ul></section>' : '') +
+        (s.rules.length ? '<section class="dvr-sec"><h2>Every episode of</h2><ul class="dvr-list">' + s.rules.map(function (x) { return '<li class="dvr-row"><span class="dvr-logo dvr-ph">' + V.icon('refresh') + '</span><div class="grow"><b>' + V.esc(x.t) + '</b><div class="dim small">' + V.esc([x.who, x.ch].filter(Boolean).join(' · ')) + '</div></div><div class="dvr-acts"><label class="dvr-keepn"><span class="sr-only">How many episodes of ' + V.esc(x.t) + ' to keep</span><select class="input sm" data-keepn="' + V.esc(x.id) + '">' + [[0, 'Keep every episode'], [1, 'Keep the latest 1'], [3, 'Keep the latest 3'], [5, 'Keep the latest 5'], [10, 'Keep the latest 10'], [20, 'Keep the latest 20']].map(function (o) { return '<option value="' + o[0] + '"' + (+x.keepN === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label><button class="icon-btn sm" data-d="rule" data-id="' + V.esc(x.id) + '" aria-label="Stop recording every ' + V.esc(x.t) + '">' + V.icon('x') + '</button></div></li>'; }).join('') + '</ul></section>' : '') +
         sec('Recorded', made, s.can ? 'No recordings yet. Pick a programme in the TV guide and choose Record.' : 'No recordings yet.') + sec('Didn’t work', bad);
       if (keep) {
         var all = V.$$('a[href], button', body);
@@ -154,6 +154,18 @@
       else if (a === 'keep') V.put('/api/dvr/' + encodeURIComponent(id), { keep: !r.keep }).then(function (x) { V.toast(x.keep ? 'Kept: it won’t be deleted automatically' : 'It can be deleted automatically again'); return D.load(); }).catch(V.fail).then(done);
       else busy = false;
     };
+    // "Keep the latest N": older episodes of that series go as new ones are recorded (ones marked "keep" stay).
+    body.onchange = function (e) {
+      var sel = e.target.closest('[data-keepn]');
+      if (!sel) return;
+      var n = +sel.value, id = sel.dataset.keepn;
+      var rule = (D.state.rules || []).filter(function (x) { return x.id === id; })[0];
+      var have = (D.state.recs || []).filter(function (x) { return x.rule === id && x.state === 'done' && !x.keep; }).length;
+      var go = function () { return V.put('/api/dvr/rules/' + encodeURIComponent(id), { keepN: n }).then(D.load).then(function () { V.toast(n ? 'Only the latest ' + n + ' will be kept' : 'Every episode will be kept'); draw(); var s2 = V.$('[data-keepn="' + id + '"]', body); if (s2) s2.focus(); }).catch(V.fail); };
+      // (It deletes recordings straight away when there are already more than that: ask first.)
+      if (n && have > n) V.confirm('Keep only the latest ' + n + ' of “' + (rule ? rule.t : 'this series') + '”? ' + V.plural(have - n, 'older recording') + ' will be deleted now. Ones marked “keep” stay.', { ok: 'Delete the older ones', danger: true }).then(function (ok) { if (ok) go(); else sel.value = String((rule && rule.keepN) || 0); });
+      else go();
+    };
     D.load().then(draw);
     // While something records or is saved, keep it current; and redraw whenever the recordings change (a recording
     // finished or failed while the page is open).
@@ -175,6 +187,7 @@
         '<section class="card-sec"><h2>Storage</h2><dl class="kv"><dt>Recordings</dt><dd>' + V.plural(u.count, 'recording') + ' · ' + V.fmtSize(u.bytes) + '</dd><dt>Free space</dt><dd>' + V.fmtSize(u.free) + '</dd><dt>Now</dt><dd>' + (a.running ? V.plural(a.running, 'recording') + ' running' : 'Nothing recording') + (a.scheduled ? ' · ' + a.scheduled + ' coming up' : '') + '</dd></dl>' +
         '<label class="field"><span>Folder on the server</span><input class="input" data-dvr="dir" value="' + V.esc(c.dir) + '" placeholder="' + V.esc(a.defaultDir) + '"><small class="dim">Empty: in the data folder. With Docker, a folder you mounted (for example /media/recordings).</small></label><div class="grid2">' +
         '<label class="field"><span>Keep recordings for</span><select class="input" data-dvr="keepDays">' + [[0, 'Until deleted'], [7, '1 week'], [14, '2 weeks'], [30, '1 month'], [90, '3 months'], [365, '1 year']].map(function (o) { return '<option value="' + o[0] + '"' + (+c.keepDays === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+        '<label class="field"><span>Once watched to the end</span><select class="input" data-dvr="watchedDays">' + [[0, 'Keep it'], [1, 'Delete it a day later'], [3, 'Delete it 3 days later'], [7, 'Delete it a week later'], [30, 'Delete it a month later']].map(function (o) { return '<option value="' + o[0] + '"' + (+c.watchedDays === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select><small class="dim">Watched by the profile that recorded it. Ones marked “keep” stay.</small></label>' +
         '<label class="field"><span>Most space they may use (GB)</span><input class="input" type="number" min="0" data-dvr="maxGB" value="' + (c.maxGB || '') + '" placeholder="No limit"><small class="dim">The oldest go first. Ones marked “keep” stay.</small></label>' +
         '<label class="field"><span>Start early (minutes)</span><input class="input" type="number" min="0" max="30" data-dvr="pre" value="' + c.pre + '"></label>' +
         '<label class="field"><span>End late (minutes)</span><input class="input" type="number" min="0" max="120" data-dvr="post" value="' + c.post + '"></label></div>' +

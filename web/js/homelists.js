@@ -205,9 +205,34 @@
     view.innerHTML = V.pageHead('Wishlist') + '<p class="dim">Films and series that aren’t here yet. When one arrives you get an alert' + (S.data.prefs.wishlistAlerts === false ? ' (they’re off in <a href="#/settings">Settings</a>)' : '') + '.</p>' +
       (tmdbOn ? '<form class="wl-search" role="search"><input class="input" type="search" data-wq placeholder="Search for any film or series" aria-label="Search for any film or series" autocomplete="off"><button class="btn primary">' + V.icon('search') + ' Search</button></form><div class="wl-results" aria-live="polite"></div>'
         : '<p class="note">' + V.icon('info') + ' <span>Searching for any film or series needs a free TMDB key. ' + (S.profile.admin ? 'Add one in <a href="#/admin/recs">Admin → Recommendations</a>.' : 'The admin can add one in Admin → Recommendations.') + (listsOn ? ' Until then, you can add titles that aren’t here from a list row’s “See the whole list” on Home.' : '') + '</span></p>') +
+      '<div class="wl-import"><button class="btn sm" data-wl-import>' + V.icon('download') + ' Import a watchlist…</button><input type="file" accept=".csv,text/csv,text/plain" data-wl-file hidden aria-hidden="true" tabindex="-1"><span class="dim small">A file exported from Letterboxd (watchlist.csv) or IMDb (a list’s Export), or any CSV with a Title column.</span></div>' +
       '<h2 class="wl-h">On your wishlist</h2><div class="wl-list"><div class="spinner"></div></div>';
     var listBox = V.$('.wl-list', view), resBox = V.$('.wl-results', view);
     var wishes = [], results = [];
+    // Import: the file is read here and its text sent — titles already here aren't added, nor ones already wished.
+    var impBtn = V.$('[data-wl-import]', view), impFile = V.$('[data-wl-file]', view);
+    impBtn.onclick = function () { impFile.value = ''; impFile.click(); };
+    impFile.onchange = function () {
+      var f = impFile.files && impFile.files[0];
+      if (!f) return;
+      if (f.size > 2e6) return V.toast('That file is too big for a watchlist (2 MB at most).', { error: true });
+      var rd = new FileReader();
+      rd.onerror = function () { V.toast('Couldn’t read that file.', { error: true }); };
+      rd.onload = function () {
+        impBtn.disabled = true;
+        V.api('/api/wishlist/import', { body: { csv: String(rd.result || '') } }).then(function (r) {
+          wishes = r.list; drawList();
+          var from = { letterboxd: 'Letterboxd', imdb: 'IMDb', csv: 'the file' }[r.format] || 'the file';
+          var parts = [V.plural(r.added, 'title') + ' added from ' + from];
+          if (r.here) parts.push(r.here + ' already here');
+          if (r.already) parts.push(r.already + ' already on your wishlist');
+          if (r.skipped) parts.push(r.skipped + ' left out (episodes or lines with no title)');
+          if (r.full) parts.push(r.full + ' didn’t fit: the wishlist is full');
+          V.toast(parts.join(' · '), { ms: 9000, error: !!r.full && !r.added });
+        }).catch(V.fail).then(function () { impBtn.disabled = false; impBtn.focus(); });
+      };
+      rd.readAsText(f);
+    };
     var load = function () { return V.api('/api/wishlist').then(function (r) { wishes = r.list; drawList(); }).catch(function (e) { listBox.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; }); };
     var line = function (x, act) {
       return '<div class="wl-item">' + V.art(x.p || (x.k && (V.entry(x.k) || {}).i), x.n, 'art wl-art') + '<div class="grow"><b>' + V.esc(x.n) + '</b> <span class="dim">' + V.esc([x.y || '', x.t === 'show' ? 'Series' : 'Film'].filter(Boolean).join(' · ')) + '</span>' +

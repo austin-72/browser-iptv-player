@@ -795,12 +795,27 @@ PP._directRoutes = function (info, it) {
   return out;
 };
 
+/** The size the viewer chose (Settings → Quality, or the player's menu): 0 for "as it comes". */
 PP._quality = function () {
   var q = V.pref('quality') || 'auto';
-  if (V.pref('dataSaver')) return 480;
   var n = parseInt(q, 10);
   return n > 0 ? n : 0;
 };
+/**
+ * Data saver (Settings → Playback): on, or on only away from home — the server says whether this device reached it
+ * from outside the home network; the browser, where it tells, whether it's on mobile data.
+ * It never has anything converted that would play as it is: a stream that comes in several sizes is held to 480p,
+ * less is buffered ahead, and what the server has to convert anyway is made smaller.
+ */
+V.dataSaver = function () {
+  var p = V.pref('dataSaver');
+  if (p === true || p === 'on') return true;
+  if (p !== 'away') return false;
+  var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return !!(S.away || (c && (c.saveData || c.type === 'cellular')));
+};
+/** The tallest picture to pick from a stream that comes in several sizes. */
+PP._cap = function () { return this._quality() || (V.dataSaver() ? 480 : 0); };
 
 PP._attempt = function (a, token, startAt) {
   var self = this;
@@ -950,6 +965,7 @@ PP._sessionBody = function (a, startAt) {
   var body = { k: it.t === 'catchup' ? it.catchupOf : it.k, alt: this.alt, url: it.t === 'catchup' ? it.u : undefined, mode: a.mode, seek: this.vod ? startAt : 0, live: !this.vod, codecs: V.codecs(), height: a.height || this._quality() || 0, audio: this.audioTrack === undefined || this.audioTrack === null ? undefined : this.audioTrack, audioLang: V.pref('audioLang') || ((S.profile && S.profile.langs) || [])[0] || '' };
   if (a.audioOnly) body.audioOnly = true;
   body.caps = V.convCaps(a);
+  if (V.dataSaver()) body.saver = true; // (smaller, if it's converted anyway)
   if (V.signMedia()) body.sign = true; // (signed in the same answer: server.js)
   return body;
 };
@@ -982,7 +998,7 @@ PP._attachMedia = function (a, token, startAt, kind, url, gone) {
   // player moves up to the point. A TV's or console's own player is left to start at the copy's beginning, as it
   // always has: the position it shows is right either way.)
   if (a.via === 'session' && rel > 0 && rel < 15 && V.device && V.device.tv) rel = 0;
-  var bufGoal = V.tune ? V.tune.bufGoal(this) : V.pref('dataSaver') ? 15 : 30;
+  var bufGoal = V.tune ? V.tune.bufGoal(this) : V.dataSaver() ? 15 : 30;
   if (kind === 'hls' && a.native) {
     v.src = url;
     if (rel > 0) this._seekOnMeta(rel);
@@ -1053,14 +1069,14 @@ PP._attachHls = function (a, token, url, rel, bufGoal) {
   {
     if (window.Hls && Hls.isSupported()) {
       this._hlsWay = 'hlsjs';
-      var q = this._quality();
+      var q = this._cap();
       var hcfg = {
         // (A film always starts where it was asked to — at its beginning too. Left to itself hls.js takes the server's
         // copy, whose playlist is still growing, for a live stream and starts near its end: a film began however far
         // the server had got by then, some seconds in — minutes for a file on the server's own disk.)
         enableWorker: true, maxBufferLength: bufGoal, backBufferLength: 60, startPosition: this.vod ? Math.max(0, rel || 0) : -1,
         manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 4, fragLoadingMaxRetry: 6, capLevelToPlayerSize: true,
-        lowLatencyMode: false, abrEwmaDefaultEstimate: V.pref('dataSaver') ? 800000 : 3000000,
+        lowLatencyMode: false, abrEwmaDefaultEstimate: V.dataSaver() ? 800000 : 3000000,
       };
       // (Buffer size and how much live TV to keep for rewinding: see tune.js.)
       if (V.tune) V.tune.hls(hcfg, this);
@@ -1130,7 +1146,7 @@ PP._shakaLoad = function (sp, url, rel, bufGoal, viaServer, token) {
   var it = this.it;
   var cfg = { streaming: { bufferingGoal: bufGoal, rebufferingGoal: 2, retryParameters: { maxAttempts: 4, timeout: 20000 } }, manifest: { retryParameters: { maxAttempts: 2, timeout: 20000 } } };
   if (V.tune) V.tune.shaka(cfg, this);
-  var q = this._quality();
+  var q = this._cap();
   if (q) cfg.abr = { restrictions: { maxHeight: q } };
   if (it.dr) {
     if (it.dr.type === 'clearkey' && it.dr.keys) cfg.drm = { clearKeys: it.dr.keys };
