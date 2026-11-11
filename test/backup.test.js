@@ -83,10 +83,15 @@ test('a backup put back into an empty server brings everything back', { timeout:
     assert.strictEqual((await b.req('GET', '/api/boot')).json.profiles.length, 0, 'empty to begin with');
     assert.strictEqual((await b.req('POST', '/api/profiles', { name: 'Temp', pin: '0000', avatar: 1 })).status, 200);
     // (Not a backup at all, and a damaged one: refused, nothing changed.)
-    assert.strictEqual((await b.raw('POST', '/api/admin/restore', Buffer.from('not a backup'))).status, 400);
-    assert.strictEqual((await b.raw('POST', '/api/admin/restore', zlib.gzipSync(Buffer.from(JSON.stringify({ app: 'browser-iptv-player', files: { 'settings.json': 42 } }))))).status, 400);
+    assert.strictEqual((await b.raw('POST', '/api/admin/restore', Buffer.from('not a backup'), { 'X-Admin-Pin': '0000' })).status, 400);
+    assert.strictEqual((await b.raw('POST', '/api/admin/restore', zlib.gzipSync(Buffer.from(JSON.stringify({ app: 'browser-iptv-player', files: { 'settings.json': 42 } }))), { 'X-Admin-Pin': '0000' })).status, 400);
     assert.strictEqual((await b.req('GET', '/api/boot')).json.profiles.length, 1);
-    const put = await b.raw('POST', '/api/admin/restore', backup, { 'Content-Type': 'application/gzip' });
+    // (Putting a backup back replaces everything: the admin's PIN again, not just being signed in as the admin.)
+    assert.strictEqual((await b.raw('POST', '/api/admin/restore', backup, { 'Content-Type': 'application/gzip' })).status, 403, 'not without the PIN');
+    assert.strictEqual((await b.raw('POST', '/api/admin/restore', backup, { 'X-Admin-Pin': '1111' })).status, 403, 'nor with a wrong one');
+    assert.strictEqual((await b.raw('POST', '/api/admin/update', Buffer.from('PK'), {})).status, 403, 'an update neither');
+    assert.strictEqual((await b.req('GET', '/api/boot')).json.profiles.length, 1, 'nothing changed');
+    const put = await b.raw('POST', '/api/admin/restore', backup, { 'Content-Type': 'application/gzip', 'X-Admin-Pin': '0000' });
     assert.strictEqual(put.status, 200, await put.text());
     assert.strictEqual(await b.exited(), 0, 'it restarts itself after a restore');
 

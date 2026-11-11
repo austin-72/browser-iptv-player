@@ -106,6 +106,16 @@ docker compose up -d
 Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./data`.
 
 <details>
+<summary>The ready-made image, without cloning</summary>
+
+```bash
+docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/browser-iptv-player:latest
+```
+
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.1.0` stays on that version.
+</details>
+
+<details>
 <summary>Without Compose</summary>
 
 ```bash
@@ -453,6 +463,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 - The bundled players are pinned releases, listed with their versions and checksums in [VENDOR.md](VENDOR.md) and checked by the tests. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 - **To use it outside your home network,** put it behind https. Casting, installing as an app and in-browser downloads also need https (or localhost):
   - **Tailscale:** the easiest, private with no open ports. `tailscale serve --bg 8080` gives you an https name.
+  - **Cloudflare Tunnel:** a public https name with no open ports and no certificate to look after. Install `cloudflared` on the machine (or run its container next to this one), create a tunnel in Cloudflare's Zero Trust dashboard, and point a public hostname at `http://localhost:8080` (in Docker Compose, the service's name: `http://iptv:8080`). Set `TRUST_PROXY=1` so the server sees viewers' real addresses, and change the site password first — or add the name to `ALLOWED_HOSTS`. Two things to know: Cloudflare gives up on a request after 100 seconds (the app is built around that), and its Service-Specific Terms restrict serving video and other large files through its network on the ordinary plans. That suits this app, where video goes straight from the provider to the viewer and only pages and small requests cross the tunnel — but it's a reason not to choose *Always through this server* for viewers who come in that way.
   - **Caddy:** `tv.example.com { reverse_proxy 127.0.0.1:8080 }`, then set `TRUST_PROXY=1`.
   - **Built in:** set `HTTPS_CERT` and `HTTPS_KEY`.
 
@@ -539,6 +550,8 @@ DEV=1 node server.js        # rebuilds the front-end bundle on every request
 npm test                    # unit tests (language detection, playback checks, duplicates, guides, connection test…)
 python3 test/ui/tvreach.py http://localhost:8080   # checks everything can be reached with a TV remote
 ```
+
+[ARCHITECTURE.md](ARCHITECTURE.md) is a one-page map of which file owns what. Every push runs the tests on GitHub (`.github/workflows/tests.yml`); a new version number in `package.json` publishes the Docker image (`image.yml`).
 
 The front end is plain JavaScript and CSS in `web/`, with no build step. Files are joined in the order given by `web/order.json`, and the code avoids optional chaining (`?.`) and `??` so older TV browsers can run it.
 

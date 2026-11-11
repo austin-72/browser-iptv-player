@@ -523,6 +523,14 @@ V.adminTabs.content = function (body, A) {
   V.$('[data-save-l]', body).onclick = function () { V.adminSave({ defaultLangs: V.$$('.lang-pick input:checked', body).map(function (x) { return x.value; }), showUnknownLang: V.$('[data-unknown]', body).checked, tmdbLangs: V.$('[data-tmdblang]', body).checked }, 'Saved — everyone using the default sees the change (a language nobody had before takes a few minutes to appear)'); };
 };
 
+/**
+ * The admin's PIN again, asked before what replaces the server's code or all its data (server.js requireAdminPin):
+ * resolves with the PIN typed, or null when the box was closed.
+ */
+function adminPin(what) {
+  return V.prompt('Enter the admin PIN to ' + what, { type: 'password' }).then(function (pin) { return pin ? String(pin).trim() : null; });
+}
+
 /** Whether the chosen hardware encoder works (the server tries it when it starts and when the choice changes). */
 function hwNote(s, st) {
   var c = st && st.hwCheck;
@@ -882,7 +890,7 @@ V.adminTabs.apps = function (body, A) {
     var bn = e.target.closest('[data-bnow]');
     if (bn) { bn.disabled = true; V.api('/api/admin/backups', { method: 'POST' }).then(function () { V.toast('Backup made'); loadBackups(); }).catch(V.fail).then(function () { bn.disabled = false; }); }
     var br = e.target.closest('[data-brestore]');
-    if (br) V.confirm('Replace everything on this server with the backup from ' + br.dataset.brestore + '?', { ok: 'Restore', danger: true }).then(function (ok) { if (ok) V.api('/api/admin/backups/' + encodeURIComponent(br.dataset.brestore) + '/restore', { method: 'POST' }).then(function () { V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 6000); }).catch(V.fail); });
+    if (br) V.confirm('Replace everything on this server with the backup from ' + br.dataset.brestore + '?', { ok: 'Restore', danger: true }).then(function (ok) { return ok ? adminPin('restore this backup') : null; }).then(function (pin) { if (pin) V.api('/api/admin/backups/' + encodeURIComponent(br.dataset.brestore) + '/restore', { method: 'POST', headers: { 'X-Admin-Pin': pin } }).then(function () { V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 6000); }).catch(V.fail); });
     var bd = e.target.closest('[data-bdel]');
     if (bd) V.confirm('Delete the backup ' + bd.dataset.bdel + '?', { ok: 'Delete', danger: true }).then(function (ok) { if (ok) V.del('/api/admin/backups/' + encodeURIComponent(bd.dataset.bdel)).then(loadBackups).catch(V.fail); });
     if (e.target.closest('[data-newkey]')) V.confirm('Make a new key? Apps using the old addresses stop working.', { ok: 'New key', danger: true }).then(function (ok) { if (ok) V.adminSave({ newExportKey: true }).then(function () { V.router.refresh(); }); });
@@ -893,8 +901,12 @@ V.adminTabs.apps = function (body, A) {
     if (e.target.dataset.update !== undefined) {
       var z = e.target.files[0];
       if (!z) return;
+      e.target.value = '';
+      adminPin('install this update').then(function (pin) {
+      if (!pin) return;
       V.toast('Uploading the update…');
-      fetch('/api/admin/update', { method: 'POST', headers: { 'X-App': '1' }, body: z, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); V.toast('Updated ' + V.plural(j.files, 'file') + (j.version ? ' to version ' + j.version : '') + (j.restart ? ' — the server restarts when nobody is watching.' : ' — restart the server to finish.'), { ms: 10000 }); loadUpdate(); }); }).catch(V.fail);
+      fetch('/api/admin/update', { method: 'POST', headers: { 'X-App': '1', 'X-Admin-Pin': pin }, body: z, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); V.toast('Updated ' + V.plural(j.files, 'file') + (j.version ? ' to version ' + j.version : '') + (j.restart ? ' — the server restarts when nobody is watching.' : ' — restart the server to finish.'), { ms: 10000 }); loadUpdate(); }); }).catch(V.fail);
+      });
       return;
     }
     if (e.target.dataset.restore === undefined) return;
@@ -902,7 +914,10 @@ V.adminTabs.apps = function (body, A) {
     if (!f) return;
     V.confirm('Replace everything on this server with “' + f.name + '”?', { ok: 'Restore', danger: true }).then(function (ok) {
       if (!ok) return;
-      fetch('/api/admin/restore', { method: 'POST', headers: { 'X-App': '1' }, body: f, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 5000); }); }).catch(V.fail);
+      adminPin('restore this backup').then(function (pin) {
+      if (!pin) return;
+      fetch('/api/admin/restore', { method: 'POST', headers: { 'X-App': '1', 'X-Admin-Pin': pin }, body: f, credentials: 'same-origin' }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error); V.toast('Restored. The server is restarting…'); setTimeout(function () { location.reload(); }, 5000); }); }).catch(V.fail);
+      });
     });
   };
 };

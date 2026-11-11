@@ -611,6 +611,18 @@ function requireAdmin(ctx) {
   if (!p.admin) throw new HttpError(403, 'Only the admin can do that.');
   return p;
 }
+/**
+ * The admin, with the admin's PIN given again (the X-Admin-Pin header): for what replaces the server's code or all of
+ * its data — an update, a restore. A session left open on a device, or its cookie in the wrong hands, isn't enough
+ * for those. (Wrong PINs count and lock like any other: lib/accounts.js.)
+ */
+function requireAdminPin(ctx, req) {
+  const p = requireAdmin(ctx);
+  const pin = String(req.headers['x-admin-pin'] || '').slice(0, 16);
+  if (!pin) throw new HttpError(403, 'This needs the admin’s PIN again.');
+  if (!accounts.checkPin(p.id, pin, ctx.sess)) throw new HttpError(403, 'That isn’t the admin’s PIN.');
+  return p;
+}
 function item(ctx, k) {
   const p = requireProfile(ctx);
   // A recording (lib/routes-p12.js): "rec:<id>".
@@ -3104,7 +3116,7 @@ route('GET', '/api/admin/backups/:name', (req, res, p, q, ctx) => {
 });
 route('DELETE', '/api/admin/backups/:name', (req, res, p, q, ctx) => { requireAdmin(ctx); if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name'); try { fs.unlinkSync(path.join(BACKUPS, p.name)); } catch {} return { ok: true }; });
 route('POST', '/api/admin/backups/:name/restore', (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  requireAdminPin(ctx, req);
   if (!/^backup-[\w-]+\.json\.gz$/.test(p.name)) throw new HttpError(400, 'Bad name');
   const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(BACKUPS, p.name))).toString('utf8'));
   restoreFiles(data);
@@ -3131,7 +3143,7 @@ function restoreFiles(data) {
 }
 
 // ---- updates: new code dropped into the app folder (or uploaded here as a .zip) takes effect without a rebuild
-const CODE_FILES = /^(server\.js|package\.json|Dockerfile|docker-entrypoint\.sh|README\.md|IMPROVEMENTS\.md|VENDOR\.md|SECURITY\.md|LICENSE|defaults\.example\.json|\.dockerignore|(lib|web|public|extension|test)\/.+)$/;
+const CODE_FILES = /^(server\.js|package\.json|Dockerfile|docker-entrypoint\.sh|README\.md|IMPROVEMENTS\.md|VENDOR\.md|SECURITY\.md|ARCHITECTURE\.md|LICENSE|defaults\.example\.json|\.dockerignore|(lib|web|public|extension|test)\/.+)$/;
 const inDocker = fs.existsSync('/.dockerenv');
 function codeSignature() {
   const h = crypto.createHash('sha1');
@@ -3197,7 +3209,7 @@ route('GET', '/api/admin/update', (req, res, p, q, ctx) => {
   return { version: cfg.version, onDisk: update.version, needsRestart: !!update.needsRestart, pending: update.pending, docker: inDocker, autoRestart: process.env.SELF_RESTART === '1', started: update.started, writable: (() => { try { fs.accessSync(cfg.root, fs.constants.W_OK); return true; } catch { return false; } })() };
 });
 route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  requireAdminPin(ctx, req);
   const buf = await readBody(req, 100 * 1024 * 1024);
   let files;
   try { files = unzip(buf); } catch (e) { throw new HttpError(400, e.message); }
@@ -3221,7 +3233,7 @@ route('POST', '/api/admin/update', async (req, res, p, q, ctx) => {
   return { ok: true, files: picked.length, version, restart: auto };
 });
 route('POST', '/api/admin/restore', async (req, res, p, q, ctx) => {
-  requireAdmin(ctx);
+  requireAdminPin(ctx, req);
   let data;
   try { let buf = await readBody(req, 2 * 1024 * 1024 * 1024); if (buf[0] === 0x1f) buf = zlib.gunzipSync(buf); data = JSON.parse(buf.toString('utf8')); } catch { throw new HttpError(400, 'That isn’t a backup file from this app.'); }
   restoreFiles(data);
