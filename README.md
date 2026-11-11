@@ -142,7 +142,7 @@ Options can go on the command line (`--port 9000 --data /srv/iptv`) or in enviro
 3. **Open Admin** (the shield icon):
    - **Security:** change the site password.
    - **Lists:** add your playlists or Xtream Codes accounts.
-   - **TV guides:** add an XMLTV guide if your lists don't name one.
+   - **TV guides:** add an XMLTV guide if your lists don't name one, or a [Schedules Direct](docs/channels-and-guide.md#schedules-direct) lineup if you have an account there.
    - **Languages & content:** pick the default languages, for example English only.
 4. **Share the address.** Everyone else signs in with the site password and adds their own profile. You can also set **Admin → Profiles → Only the admin can add profiles**.
 
@@ -177,6 +177,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Audio sync** in either direction: when the sound is early it's held back; when it's late the *picture* is held back. Remembered per channel.
 - **Data saver** (Settings → Playback): off, always, or *only when I’m away from home* — when the device reaches the server from outside the home network, or says it’s on mobile data. Streams that come in several sizes are held to 480p, less is loaded ahead, and anything the server has to convert anyway is made smaller. It never converts something that would play as it is. (On iPhones and iPads the browser picks the size of such streams itself.)
 - **Sound only** for live channels (radio-style, far less data), **Open in another app** (VLC, MX Player, Infuse, Outplayer and others, or a .m3u file), **Shuffle** for series, your own **skip lengths** (5–60 s), a bigger **buffer** for unreliable providers, opening on your **last channel**, and reminders that can **switch channel** by themselves.
+- **Subtitles made from the sound** (optional): when nothing is found online and the server has a speech-to-text program (whisper.cpp or OpenAI's whisper), it can listen to a film or episode and write subtitles, in the background, without changing how anything plays. See [docs/integrations.md](docs/integrations.md#subtitles-made-from-the-sound).
 - **Subtitles found online** when a film or episode has none in your language (on demand or automatically): SubDL and Addic7ed for free, with OpenSubtitles as the backup.
 - **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay (picture and sound: streams the TV can't play as they are are handed over in a form it can) and the Remote Playback API.
 
@@ -436,6 +437,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 | `SITE_PASSWORD` | `changeme` | The site password used the very first time. After that, change it in Admin → Security |
 | `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see [Security](#security)) |
 | `CSP` | on | Set to `off` to stop sending the Content-Security-Policy and frame-protection headers (or `"csp": false` in `defaults.json`). Only if a device or a proxy in front ever needs it (see [Security](#security)) |
+| `WHISPER_BIN`, `WHISPER_MODEL` | — | A speech-to-text program and its model, for [subtitles made from the sound](docs/integrations.md#subtitles-made-from-the-sound). Without one that part is simply off. |
 | `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used (the last address in X-Forwarded-For that isn’t local or Cloudflare’s) |
 | `HTTPS_CERT`, `HTTPS_KEY` | — | Paths to a certificate and key, so the server speaks https itself |
 | `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Tested when the server starts; falls back to software if it fails. Docker Desktop on Windows or Mac can't pass Intel or AMD graphics through |

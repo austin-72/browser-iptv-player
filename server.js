@@ -2587,7 +2587,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
   const use = listUsage();
   return {
     settings: adminSettingsView(),
-    lists: lists.all().map((l) => ({ ...lists.view(l), uniq: (listCountsNow() || {})[l.id] || null, testing: !!(connTest.status(l.id) || {}).running, inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides(),
+    lists: lists.all().map((l) => ({ ...lists.view(l), uniq: (listCountsNow() || {})[l.id] || null, testing: !!(connTest.status(l.id) || {}).running, inUse: (use.get(l.id) || []).map((c) => ({ name: (accounts.profile(c.pid) || {}).name || '', device: c.deviceName, n: c.playing.n })) })), guides: lists.guides().map((g) => lists.guideView(g)),
     profiles: accounts.profiles.map((x) => ({ ...accounts.view(x), online: hub.online().includes(x.id) })),
     devices: accounts.sessionsList(),
     me: ctx.sess ? ctx.sess.id : null,
@@ -2614,6 +2614,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     s.userAgent = ua || DEFAULT_SETTINGS.userAgent;
   }
   if (['direct-first', 'server', 'direct-only'].includes(b.routing)) s.routing = b.routing;
+  if (['everyone', 'admin', 'off'].includes(b.subGen)) s.subGen = b.subGen; // (who may have subtitles made from a film's sound: lib/routes-p13.js)
   if (b.off && typeof b.off === 'object' && !Array.isArray(b.off)) s.off = Object.fromEntries(AREAS.filter((a) => b.off[a] === true).map((a) => [a, true]));
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
   for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
@@ -2796,11 +2797,16 @@ route('POST', '/api/admin/lists/:id/refresh', async (req, res, p, q, ctx) => {
 route('POST', '/api/admin/guides/:id/refresh', async (req, res, p, q, ctx) => {
   const who = requireAdmin(ctx);
   const late = new Promise((ok) => setTimeout(() => ok({ running: true }), 45000).unref());
-  return forManager(who, Promise.race([lists.refreshGuide(p.id), late]));
+  return forManager(who, Promise.race([lists.refreshGuide(p.id).then((g) => lists.guideView(g)), late]));
 });
 route('POST', '/api/admin/lists-order', async (req, res, p, q, ctx) => { requireAdmin(ctx); lists.reorder((await readJSON(req)).ids || []); return { ok: true }; });
-route('POST', '/api/admin/guides', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.addGuide(await readJSON(req)); });
-route('PUT', '/api/admin/guides/:id', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.updateGuide(p.id, await readJSON(req)); });
+route('POST', '/api/admin/guides', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.guideView(await lists.addGuide(await readObj(req))); });
+// Schedules Direct (lib/schedulesdirect.js): the lineups on the admin's account, to add one as a guide.
+route('POST', '/api/admin/schedulesdirect/lineups', async (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  try { return { lineups: await lists.sdLineups(await readObj(req)) }; } catch (e) { throw new HttpError(e.status || 502, e.message); }
+});
+route('PUT', '/api/admin/guides/:id', async (req, res, p, q, ctx) => { requireAdmin(ctx); return lists.guideView(lists.updateGuide(p.id, await readJSON(req))); });
 route('DELETE', '/api/admin/guides/:id', (req, res, p, q, ctx) => { requireAdmin(ctx); lists.removeGuide(p.id); return { ok: true }; });
 route('PUT', '/api/admin/profiles/:id', async (req, res, p, q, ctx) => {
   requireAdmin(ctx);
@@ -3357,6 +3363,9 @@ require('./lib/routes-p12')({ route, requireProfile, requireAdmin, readJSON, D, 
 const p10 = require('./lib/routes-p10')({ route, requireProfile, requireAdmin, readJSON, D, userdata, accounts, hub, tmdb, catalog: () => catalog, areaOff });
 followsOf = p10.followsOf;
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p10.publicFlags() }); }
+// [routes:p13] Subtitles made from a film's sound, when a speech-to-text program is on the server (lib/subgen.js).
+const p13 = require('./lib/routes-p13')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, settings, catalog: () => catalog, item, inputOf, srcList, connLimit, listUsage, hub, media, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
+{ const prev = p5Public; p5Public = () => ({ ...prev(), ...p13.publicFlags() }); }
 // [routes:p7] The play queue (per profile, synced between its devices).
 require('./lib/routes-p7')({ route, requireProfile, readJSON, HttpError, userdata, hub, catalog: () => catalog });
 // [routes:p9] Channel health (dead channels, uptime, background checks) and finding guides and logos in public databases.

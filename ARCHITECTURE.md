@@ -36,10 +36,10 @@ Three tables in `server.js` decide, at the one place requests are matched to rou
 | **Sign-in, profiles, PINs, guests** | `accounts.js` · per-profile data (history, My List, settings): `userdata.js` · screen time: `screentime.js` · parental locks and channel edits: `overrides.js` |
 | **Lists from providers** | `lists.js` (M3U, Xtream, files; fetching, caching, refreshing) · parsing: `parse.js`, `listworker.js` · Stalker portals: `stalker.js` · Jellyfin/Emby/Plex: `mediaserver.js` · media folders: `library.js` |
 | **The catalogue** (every list merged into films, series, channels) | `catalog.js` · saved for a quick start: `catsnap.js` · tidy names: `titles.js` · languages: `langs.js` · categories: `smartcats.js` |
-| **TV guide** | `epg.js` · reading XMLTV: `xmltv.js` · saved guide files: `guidefile.js` · suggestions for missing guides and logos: `publicdb.js` · event channels: `events.js` · followed teams: `follow.js` |
-| **Film and series details** | `tmdb.js` · recommendations: `recs.js` · Home rows from TMDB lists: `homelists.js` · Wishlist: `wishlist.js` |
+| **TV guide** | `epg.js` · reading XMLTV: `xmltv.js` · a Schedules Direct lineup as a guide: `schedulesdirect.js` · saved guide files: `guidefile.js` · suggestions for missing guides and logos: `publicdb.js` · event channels: `events.js` · followed teams: `follow.js` |
+| **Film and series details** | `tmdb.js` · recommendations: `recs.js` · Home rows from TMDB lists: `homelists.js` · Wishlist: `wishlist.js` · a Letterboxd or IMDb watchlist file into it: `watchlist-import.js` |
 | **Playing** | how a browser can reach a stream itself: `reach.js` · passing a stream through: `proxy.js` · converting with ffmpeg (HLS sessions, probing, thumbnails): `media.js` · one connection shared by a watch party: `fanout.js` · the stream relay's side here: `streamrelay.js` · outgoing connections and proxies: `net.js` |
-| **Subtitles** | found online: `subtitles.js`, `subsources.js` · picture subtitles (PGS, VobSub, DVB): `picsubs.js` |
+| **Subtitles** | found online: `subtitles.js`, `subsources.js` · picture subtitles (PGS, VobSub, DVB): `picsubs.js` · made from a film's sound by an optional whisper on the server: `subgen.js` |
 | **Skip intro / credits** | `intro.js`, `markers.js` |
 | **Recording** | `dvr.js` |
 | **Channels the admin makes, and other apps** | 24/7 "My channels": `mychannels.js` · playlists, guide and an HDHomeRun tuner for other apps: `outputs.js` |
@@ -48,9 +48,9 @@ Three tables in `server.js` decide, at the one place requests are matched to rou
 | **For the admin** | playback statistics: `stats.js` · error reports from devices: `errors.js` · API keys: `apikeys.js` · webhooks: `webhooks.js` |
 | **Plumbing** | JSON files written safely: `store.js` · start-up options: `config.js` · small helpers: `util.js` · zip, QR codes: `zip.js`, `qr.js`, `qrcode.js` · CSS for old TV browsers: `cssfallbacks.js` |
 
-`lib/routes-p1.js` … `routes-p12.js` hold the routes of features added later; each begins with a comment saying which
+`lib/routes-p1.js` … `routes-p13.js` hold the routes of features added later; each begins with a comment saying which
 (open in another app, watch-party streaming, channel editing, Stalker and outputs, integrations, picture subtitles,
-play queue, following and events, channel health, Home lists and the Wishlist, screen time, the DVR).
+play queue, following and events, channel health, Home lists and the Wishlist, screen time, the DVR, subtitles made from the sound).
 
 ## The app in the browser (`web/js/`)
 

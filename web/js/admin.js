@@ -302,6 +302,49 @@ V.connTestDialog = function (l) {
 
 V.langSelect = function (cur) { return '<select class="input" name="lang"><option value="">Detect automatically</option>' + (S.boot.languages || []).map(function (l) { return '<option value="' + l.code + '"' + (l.code === cur ? ' selected' : '') + '>' + V.esc(l.name) + '</option>'; }).join('') + '</select>'; };
 
+/** Admin → TV guides → Add Schedules Direct: sign in, pick one of the account's lineups (lib/schedulesdirect.js). */
+V.addSdDialog = function () {
+  var lineups = [];
+  var cred = function (d) { var f = V.$('form', d); return { username: f.username.value.trim(), password: f.password.value }; };
+  return V.dialog({
+    title: 'Add Schedules Direct',
+    body: '<form class="sd-form"><p class="dim">A paid listings service for the US, Canada and more (schedulesdirect.org). Add the lineup for your area to your account on their site first, then sign in here to pick it.</p>' +
+      '<label class="field"><span>User name</span><input class="input" name="username" autocomplete="off" spellcheck="false"></label>' +
+      '<label class="field"><span>Password</span><input class="input" type="password" name="password" autocomplete="new-password"></label>' +
+      '<div class="btn-row"><button type="button" class="btn" data-sd-find>Find my lineups</button></div>' +
+      '<label class="field" data-sd-pick hidden><span>Lineup</span><select class="input" name="lineup"></select></label>' +
+      '<p class="dim small">The password itself isn’t kept: only its hash, which is what the service takes. Listings are fetched when guides refresh, and only what changed since last time. The first fetch of a big lineup can take a few minutes.</p>' +
+      '<div class="err" role="alert"></div></form>',
+    actions: [{ label: 'Cancel', value: false }, { label: 'Add guide', primary: true, fn: function (d) {
+      var f = V.$('form', d), err = V.$('.err', d), c = cred(d);
+      if (!lineups.length) { err.textContent = 'Press “Find my lineups” first.'; return false; }
+      var l = lineups.filter(function (x) { return x.id === f.lineup.value; })[0];
+      if (!l) { err.textContent = 'Choose a lineup.'; return false; }
+      err.textContent = 'Fetching the listings… a big lineup can take a few minutes.';
+      return V.api('/api/admin/guides', { body: { name: 'Schedules Direct: ' + l.name, sd: { username: c.username, password: c.password, lineup: l.id } } }).then(function (g) {
+        V.toast(g.status && g.status.ok ? 'Guide added · ' + (g.status.channels || 0) + ' stations' : 'Guide added, but: ' + ((g.status && g.status.error) || 'it didn’t load'), { error: !(g.status && g.status.ok), ms: 8000 });
+        return true;
+      }, function (e) { err.textContent = e.message; return false; });
+    } }],
+    onOpen: function (d) {
+      V.$('form', d).onsubmit = function (e) { e.preventDefault(); };
+      V.$('[data-sd-find]', d).onclick = function () {
+        var b = this, err = V.$('.err', d), c = cred(d);
+        if (!c.username || !c.password) { err.textContent = 'Enter the user name and password.'; return; }
+        b.disabled = true; err.textContent = 'Signing in…';
+        V.api('/api/admin/schedulesdirect/lineups', { body: c }).then(function (r) {
+          lineups = r.lineups || [];
+          err.textContent = lineups.length ? '' : 'The account has no lineups yet. Add one at schedulesdirect.org (your account → Lineups), then try again.';
+          var sel = V.$('select[name=lineup]', d);
+          sel.innerHTML = lineups.map(function (l) { return '<option value="' + V.esc(l.id) + '">' + V.esc(l.name + (l.location ? ' · ' + l.location : '') + (l.transport ? ' (' + l.transport + ')' : '')) + '</option>'; }).join('');
+          V.$('[data-sd-pick]', d).hidden = !lineups.length;
+          if (lineups.length) sel.focus();
+        }).catch(function (e) { err.textContent = e.message; }).then(function () { b.disabled = false; });
+      };
+    },
+  });
+};
+
 V.addListDialog = function () {
   return V.dialog({
     title: 'Add a list', wide: true,
@@ -399,14 +442,15 @@ V.folderPicker = function () {
 };
 
 V.adminTabs.guides = function (body, A) {
-  body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a guide (XMLTV)</button><span class="dim">Guides named by your lists are added automatically. Channels are matched by tvg-id, then by name.</span></div>' +
+  body.innerHTML = '<div class="page-tools"><button class="btn primary" data-add>' + V.icon('plus') + ' Add a guide (XMLTV)</button><button class="btn" data-add-sd>' + V.icon('plus') + ' Add Schedules Direct…</button><span class="dim">Guides named by your lists are added automatically. Channels are matched by tvg-id, then by name.</span></div>' +
     '<div class="grid2 small-grid"><label class="field"><span>Days of listings to keep ahead</span><input class="input" type="number" min="1" max="21" data-s="epgDays" value="' + A.settings.epgDays + '"></label><label class="field"><span>Days to keep in the past (for catch-up)</span><input class="input" type="number" min="0" max="14" data-s="epgPastDays" value="' + A.settings.epgPastDays + '"></label><label class="field"><span>Refresh every (hours)</span><input class="input" type="number" min="1" max="168" data-s="epgRefreshHours" value="' + A.settings.epgRefreshHours + '"></label></div>' +
-    (A.guides.length ? '<ul class="adm-list">' + A.guides.map(function (g) { var s = g.status || {}; return '<li class="' + (g.enabled ? '' : 'off') + '" data-id="' + g.id + '"><div class="al-h"><b>' + V.esc(g.name) + '</b>' + (g.auto ? '<span class="chip sm">from a list</span>' : '') + '<span class="sp"></span><label class="switch sm"><input type="checkbox" data-en' + (g.enabled ? ' checked' : '') + '><span class="sw"></span></label><button class="icon-btn" data-ref aria-label="Refresh">' + V.icon('refresh') + '</button>' + (g.auto ? '' : '<button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button>') + '</div><div class="al-b dim small">' + V.esc(g.url.replace(/(password=)[^&]+/, '$1•••')) + '</div><div class="al-s small">' + (s.ok ? V.icon('check', 'tiny ok') + ' ' + (s.channels || 0) + ' channels · ' + (s.programmes || 0).toLocaleString() + ' programmes · ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.esc(s.error) + '</span>' : 'Not loaded yet') + '</div></li>'; }).join('') + '</ul>' : V.empty('No guides', 'Add an XMLTV address (.xml or .xml.gz).'));
+    (A.guides.length ? '<ul class="adm-list">' + A.guides.map(function (g) { var s = g.status || {}; return '<li class="' + (g.enabled ? '' : 'off') + '" data-id="' + g.id + '"><div class="al-h"><b>' + V.esc(g.name) + '</b>' + (g.auto ? '<span class="chip sm">from a list</span>' : '') + '<span class="sp"></span><label class="switch sm"><input type="checkbox" data-en' + (g.enabled ? ' checked' : '') + '><span class="sw"></span></label><button class="icon-btn" data-ref aria-label="Refresh">' + V.icon('refresh') + '</button>' + (g.auto ? '' : '<button class="icon-btn" data-del aria-label="Delete">' + V.icon('trash') + '</button>') + '</div><div class="al-b dim small">' + V.esc(g.sd ? 'Schedules Direct · lineup ' + g.url.slice(3) + ' · account ' + g.sd.user : g.url.replace(/(password=)[^&]+/, '$1•••')) + '</div><div class="al-s small">' + (s.ok ? V.icon('check', 'tiny ok') + ' ' + (s.channels || 0) + ' channels · ' + (s.programmes || 0).toLocaleString() + ' programmes · ' + V.fmtAgo(s.at) : s.error ? '<span class="err">' + V.esc(s.error) + '</span>' : 'Not loaded yet') + '</div></li>'; }).join('') + '</ul>' : V.empty('No guides', 'Add an XMLTV address (.xml or .xml.gz).'));
   body.onchange = function (e) {
     if (e.target.dataset.s) { var k = e.target.dataset.s, n = V.adminNum(e.target, S.admin.settings[k]); if (n === null) return; var p = {}; p[k] = n; V.adminSave(p).catch(function () {}); }
     if (e.target.hasAttribute('data-en')) V.put('/api/admin/guides/' + e.target.closest('[data-id]').dataset.id, { enabled: e.target.checked }).then(function () { V.router.refresh(); }).catch(function (x) { V.fail(x); V.router.refresh(); });
   };
   body.onclick = function (e) {
+    if (e.target.closest('[data-add-sd]')) return V.addSdDialog().then(function (ok) { if (ok) V.router.refresh(); });
     if (e.target.closest('[data-add]')) return V.prompt('Guide address (XMLTV)', { placeholder: 'https://…/guide.xml.gz' }).then(function (u) { if (u) { V.toast('Loading the guide…'); V.api('/api/admin/guides', { body: { url: u } }).then(function (g) { V.toast(g.status && g.status.ok ? 'Guide loaded' : 'Guide added, but: ' + ((g.status && g.status.error) || 'not loaded')); V.router.refresh(); }).catch(V.fail); } });
     var li = e.target.closest('[data-id]');
     if (!li) return;

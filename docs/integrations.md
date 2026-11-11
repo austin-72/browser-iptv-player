@@ -19,6 +19,25 @@ Each subtitle is downloaded once, converted to WebVTT and kept on the server (up
 - **Setup (admin):** Admin → **Integrations** → *Subtitles found online*: the SubDL key, the Addic7ed switch, and *Test all sources*. OpenSubtitles is the section below it; an account there only helps with a VIP subscription.
 - When OpenSubtitles' downloads are used up, the message says so; the other sources keep working.
 
+## Subtitles made from the sound
+
+When nothing is found online, the server can listen to a film or episode and write subtitles in the language spoken: **Find subtitles → Make subtitles from the sound**. A note arrives when they're ready, and from then on they're in that title's Subtitles menu for everyone (marked *made here*).
+
+It is optional and off unless the server has a speech-to-text program. Nothing is bundled and no npm package is used:
+
+| | |
+|---|---|
+| `WHISPER_BIN` | The program. Default: `whisper-cli` (whisper.cpp), then `whisper` (OpenAI's, or `whisper-ctranslate2`), looked for on the `PATH`. |
+| `WHISPER_MODEL` | whisper.cpp: the path of a model file such as `ggml-base.bin` (required). The Python command line: a model name (`base` unless set). |
+
+Admin → **Integrations** → *Subtitles made from the sound* shows what was found (or why not) and who may ask: everyone, only the admin, or nobody.
+
+- **It never changes how anything plays.** It is a background job of its own: ffmpeg reads the title once and keeps only its sound, the program writes a WebVTT file into `gen-subs` in the data folder, and the sound file is deleted.
+- While the sound is read from a provider, the job uses one of that provider's connections. It is listed with the people watching as *Making subtitles*, waits for a free connection instead of taking one, and reads the whole file once.
+- One title at a time; up to five wait in a queue. It runs at low priority, and it is slow work: expect a good part of the running time on a small server, depending on the model.
+- Machine-made: names and fast speech come out wrong, and the timing is by the sentence.
+- **Docker:** the image doesn't include a speech-to-text program. Add one in an image of your own on top of it (the base is Alpine, so whisper.cpp has to be built for Alpine), put a model file in the data folder, and set the two variables. This path hasn't been tried on a real install; the feature was tested with a stand-in for the program that takes whisper.cpp's options.
+
 ## Home rows from TMDB lists
 
 **Home → Add a row from a list** (at the bottom of Home, and in *Customise this page*) puts a list on your home page. Paste a link to:

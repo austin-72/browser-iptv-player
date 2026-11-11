@@ -175,3 +175,9 @@ body.off-themes [data-area~="themes"] { display: none !important; }
 /* Wishlist → Import a watchlist; Recordings → how many episodes a series keeps */
 .wl-import { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin: .8rem 0 0; }
 .dvr-keepn .input { width: auto; max-width: 13rem; }
+
+/* Find subtitles → made from the sound (web/js/integrations.js) */
+.os-gen { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.os-gen:empty { display: none; }
+.os-gen-h { font-size: 1rem; margin: 0 0 .4rem; }
+.os-gen-st { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }

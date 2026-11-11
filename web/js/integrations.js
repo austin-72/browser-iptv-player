@@ -6,13 +6,13 @@
   var ext = function (p) { return p._extSubs || (p._extSubs = []); };
   var subUrl = function (p, url) { return url + (p.sessionId && p.offset ? (url.indexOf('?') < 0 ? '?' : '&') + 'offset=' + p.offset : ''); };
 
-  /** Adds a fetched subtitle to the video and shows it. */
-  V.addExtSub = function (p, url, label, lang, again) {
+  /** Adds a fetched subtitle to the video and shows it (hidden: only puts it in the Subtitles menu). */
+  V.addExtSub = function (p, url, label, lang, again, hidden) {
     var v = p.video;
     var list = ext(p).filter(function (x) { return x.el && x.el.parentNode === v; }); // (a reload took the old ones off)
     p._extSubs = list;
     // (Kept, so a reload — a jump in a converted stream, a new quality — puts it back with the times moved right.)
-    p._extKeep = { k: p.it && p.it.k, url: url, label: label, lang: lang };
+    if (!hidden) p._extKeep = { k: p.it && p.it.k, url: url, label: label, lang: lang };
     var have = list.filter(function (x) { return x.url === url; })[0];
     if (have && again) { have.el.remove(); list.splice(list.indexOf(have), 1); have = null; }
     if (!have) {
@@ -26,6 +26,7 @@
       have = { url: url, label: label, lang: lang, el: tr };
       list.push(have);
     }
+    if (hidden) { if (have.el.track && have.el.track.mode === 'showing' && p._extOn !== url) have.el.track.mode = 'disabled'; if (p._menuRefresh) p._menuRefresh(); return; }
     if (p.hls && p.hls.subtitleTrack >= 0) p.hls.subtitleTrack = -1;
     setTimeout(function () {
       // (This very track — two fetched ones, or one inside the file, can carry the same name, and showed on top of each other.)
@@ -54,8 +55,11 @@
     var it = p.it;
     if (!it) return;
     var body = document.createElement('div');
-    body.innerHTML = '<p class="dim small">Found online, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div>';
-    V.dialog({ title: 'Find subtitles', body: body, wide: true, actions: [{ label: 'Close' }] });
+    body.innerHTML = '<p class="dim small">Found online, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div><div class="os-gen"></div>';
+    var genStop = V.subGenPanel ? V.subGenPanel(p, V.$('.os-gen', body)) : null;
+    V.dialog({ title: 'Find subtitles', body: body, wide: true, actions: [{ label: 'Close' }], onClose: function () { if (genStop) genStop(); } });
+    // (No online source set up, only subtitles made here: nothing to search.)
+    if (!(S.settings.subtitles || S.settings.opensubtitles)) { V.$('.os-list', body).innerHTML = ''; V.$('p', body).textContent = 'No online subtitle source is set up on this server.'; return; }
     V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k)).then(function (r) {
       var box = V.$('.os-list', body);
       if (!box) return;
@@ -81,6 +85,62 @@
       var first = V.$('.os-pick:not([disabled])', box); if (first) first.focus();
     }).catch(function (e) { var box = V.$('.os-list', body); if (box) box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
   };
+
+  // ------------------------------------------------------------ subtitles made from the film's sound (lib/subgen.js)
+  var genLabel = function (lang) { return (lang ? V.langName(lang) || lang : 'Spoken language') + ' (made here)'; };
+  /**
+   * In "Find subtitles": have the server write subtitles from the sound, when it has a speech-to-text program and
+   * the admin lets this profile ask. Returns what stops its checking (the dialog closed).
+   */
+  V.subGenPanel = function (p, box) {
+    var it = p.it, timer = null, gone = false;
+    if (!S.settings.subGen || !it || (it.t !== 'movie' && it.t !== 'episode')) return null;
+    var mins = function (s) { return s >= 3600 ? Math.floor(s / 3600) + ' h ' + Math.round((s % 3600) / 60) + ' min' : Math.round(s / 60) + ' min'; };
+    var draw = function (r) {
+      if (gone) return;
+      clearTimeout(timer);
+      var busy = r.state === 'queued' || r.state === 'waiting' || r.state === 'audio' || r.state === 'writing';
+      var what = { queued: r.ahead ? 'Waiting for ' + V.plural(r.ahead, 'other title') + ' to be done first.' : 'About to start.', waiting: 'Waiting for a free connection to the provider.', audio: 'Listening to it… ' + (r.secs ? mins(r.secs) + ' heard so far.' : ''), writing: 'Writing the subtitles… ' + (r.pct ? r.pct + '%' : '') }[r.state] || '';
+      box.innerHTML = '<h3 class="os-gen-h">Made from the sound</h3>' +
+        (r.state === 'done' ? '<button class="btn ghost block os-pick" data-gen-show><b>' + V.esc(genLabel(r.lang)) + '</b> <span class="dim small">written by this server from what’s said · timing and words won’t be perfect</span></button>' + (S.profile.admin ? '<button class="linkish small" data-gen-del>Delete these and start over</button>' : '')
+          : busy ? '<p class="os-gen-st" role="status"><span class="spinner sm"></span> ' + V.esc(what) + ' <span class="dim small">You can close this and keep watching: a note arrives when they’re ready.</span></p>' + (r.mine || S.profile.admin ? '<button class="linkish small" data-gen-del>Stop</button>' : '')
+            : !r.can ? '<p class="dim small">' + (S.settings.subGen === 'admin' ? 'The admin can have this server write subtitles from what’s said.' : '') + '</p>'
+              : (r.state === 'failed' ? '<p class="err small">Last time it didn’t work: ' + V.esc(r.err || 'unknown') + '</p>' : '') + '<p class="dim small">Nothing that fits? This server can listen to the whole ' + (it.t === 'movie' ? 'film' : 'episode') + ' and write subtitles in the language spoken. It takes a while (often a quarter of the running time, more on a small server) and doesn’t change how anything plays.</p><button class="btn" data-gen-go>' + V.icon('cc') + ' Make subtitles from the sound</button>');
+      if (busy) timer = setTimeout(load, 5000);
+    };
+    var load = function () { return V.api('/api/subgen?k=' + encodeURIComponent(it.k)).then(draw).catch(function () { if (!gone) box.innerHTML = ''; }); };
+    box.onclick = function (e) {
+      var b = e.target.closest('button');
+      if (!b || b.disabled) return;
+      if (b.hasAttribute('data-gen-go')) { b.disabled = true; V.api('/api/subgen', { body: { k: it.k } }).then(draw).catch(function (er) { b.disabled = false; V.fail(er); }); }
+      else if (b.hasAttribute('data-gen-del')) { b.disabled = true; V.del('/api/subgen?k=' + encodeURIComponent(it.k)).then(load).catch(function (er) { b.disabled = false; V.fail(er); }); }
+      else if (b.hasAttribute('data-gen-show')) V.api('/api/subgen?k=' + encodeURIComponent(it.k)).then(function (r) {
+        if (r.state !== 'done') return draw(r);
+        V.addExtSub(p, r.url, genLabel(r.lang), r.lang || 'und');
+        var d = box.closest('dialog'); if (d && d._finish) d._finish(null);
+        p.osd && p.osd('Subtitles on', 1200);
+      }).catch(V.fail);
+    };
+    load();
+    return function () { gone = true; clearTimeout(timer); };
+  };
+  // Ones already made for this title are in its Subtitles menu from the start (not switched on by themselves).
+  V.on('playing', function (it) {
+    if (!it || (it.t !== 'movie' && it.t !== 'episode') || !S.settings.subGen) return;
+    var p = V.player, tok = p.token;
+    if (p._genAsked === it.k) return;
+    p._genAsked = it.k;
+    V.api('/api/subgen?k=' + encodeURIComponent(it.k)).then(function (r) {
+      if (r.state === 'done' && p.token === tok && V.watch.it === it) V.addExtSub(p, r.url, genLabel(r.lang), r.lang || 'und', false, true);
+    }).catch(function () {});
+  });
+  // (Just finished, while it's playing: there straight away.)
+  V.on('subgen', function (d) {
+    var p = V.player;
+    if (!d || d.state !== 'done' || !p || !p.it || p.it.k !== d.k) return;
+    p._genAsked = null;
+    V.api('/api/subgen?k=' + encodeURIComponent(d.k)).then(function (r) { if (r.state === 'done' && p.it && p.it.k === d.k) V.addExtSub(p, r.url, genLabel(r.lang), r.lang || 'und', false, true); }).catch(function () {});
+  });
 
   /** Does the player already have subtitles in this language (from the stream, the file, or fetched)? */
   var hasSubsIn = function (p, lang) {
@@ -401,8 +461,32 @@
         '<section class="card-sec"><h2>Backup: OpenSubtitles.com</h2><p class="dim">The biggest library, used when the free sources have nothing. A free API key (opensubtitles.com → your profile → API consumers) allows 5 downloads a day, shared by everyone here; subtitles already saved here don’t count again. Signing in with an account only raises that with a VIP subscription.</p>' +
         '<div class="int-fields">' + secretField('os.apiKey', 'API key', o.apiKey) + secretField('os.username', 'Account username (optional)', o.username) + '<label class="field"><span>Account password</span><input class="input" type="password" data-f="os.password" value="' + V.esc(o.password) + '" autocomplete="new-password"></label></div>' +
         left +
-        '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>';
+        '<div class="btn-row"><button class="btn primary" data-save="os">Save</button><button class="btn" data-test="os">Test</button></div><p class="os-test small"></p></section>' +
+        '<section class="card-sec" data-subgen><h2>Subtitles made from the sound</h2><div class="spinner"></div></section>';
       focusBack(body, refocus);
+      // Subtitles written by the server from what's said (lib/subgen.js): what was found, and who may ask.
+      var drawGen = function (g) {
+        var sec = V.$('[data-subgen]', body);
+        if (!sec) return;
+        sec.innerHTML = '<h2>Subtitles made from the sound</h2><p class="dim">When nothing is found online, the server can listen to a film or episode and write subtitles in the language spoken (Find subtitles → Make subtitles from the sound). It needs a speech-to-text program on the server — whisper.cpp or OpenAI’s whisper — and works in the background: nothing about how the film plays changes. It is slow work for a small server, one title at a time.</p>' +
+          (g.available ? '<p>' + V.icon('check', 'tiny ok') + ' Found: <b>' + V.esc(g.kind === 'cpp' ? 'whisper.cpp' : 'whisper') + '</b> <span class="dim small">' + V.esc(g.bin) + (g.model ? ' · model ' + V.esc(g.model) : '') + '</span></p>' +
+            (g.ffmpeg ? '' : '<p class="note warn">' + V.icon('info') + ' <span>It also needs ffmpeg, which isn’t on this server.</span></p>') +
+            '<label class="field"><span>Who can ask for them</span><select class="input" data-subgen-mode>' + [['everyone', 'Everyone'], ['admin', 'Only the admin'], ['off', 'Nobody (off)']].map(function (o) { return '<option value="' + o[0] + '"' + (g.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>'
+            : '<p class="note">' + V.icon('info') + ' <span>Not set up: ' + V.esc(g.why || 'no program found') + ' See “Subtitles made from the sound” in docs/integrations.md.</span></p><div class="btn-row"><button class="btn sm" data-subgen-again>Look again</button></div>');
+      };
+      V.api('/api/admin/subgen').then(drawGen).catch(function () { var sec = V.$('[data-subgen]', body); if (sec) sec.remove(); });
+      // (This page is drawn again into the same element after a save: its listeners are added once.)
+      if (!body._subgenWired) {
+        body._subgenWired = true;
+        body.addEventListener('change', function (e) {
+          if (!e.target.hasAttribute('data-subgen-mode')) return;
+          V.adminSave({ subGen: e.target.value }).then(function () { S.settings.subGen = e.target.value === 'off' ? '' : e.target.value; }).catch(function () {});
+        });
+        body.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-subgen-again]');
+          if (b) { b.disabled = true; V.api('/api/admin/subgen?again=1').then(function (g) { drawGen(g); V.toast(g.available ? 'Found it' : 'Still not found'); }).catch(V.fail); }
+        });
+      }
       body.onclick = function (e) {
         var s = e.target.closest('[data-save]');
         if (s && !s.disabled) {

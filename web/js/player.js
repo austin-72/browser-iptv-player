@@ -2370,7 +2370,7 @@ PP._menuPages = function (kind) {
     if (tr.audio) { main.push({ label: 'Audio', value: tr.audio.value, page: 'audio' }); pages.audio = tr.audio.items; }
     main.push({ label: 'Subtitle style', value: '', fn: function () { V.subtitleStyleDialog(); } });
     // Subtitles found online (SubDL, Addic7ed, OpenSubtitles): see integrations.js.
-    if ((S.settings.subtitles || S.settings.opensubtitles) && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
+    if ((S.settings.subtitles || S.settings.opensubtitles || S.settings.subGen) && this.it && (this.it.t === 'movie' || this.it.t === 'episode')) main.push({ label: 'Find subtitles…', value: '', fn: function () { V.findSubtitles(self); } });
     if (V.ccMenuExtras) V.ccMenuExtras(this, main, pages); // (subtitle timing: subtiming.js)
     pages.main = main;
     return pages;

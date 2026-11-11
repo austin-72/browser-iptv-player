@@ -43,6 +43,7 @@ V.rt = (function () {
     on('app-updated', function () { V.appUpdated(); });
     on('screentime', function (d) { V.emit('screentime', d); });
     on('dvr', function (d) { V.emit('dvr', d); });
+    on('subgen', function (d) { V.emit('subgen', d); }); // (subtitles made from a film's sound: integrations.js)
     on('trending', function () { V.emit('trending-push'); }); // (TMDB's charts fetched again: smartcats.js)
     on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {

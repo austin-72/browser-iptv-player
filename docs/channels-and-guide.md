@@ -19,6 +19,20 @@ Search by name or number, and filter by list, category, type (TV or radio) and "
 - **Time offset**: move a channel's guide times in half-hour steps (in the channel's Edit window), or a whole guide's times (Admin → TV guides, next to each guide). The two add up.
 - Only the channels you actually use are kept in memory, as before; offsets are applied as each guide is read, so they cost nothing extra.
 
+## Schedules Direct
+
+[Schedules Direct](https://schedulesdirect.org) is a paid listings service for the US, Canada and more. It is accurate where a provider's own guide is thin or wrong.
+
+1. On their site, add the lineup for your area to your account (your account → Lineups).
+2. Here: Admin → **TV guides** → **Add Schedules Direct…**, enter the account's user name and password, press *Find my lineups*, pick one and add it.
+
+From then on it refreshes like any other guide. Its stations are matched to your channels the usual way: by tvg-id (`I<station>.json.schedulesdirect.org`, as other Schedules Direct tools write it), then by name, or by hand in Admin → Channels → Edit → *Pick a guide channel*.
+
+- The password itself isn't kept, only its SHA-1, which is what the service takes. It is stored with the lists' own sign-in details and never sent back to a browser.
+- The server signs in at most once a day (the token is kept), asks only for programmes that changed since last time, and stops at an error instead of retrying: the service's rules for programs that use it.
+- Listings start today: Schedules Direct has no past days, so a channel on it has no listings before today for catch-up.
+- This was written against the service's published API and tested against a stand-in for it, not against a real account.
+
 ## Find guides and logos
 
 For channels with no guide or no logo, **Admin → TV guides → Find guides and logos** suggests matches from two free public databases:
