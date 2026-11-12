@@ -112,7 +112,7 @@ Admin → **Integrations** → *Subtitles made from the sound* shows what was fo
 
 ## More from TMDB on a title's page, and people
 
-With a TMDB key (Admin → Recommendations), opening a film's or series' page asks TMDB once more for that title — one request, kept two weeks — and adds:
+With a TMDB key (Admin → Recommendations), opening a film's or series' page asks TMDB once more for that title — one request, kept on the server — and adds:
 
 - **Its logo** in place of the name in plain text, on its page and in Home's banner (the name stays for screen readers, and shows if the picture doesn't load).
 - **The tagline**, and **the cast with photos and who they play** (for a series: who is in the most episodes). **Who made it**: director, writers, music, photography; a series' creators.
@@ -123,6 +123,10 @@ With a TMDB key (Admin → Recommendations), opening a film's or series' page as
 A name in the cast opens **that person's page**: photo, a few lines about them, everything of theirs in your lists (also the films where they are too far down the cast to be listed on the title's own page), and under it what they are best known for that isn't here, one press from your wishlist. Searching for a name leads there too (the row's title).
 
 **Episodes in the wrong order?** on a series' page lists the other orders TMDB has for it — DVD order, numbered straight through, by story arc. Pick the one that matches the episodes your provider has and their titles, pictures and descriptions line up, for everyone. Subtitle searches still ask by the season and episode it was first shown as.
+
+**How fast it is.** The first time anyone opens a title's page, its extras wait for TMDB (a fraction of a second; the rest of the page is there at once). After that they come from the server's disk straight away, and when what is saved is older than a day TMDB is asked again behind the page, for next time — so nothing shown is ever waited for twice, and nothing stays out of date for long. People's pages work the same way.
+
+To have no page wait even the first time: Admin → Recommendations → **Page extras → Fetch for all … titles**. It asks TMDB for every title that has details and whose page isn't saved yet — one request a title, about 7 a second (100,000 titles: about four hours), and a good deal of disk space, which it reports as it goes along with what the whole library will come to. Everything keeps working meanwhile; it can be stopped and picks up where it was. It also gives every title its IMDb number and other names (for subtitles) and an age rating where it had none. *Fetch them all again* asks for every one afresh.
 
 Three switches in Admin → Playback → *What’s switched on*: **People** (off: names only), **Title logos**, **Viewers' reviews** (never shown on a kids profile; a kids profile also can't change an episode order, and a person's page there lists only what that profile may see).
 

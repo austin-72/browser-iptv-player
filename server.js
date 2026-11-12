@@ -3378,7 +3378,7 @@ followsOf = p10.followsOf;
 const p13 = require('./lib/routes-p13')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, settings, catalog: () => catalog, item, inputOf, srcList, connLimit, listUsage, hub, media, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
 // [routes:p14] More from TMDB when a page asks: a title's logo, cast with photos, facts and reviews; people; episode orders.
 require('./lib/routes-p14')({
-  route, requireProfile, readJSON, HttpError, tmdb, catalog: () => catalog, item, userdata, areaOff, certLevel: require('./lib/catalog').certLevel, log, hub,
+  route, requireProfile, requireAdmin, readJSON, HttpError, tmdb, catalog: () => catalog, item, userdata, areaOff, certLevel: require('./lib/catalog').certLevel, log, hub,
   byTmdb: (t, id) => trending._index().m.get(t + id) || [],
 });
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p13.publicFlags() }); }

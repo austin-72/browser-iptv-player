@@ -745,13 +745,14 @@ V.adminTabs.recs = function (body, A) {
     '<label class="field"><span>TMDB key</span><div class="inline"><input class="input" data-key value="' + V.esc(s.tmdbKey || '') + '" placeholder="Paste the key"><button class="btn" data-save>Save</button><button class="btn" data-test>Test</button></div></label>' +
     '<p class="dim small">Status: ' + (A.status.tmdb.enabled ? 'on · ' + A.status.tmdb.matched + ' titles have details' + (A.status.tmdb.error ? ' · <span class="err">' + V.esc(A.status.tmdb.error) + '</span>' : '') : 'off') + '</p>' +
     '<div class="tmdb-fetch"></div></section>' +
-    (A.status.tmdb.enabled ? V.tmdbOptionsHtml(s) + '<section class="card-sec"><h2>Episode details</h2><p class="dim">Each episode’s own title, plot, picture and first air date from TMDB, for series your lists describe only as “Episode 3” or with no plots and pictures. Shown on each series’ page; the provider’s own titles and plots stay where they’re good.</p><div class="tmdb-eps"></div></section>' : '') +
+    (A.status.tmdb.enabled ? V.tmdbOptionsHtml(s) + '<section class="card-sec"><h2>Episode details</h2><p class="dim">Each episode’s own title, plot, picture and first air date from TMDB, for series your lists describe only as “Episode 3” or with no plots and pictures. Shown on each series’ page; the provider’s own titles and plots stay where they’re good.</p><div class="tmdb-eps"></div></section>' +
+      '<section class="card-sec"><h2>Page extras</h2><p class="dim">A title’s logo, cast with photos, facts, release dates and reviews are fetched from TMDB the first time its page is opened, then kept here: later opens are instant, and anything older than a day is updated behind the page. To have no page wait even the first time, fetch them all ahead — one request a title, about 7 a second, and a good deal of disk space (shown as it goes). It can be stopped and carries on later where it left off.</p><div class="tmdb-extras"></div></section>' : '') +
     '<section class="card-sec"><h2>How recommendations work</h2><p class="dim">Each profile’s picks are worked out on the server and saved on disk. They use what the profile watched (more weight for finished and recent things), thumbs up/down, My List and chosen interests; TMDB’s related titles; actors and directors you keep watching; titles several of your favourites point to; and what others in the household watch. Titles that keep being shown without being opened make way for new ones, and rows are re-ranked for variety.</p></section>';
   body.onclick = function (e) {
     if (e.target.closest('[data-save]')) V.adminSave({ tmdbKey: V.$('[data-key]', body).value }).then(function () { V.router.refresh(); });
     if (e.target.closest('[data-test]')) V.api('/api/admin/tmdb/test', { method: 'POST' }).then(function (j) { V.toast(j.ok ? 'TMDB works' : 'TMDB: ' + j.error, { error: !j.ok }); }).catch(V.fail);
   };
-  if (A.status.tmdb.enabled) { V.tmdbFetchPanel(V.$('.tmdb-fetch', body)); V.tmdbEpisodesPanel(V.$('.tmdb-eps', body)); V.tmdbOptionsWire(body); }
+  if (A.status.tmdb.enabled) { V.tmdbFetchPanel(V.$('.tmdb-fetch', body)); V.tmdbEpisodesPanel(V.$('.tmdb-eps', body)); V.tmdbExtrasPanel(V.$('.tmdb-extras', body)); V.tmdbOptionsWire(body); }
 };
 
 /** Admin → Recommendations → Options: what TMDB fills in, and how. */
@@ -775,6 +776,48 @@ V.tmdbOptionsWire = function (body) {
     else return;
     V.adminSave(patch, t.dataset.opt === 'tmdbTitles' ? 'Saved — the catalogue is being put together again' : 'Saved').catch(function () { if (t.dataset.opt) t.checked = !t.checked; });
   });
+};
+
+/** Admin → Recommendations → Page extras: every title's page fetched from TMDB ahead of anyone opening it (lib/routes-p14.js). */
+V.tmdbExtrasPanel = function (box) {
+  if (!box) return;
+  var info = null, timer = null;
+  var took = function (n) { var s = n / 7; return s < 90 ? 'about a minute' : s < 5400 ? 'about ' + Math.round(s / 60) + ' minutes' : 'about ' + (Math.round(s / 360) / 10) + ' hours'; };
+  var sum = function (x) { return x.fetched.toLocaleString() + ' fetched, ' + x.had.toLocaleString() + ' already here' + (x.failed ? ', ' + x.failed.toLocaleString() + ' TMDB had nothing for' : '') + ' · ' + V.fmtSize(x.bytes) + ' on disk'; };
+  var draw = function () {
+    var j = info.job, last = info.last;
+    var pct = j && j.total ? j.done / j.total : 0;
+    // (How much room all of it will take, from what has come so far.)
+    var seen = j ? j.fetched + j.had : 0, whole = j && seen > 200 ? ' · about ' + V.fmtSize(j.bytes / seen * j.total) + ' for all of them' : '';
+    box.innerHTML = (j ? '<div class="tf-job"><div class="tf-h"><b>Fetching page extras</b><span class="sp"></span><button class="btn sm" data-tx-stop>Stop</button></div><div class="bar big"><i style="width:' + (pct * 100).toFixed(1) + '%"></i></div><div class="dim small">' + j.done.toLocaleString() + ' of ' + V.plural(j.total, 'title') + ' · ' + sum(j) + whole + (j.current ? '<br>' + V.esc(j.current) : '') + '</div></div>'
+      : last && last.finished ? '<p class="dim small">' + (last.error ? 'Stopped: ' + V.esc(last.error) : (last.stopped ? 'Stopped' : 'Finished') + ' ' + V.fmtAgo(last.finished)) + ' — ' + last.done.toLocaleString() + ' of ' + last.total.toLocaleString() + ': ' + sum(last) + '.</p>' : '') +
+      '<div class="btn-row"' + (j ? ' hidden' : '') + '><button class="btn primary" data-tx="missing">' + V.icon('download') + ' Fetch for all ' + Number(info.titles).toLocaleString() + ' titles</button><button class="btn" data-tx="all">' + V.icon('refresh') + ' Fetch them all again</button></div>';
+  };
+  var load = function () {
+    clearTimeout(timer);
+    return V.api('/api/admin/tmdb/extras').then(function (r) {
+      info = r;
+      var had = document.activeElement && box.contains(document.activeElement) ? document.activeElement.getAttribute('data-tx') || (document.activeElement.hasAttribute('data-tx-stop') ? 'stop' : '') : '';
+      draw();
+      if (had) { var back = V.$(had === 'stop' ? '[data-tx-stop]' : '[data-tx="' + had + '"]', box) || V.$('button:not([hidden])', box); if (back && !back.closest('[hidden]')) back.focus(); }
+      if (r.job && document.documentElement.contains(box)) timer = setTimeout(load, 2000);
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  box.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tx]');
+    if (b && !b.disabled) {
+      var mode = b.dataset.tx;
+      V.confirm(mode === 'all'
+        ? 'Fetch every title’s page from TMDB again, including the ones already here? ' + Number(info.titles).toLocaleString() + ' requests, ' + took(info.titles) + '. Everything keeps working meanwhile.'
+        : 'Fetch the page extras for every title that doesn’t have them here yet? Up to ' + Number(info.titles).toLocaleString() + ' requests, ' + took(info.titles) + ', and possibly several gigabytes on disk — it says how much as it goes. Everything keeps working meanwhile, and you can stop it at any time.', { ok: 'Fetch them' }).then(function (ok) {
+        if (ok) V.api('/api/admin/tmdb/extras', { body: { mode: mode } }).then(function (r) { if (r.nothing) V.toast('No titles have details yet'); load(); }).catch(V.fail);
+      });
+    }
+    if (e.target.closest('[data-tx-stop]')) V.del('/api/admin/tmdb/extras').then(load);
+  });
+  load();
+  var prevCleanup = V.pageCleanup;
+  V.pageCleanup = function () { clearTimeout(timer); if (prevCleanup) prevCleanup(); };
 };
 
 /** Admin → Recommendations → Episode details: how many series have them, and fetching them for many at once. */

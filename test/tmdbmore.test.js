@@ -152,6 +152,42 @@ test('a Home row made by choosing: what TMDB is asked, and what the row is calle
   assert.throws(() => parseSource({ kind: 'tmdb-discover', ref: 'not json' }), /isn’t a row/);
 });
 
+test('what is saved is given at once; older than a day, it is asked for again behind the page', async () => {
+  const { Tmdb } = require('../lib/tmdb');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmdbsoft-'));
+  let hits = 0, tagline = 'First';
+  const srv = http.createServer((req, res) => { hits++; setTimeout(() => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ id: 603, title: 'The Matrix', tagline })); }, 150); });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  try {
+    const t = new Tmdb({ dataDir: dir, getKey: () => 'k', base: `http://127.0.0.1:${srv.address().port}` });
+    const more = new M.TmdbMore({ tmdb: t, level: certLevel });
+    t.map.data.m.x = { id: 603, type: 'movie' };
+    const it = { k: 'x', t: 'movie', n: 'The Matrix' };
+    assert.deepStrictEqual(await more.saved(it), { have: false, bytes: 0 });
+    assert.deepStrictEqual(await more.saved({ k: 'nope' }), { have: false, bytes: 0, unmatched: true });
+    assert.strictEqual((await more.title(it)).tagline, 'First'); // (nothing saved: TMDB is waited for)
+    assert.strictEqual(hits, 1);
+    await wait(50);
+    assert.strictEqual((await more.saved(it)).have, true);
+    tagline = 'Second';
+    assert.strictEqual((await more.title(it)).tagline, 'First');
+    assert.strictEqual(hits, 1, 'within a day: from what is saved, nothing asked');
+    // Two days old: still given at once (TMDB takes 150 ms here), and asked for again behind it — once.
+    const r = more.titleReq(t.map.data.m.x), old = new Date(Date.now() - 2 * 86400e3);
+    fs.utimesSync(t.cacheFile(r.p, r.params), old, old);
+    const t0 = Date.now();
+    const [a, b] = await Promise.all([more.title(it), more.title(it)]);
+    assert.ok(a.tagline === 'First' && b.tagline === 'First' && Date.now() - t0 < 120, `${Date.now() - t0} ms`);
+    for (let i = 0; i < 40 && (await more.title(it)).tagline !== 'Second'; i++) await wait(50);
+    assert.strictEqual((await more.title(it)).tagline, 'Second', 'next time: the new answer');
+    assert.strictEqual(hits, 2);
+    // TMDB down: what is saved, however old.
+    srv.close(); srv.closeAllConnections();
+    fs.utimesSync(t.cacheFile(r.p, r.params), old, old);
+    assert.strictEqual((await more.title(it)).tagline, 'Second');
+  } finally { srv.close(); try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch {} }
+});
+
 // ---------------------------------------------------------------- through the real server
 function fakeTmdb() {
   const hits = [];
@@ -285,6 +321,30 @@ test('through the server: a title’s extras, a person, episode orders, a row by
     assert.strictEqual((await k.req('POST', `/api/item/${encodeURIComponent(show.k)}/order`, { id: '' })).status, 403);
     const pk = (await k.req('GET', '/api/person/6384')).json;
     assert.deepStrictEqual([pk.here.map((h) => h.k), pk.more], [[], []], 'an R film and an 18 one: neither is this profile’s to see');
+
+    // Every title's page fetched ahead (Admin → Recommendations): only what isn't saved yet — Obscura's, never opened.
+    assert.strictEqual((await k.req('POST', '/api/admin/tmdb/extras', {})).status, 403);
+    const pages = () => t.hits.filter((h) => /^\/(movie|tv)\/\d+\?/.test(h) && /images/.test(h)).length;
+    const runJob = async (body) => {
+      const st = await a.req('POST', '/api/admin/tmdb/extras', body);
+      assert.strictEqual(st.status, 200, st.text);
+      let j = null;
+      for (let i = 0; i < 100; i++) { j = (await a.req('GET', '/api/admin/tmdb/extras')).json; if (!j.job && j.last && j.last.finished >= st.json.started) break; await wait(100); }
+      return j;
+    };
+    let before = pages();
+    let jr = await runJob({});
+    assert.deepStrictEqual([jr.titles, jr.last.total, jr.last.done, jr.last.fetched, jr.last.had, jr.last.failed], [4, 4, 4, 1, 3, 0]);
+    assert.ok(jr.last.bytes > 1000 && pages() === before + 1);
+    assert.match(out, /TMDB: page extras done — 1 fetched, 3 already here/);
+    jr = await runJob({});
+    assert.deepStrictEqual([jr.last.fetched, jr.last.had, pages()], [0, 4, before + 1], 'again: nothing to do, nothing asked');
+    // A page opened after that comes straight from what is saved.
+    assert.strictEqual((await more(a, odd.k)).cast[0].name, 'Keanu Reeves');
+    assert.strictEqual(pages(), before + 1);
+    // "Fetch them all again": every one asked for afresh.
+    jr = await runJob({ mode: 'all' });
+    assert.deepStrictEqual([jr.last.fetched, jr.last.had, pages()], [4, 0, before + 5]);
 
     // A row made by choosing.
     const opts = (await a.req('GET', '/api/homelists/options')).json;
