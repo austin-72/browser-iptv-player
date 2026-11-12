@@ -3,6 +3,15 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.2
+
+- **Genres that were nearly empty for series:** TMDB's list of series genres has no Horror, Thriller, Romance,
+  History, Music, Sport or Faith, so a series could only be in them through a provider's category name (two horror
+  series out of 21,000). TMDB's keywords for each title now count too ("supernatural horror", "psychological
+  thriller", "love triangle", "period drama", "stand-up comedy", "cooking"…), and for a series with none, a clear
+  phrase in its description ("a horror anthology", "a romantic comedy"). Films gain from the keywords as well.
+- **Movies and Series:** the headings in the list of categories are in the theme's accent colour.
+
 ## 2.8.1
 
 - **Genres tidied:** a provider's "Comedy." or "Talk-Show", "Mystère", "Krimi", "Familie", "Dokumentarfilm" and

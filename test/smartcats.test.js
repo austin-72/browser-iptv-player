@@ -220,3 +220,25 @@ test('My List remembers when titles were added and liked', () => {
   ud.rate('p', 'b', 0);
   assert.ok(!('b' in ud.of('p').data.ratedAt));
 });
+
+test('genres TMDB gives series no name for: from its keywords, else a clear phrase in the description', () => {
+  const show = (k, kw, extra) => tagOf({ t: 'show', n: 'Show ' + k, k, g: 'Series', rg: 'Series', gn: ['Drama', 'Mystery'], ...extra }, { meta: (key) => (key === k && kw ? { kw } : null) }, { smart: { on: true, plot: true } });
+  has(show('a', ['supernatural horror', 'small town']), 'g:horror', 'g:drama', 'g:mystery');
+  has(show('b', ['zombie apocalypse']), 'g:horror');
+  has(show('c', ['psychological thriller']), 'g:thriller');
+  has(show('d', ['love triangle', 'high school']), 'g:romance');
+  lacks(show('e', ['bromance', 'loss of loved one']), 'g:romance');
+  has(show('f', ['period drama']), 'g:history');
+  has(show('g', ['musician']), 'g:music');
+  has(show('h', ['sports documentary']), 'g:sports');
+  has(show('i', ['stand-up comedy']), 'g:standup', 'g:comedy');
+  has(show('j', ['cooking competition']), 'g:lifestyle', 'g:reality');
+  has(show('k', ['christian faith']), 'g:faith');
+  lacks(show('l', ['time travel', 'space travel']), 'g:lifestyle', 'g:horror');
+  // No keywords: the description, only for clear phrases.
+  has(show('m', null, { plot: 'A horror anthology of stories set in one cursed town.' }), 'g:horror');
+  lacks(show('n', null, { plot: 'He survived the horrors of war and came home.' }), 'g:horror');
+  has(show('o', null, { plot: 'A romantic comedy about two rival bakers.' }), 'g:romance');
+  // A film's description isn't read for these (TMDB names its genres).
+  lacks(tagOf({ t: 'movie', n: 'Film', k: 'p', g: 'Movies', plot: 'A horror anthology.' }, {}, { smart: { on: true, plot: true } }), 'g:horror');
+});

@@ -546,3 +546,7 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
   .sg-steps a { white-space: nowrap; padding: .45rem .6rem; }
   .sg-steps a:not(.on) span:not(.sg-n) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
+/* The headings in the list of categories (For you, Popular worldwide, Genres…) in the theme's accent colour — a little
+   towards the text colour, so they stay readable on the list's background in every theme. */
+.lib .grp-h, .lib-sheet .grp-h { color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); }
+.lib .lib-kh:hover, .lib-sheet .lib-kh:hover { color: var(--text); }
