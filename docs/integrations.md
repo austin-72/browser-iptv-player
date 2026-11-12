@@ -4,7 +4,7 @@
 
 ## Subtitles found online
 
-When a film or episode has no subtitles in your language, the player can find some online: **subtitles button → Find subtitles…**. Every source is searched at once and the results are listed together, best first: your first language; then subtitles already saved here and the free sources; real translations before machine ones; single episodes before whole-season packs; then the most downloaded. Each result says where it's from. Pick one and it shows straight away.
+When a film or episode has no subtitles in your language, the player can find some online: **subtitles button → Find subtitles…**. Every source is searched at once and the results are listed together, best fit for the video first. Pick one and it shows straight away.
 
 | Source | Cost | Covers | Setup |
 | --- | --- | --- | --- |
@@ -12,7 +12,51 @@ When a film or episode has no subtitles in your language, the player can find so
 | **Addic7ed** (through Gestdown) | Free | TV episodes only; often first after an episode airs | Nothing — on by default |
 | **OpenSubtitles.com** (backup) | 5 downloads a day on a free key, shared by everyone here; more only with VIP | The biggest library | A free API key (your profile → API consumers) |
 
-Each subtitle is downloaded once, converted to WebVTT and kept on the server (up to 3,000 files / 300 MB; the least recently used go first), so watching it again — or someone else picking it — costs nothing. Season packs are opened and the right episode picked out. It also works when the server converts a stream part-way through.
+Each subtitle is downloaded once, converted to WebVTT and kept on the server (up to 3,000 files / 300 MB; the least recently used go first), so watching it again — or someone else picking it — costs nothing. It also works when the server converts a stream part-way through.
+
+### What each result says
+
+The sites list subtitles under the name of the copy they were timed for (`Show.S02E05.720p.BluRay.x264-GRP`), with a free-text comment and a few tick-boxes that are often wrong. The list here says what that means, in words:
+
+| It says | Meaning |
+| --- | --- |
+| **Everything spoken** | Every line of speech. |
+| **With sounds described (SDH)** | Every line of speech, plus sounds and who is talking ("[door slams]"). Sites call these SDH, HI or CC. |
+| **Foreign-language parts only** | Only the lines in a language other than the film's own, and signs on screen ("forced" subtitles). A handful of lines in the whole film. Never fetched automatically. |
+| Blu-ray · Streaming · TV broadcast · DVD · Cinema recording | The kind of copy the timing was made for. |
+| 23.976 fps · 25 fps | That copy's speed. A 25 fps file on a 23.976 video drifts further out the longer it plays. |
+| Extended cut, Director's cut, Unrated … | A different edit of the film. |
+| Same length as this video / *Made for a copy 4 min longer* | The length the uploader gives for their copy, against the video's. |
+| Official text · Read by machine from a disc · Retimed | Copied from the disc or service; read from a disc's picture subtitles by a program (the odd typo); someone else's text moved to fit a copy. |
+| *Probably not for this video* | Its name is another show's (a spin-off filed under the parent), it is one disc of two, or someone here marked it wrong. Listed last, never fetched automatically. |
+
+Words win over tick-boxes: a file ticked "hearing impaired" whose comment says "removed HI" is listed as *Everything spoken*. Advertising, web addresses and "please rate" are taken out of the comments. The chips above the list show one kind only.
+
+### Wrong episode, wrong timing
+
+Three checks, cheapest first:
+
+1. **The name.** A result named for another episode or season is left out, as is one OpenSubtitles files under another episode, and a film's result that names another film and year. From a whole-season zip, the episode's own file is picked by its name (`S02E05`, `2x05`, `Episode 5`, `05 Title.srt`, or the episode's title); a zip in which no file can be told to be the episode is refused rather than guessed at.
+2. **The length.** A fetched file whose lines run on after the video has ended, stop before half of it, or number only a few, isn't used automatically. Picked by hand it is shown, with a note saying so.
+3. **The sound.** The server reads three minutes of the title's sound in two places (sound only, at telephone quality; nothing is converted and playback doesn't change), marks where it sounds like talking, and slides the file's lines along until they fit. That gives one of:
+   - *in time*, or *off by a fixed amount* (a recap, a different opening): the file is moved;
+   - *another speed* (made for a 25 fps copy, or 24 against 23.976): the file is re-timed;
+   - *fits nowhere*: automatic fetching tries the next result. If every result fits nowhere, the first is used after all and said to be unsure;
+   - *can't tell* (loud music all through, hardly any talk): nothing is changed.
+
+   The correction is kept for that title, for every profile and device, and the file itself stays as it came. It claims an answer only when both places agree and the fit stands well clear of every other; it has been tried on made-up sound with known answers, not on a library of real films, so treat it as a helper.
+
+**When the server listens** — Admin → Integrations → *Checking them against the sound*:
+
+| Setting | Listens |
+| --- | --- |
+| *When it costs no provider connection, or one is known to be free* (as it comes) | For files in your own folders and films the stream relay already holds; from a provider only when its connection limit is known and one is spare. An account that allows one connection is never read while someone watches. |
+| *Whenever the provider isn't known to be full* | Also when the limit isn't known. |
+| *Never* | Not at all. |
+
+While it reads from a provider it shows among that provider's connections as *Checking subtitles*, for about a minute.
+
+**In the player**, while fetched subtitles are showing: **Wrong subtitles? → Try others** marks that file wrong for the title (nobody here is given it again unless they pick it by hand) and fetches the next best; **Subtitle timing → Fix by listening** asks for the check by hand; and the manual steps now go up to 5 s.
 
 - **Fetch automatically:** Settings → *Subtitles found online* → *Fetch subtitles automatically*. When you'd want subtitles and there are none in your language, the free sources are tried about 15 seconds in. OpenSubtitles is only tried if they have nothing **and** you've watched for 3 minutes (so channel-surfing doesn't use up its downloads), and never when it would leave fewer than 2 of today's downloads for choosing by hand.
 - In **Find subtitles**, OpenSubtitles results say they use one of today's downloads, and how many are left.

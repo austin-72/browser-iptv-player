@@ -114,7 +114,7 @@ Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./
 docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/superstation-iptv:latest
 ```
 
-Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.4.0` stays on that version.
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.5.0` stays on that version.
 </details>
 
 <details>
@@ -169,7 +169,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Skip intro and skip credits.** Found automatically by comparing episodes, read from chapter names, or marked by hand.
 - **Subtitles and audio tracks:** built-in, from the file or from subtitle files next to it (`Film.en.srt`, `.vtt`, `.ass`), with adjustable style. Subtitles can be set to "only when the audio isn't in my language".
 - **Picture subtitles** from Blu-ray (PGS), DVD (VobSub) and DVB rips, drawn by the player itself over the picture: the server only copies them out of the file, nothing is burnt in or converted.
-- **Subtitle timing:** move any subtitles earlier or later (0.1 s / 0.5 s steps, G / H keys), remembered per title.
+- **Subtitle timing:** move any subtitles earlier or later (0.1 s, 0.5 s and 5 s steps, G / H keys), remembered per title. Subtitles found online can be lined up with the sound by the server (*Subtitle timing → Fix by listening*).
 - **Captions on live TV:** closed captions inside HLS channels and films, and DVB and teletext subtitles on MPEG-TS channels (played in the browser, or when the server converts them anyway).
 - Speed 0.25–3×, frame step, seek-bar thumbnails, picture-in-picture, a mini player while browsing, bookmarks with notes, a sleep timer and *Are you still watching?*.
 - **Live TV:** channel numbers, zapping with arrow keys or channel buttons, previous channel, a channel list, catch-up and timeshift.
@@ -181,6 +181,9 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Sound only** for live channels (radio-style, far less data), **Open in another app** (VLC, MX Player, Infuse, Outplayer and others, or a .m3u file), **Shuffle** for series, your own **skip lengths** (5–60 s), a bigger **buffer** for unreliable providers, opening on your **last channel**, and reminders that can **switch channel** by themselves.
 - **Subtitles made from the sound** (optional): when nothing is found online and the server has a speech-to-text program (whisper.cpp or OpenAI's whisper), it can listen to a film or episode and write subtitles, in the background, without changing how anything plays. See [docs/integrations.md](docs/integrations.md#subtitles-made-from-the-sound).
 - **Subtitles found online** when a film or episode has none in your language (on demand or automatically): SubDL and Addic7ed for free, with OpenSubtitles as the backup.
+  - *Said in plain words.* Each result says what it is (everything spoken, with sounds described, or only the foreign-language parts), what copy it was timed for (Blu-ray, streaming, TV, DVD), its speed, cut and length where given, and what may be wrong with it. Advertising in names and comments is taken out. [What each result says](docs/integrations.md#what-each-result-says).
+  - *The right episode.* Results named for another episode, season or film are left out; the episode's own file is picked out of a whole-season zip by name, and a zip where it can't be told is refused instead of guessed at.
+  - *In time.* A file that doesn't fit the video's length isn't used automatically. Where the server may, it listens to a few minutes of the sound, moves the subtitles into time (a fixed offset or another speed), and passes over ones that fit nowhere. The correction is kept for everyone. **Wrong subtitles? → Try others** in the player marks a file wrong for that title. [How it checks, and when it listens](docs/integrations.md#wrong-episode-wrong-timing).
 - **Downloads** for offline viewing in the browser (converted to MP4 when needed), or a plain "Save file". **Casting** to Chromecast, AirPlay (picture and sound: streams the TV can't play as they are are handed over in a form it can) and the Remote Playback API.
 
 ### Finding something to watch

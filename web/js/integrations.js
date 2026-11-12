@@ -13,8 +13,10 @@
     p._extSubs = list;
     // (Kept, so a reload — a jump in a converted stream, a new quality — puts it back with the times moved right.)
     if (!hidden) p._extKeep = { k: p.it && p.it.k, url: url, label: label, lang: lang };
-    var have = list.filter(function (x) { return x.url === url; })[0];
-    if (have && again) { have.el.remove(); list.splice(list.indexOf(have), 1); have = null; }
+    // (The same file at a new address — its timing was corrected — takes the old one's place.)
+    var fileOf = function (u) { return String(u).split('?')[0]; };
+    var have = list.filter(function (x) { return fileOf(x.url) === fileOf(url); })[0];
+    if (have && (again || have.url !== url)) { if (p._extOn === have.url) p._extOn = null; have.el.remove(); list.splice(list.indexOf(have), 1); have = null; }
     if (!have) {
       var tr = document.createElement('track');
       tr.kind = 'subtitles';
@@ -51,16 +53,52 @@
 
   var subLabel = function (lang, from) { return (V.langName(lang) || lang) + (from ? ' (' + from + ')' : ''); };
   var osLeft = function (q) { return q && q.remaining !== undefined && Date.now() - (q.at || 0) < 24 * 3600e3 ? q.remaining : null; };
+  /** The video's whole length in seconds, when it is known for sure (not a stream still growing). */
+  var durOf = function (p) {
+    if (!p.vod || !p.video) return 0;
+    // (From the video itself or the server's look inside the file — never the provider's own figure, which is often rounded.)
+    var v = p.video.duration, d = p.sessionDuration || (isFinite(v) && v > 0 ? v + (p.base || 0) : 0);
+    return d > 60 && isFinite(d) ? Math.round(d) : 0;
+  };
+  var tokenOf = function (url) { var m = /\/api\/opensubs\/file\/([0-9a-f]+)/i.exec(String(url || '')); return m ? m[1] : ''; };
+  V.subDurOf = durOf;
+
+  /* What the words in a subtitle listing mean (shown under the list). */
+  var HELP = '<details class="os-help"><summary>What do these mean?</summary><dl>' +
+    '<dt>Everything spoken</dt><dd>Every line of speech. What most people want.</dd>' +
+    '<dt>With sounds described (SDH)</dt><dd>Every line of speech, plus sounds and who is talking — “[door slams]”, “MAN:”. Written for deaf and hard-of-hearing viewers. Sites also call these HI or CC.</dd>' +
+    '<dt>Foreign-language parts only</dt><dd>Only the lines spoken in a language other than the film’s own, and signs on screen. In an English film with some Spanish in it, just the Spanish is translated. There are only a handful of lines, so it looks broken if you wanted everything. Sites call these “forced”.</dd>' +
+    '<dt>Blu-ray · Streaming · TV broadcast · DVD</dt><dd>The kind of copy the timing was made for. Copies of the same kind usually match each other; a TV broadcast and a Blu-ray often don’t (a recap at the start, breaks cut out).</dd>' +
+    '<dt>23.976 fps · 25 fps</dt><dd>The speed of that copy. 25 is a European TV or DVD copy, which runs 4% faster: on any other copy the subtitles slip further out the longer it plays.</dd>' +
+    '<dt>Extended · Director’s cut · Unrated</dt><dd>A different edit of the film, with scenes added or taken out. Subtitles for one go wrong at the first changed scene of another.</dd>' +
+    '<dt>Official text</dt><dd>Copied from the disc or streaming service, not typed by a fan. Usually the most accurate.</dd>' +
+    '<dt>Read by machine from a disc</dt><dd>The disc’s subtitles are pictures; a program read them into text. Good timing, the odd typo (l for I).</dd>' +
+    '<dt>Retimed</dt><dd>Someone else’s subtitles, moved to fit a particular copy.</dd>' +
+    '<dt>Whole season</dt><dd>A zip of every episode; this episode’s file is picked out of it.</dd>' +
+    '</dl></details>';
+  var KINDS = [['', 'All'], ['full', 'Everything spoken'], ['sdh', 'With sounds described'], ['foreign', 'Foreign parts only']];
+  var rowHtml = function (x, left) {
+    var meta = [x.from, x.pack ? 'whole season' : '', x.downloads ? V.plural(x.downloads, 'download') : '', x.votes >= 2 ? 'rated ' + (Math.round(x.rating * 10) / 10) + '/10' : '', x.fromTrusted ? 'trusted uploader' : '', x.cached ? 'saved here' : x.costly ? 'uses 1 of today’s OpenSubtitles downloads' : ''].filter(Boolean).join(' · ');
+    return '<li data-kind="' + V.esc(x.kind || 'full') + '"><button class="btn ghost block os-pick' + (x.bad ? ' os-bad' : '') + '" data-f="' + V.esc(x.id || x.fileId) + '" data-l="' + V.esc(x.lang) + '" data-s="' + V.esc(x.from || '') + '"' + (x.costly && left === 0 ? ' disabled' : '') + '>' +
+      '<span class="os-top"><span class="os-head"><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="os-what os-k-' + V.esc(x.kind || 'full') + '">' + V.esc(x.what || (x.hi ? 'With sounds described (SDH)' : 'Everything spoken')) + '</span></span>' +
+      (x.best ? '<span class="os-tag best">Best match</span>' : '') + (x.tags || []).map(function (t) { return '<span class="os-tag">' + V.esc(t) + '</span>'; }).join('') + '</span>' +
+      (x.bad ? '<span class="os-line os-warnline">' + V.icon('info', 'tiny') + ' Probably not right: ' + V.esc(x.bad) + '.</span>' : '') +
+      (x.warn || []).map(function (w) { return '<span class="os-line os-warnline">' + V.icon('info', 'tiny') + ' ' + V.esc(w) + '</span>'; }).join('') +
+      '<span class="os-line os-rel" title="' + V.esc(x.name) + '">' + V.esc(x.name) + '</span>' +
+      (x.note ? '<span class="os-line os-note">“' + V.esc(x.note) + '”</span>' : '') +
+      '<small class="dim">' + meta + '</small></button></li>';
+  };
   V.findSubtitles = function (p) {
     var it = p.it;
     if (!it) return;
     var body = document.createElement('div');
-    body.innerHTML = '<p class="dim small">Found online, in your languages. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div><div class="os-gen"></div>';
+    body.innerHTML = '<p class="dim small os-intro">Found online, in your languages, best fit for this video first. Pick one to show it.</p><div class="os-list"><div class="spinner"></div></div><div class="os-gen"></div>';
     var genStop = V.subGenPanel ? V.subGenPanel(p, V.$('.os-gen', body)) : null;
     V.dialog({ title: 'Find subtitles', body: body, wide: true, actions: [{ label: 'Close' }], onClose: function () { if (genStop) genStop(); } });
     // (No online source set up, only subtitles made here: nothing to search.)
     if (!(S.settings.subtitles || S.settings.opensubtitles)) { V.$('.os-list', body).innerHTML = ''; V.$('p', body).textContent = 'No online subtitle source is set up on this server.'; return; }
-    V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k)).then(function (r) {
+    var dur = durOf(p);
+    V.api('/api/opensubs/search?k=' + encodeURIComponent(it.k) + (dur ? '&dur=' + dur : '')).then(function (r) {
       var box = V.$('.os-list', body);
       if (!box) return;
       // (A source that couldn't search — SubDL with a bad key, or one that's down — is said, not left out silently.)
@@ -68,22 +106,42 @@
       if (!r.list.length) { box.innerHTML = '<p>Nothing found for “' + V.esc(it.n) + '” in your languages.</p>' + warn; return; }
       var left = osLeft(r.quota);
       var anyCostly = r.list.some(function (x) { return x.costly; });
-      box.innerHTML = '<ul class="os-ul">' + r.list.map(function (x) {
-        return '<li><button class="btn ghost block os-pick" data-f="' + V.esc(x.id || x.fileId) + '" data-l="' + V.esc(x.lang) + '" data-s="' + V.esc(x.from || '') + '"' + (x.costly && left === 0 ? ' disabled' : '') + '><b>' + V.esc(V.langName(x.lang) || x.lang) + '</b> <span class="truncate">' + V.esc(x.name) + '</span><small class="dim">' +
-          [x.from, x.pack ? 'whole season' : '', x.downloads ? V.plural(x.downloads, 'download') : '', x.hi ? 'for the hard of hearing' : '', x.machine ? 'machine translated' : '', x.fromTrusted ? 'trusted' : '', x.cached ? 'saved here' : x.costly ? 'uses 1 of today’s OpenSubtitles downloads' : ''].filter(Boolean).join(' · ') + '</small></button></li>';
-      }).join('') + '</ul>' + warn + (anyCostly ? '<p class="dim small">' + (left !== null ? 'OpenSubtitles: ' + V.plural(left, 'download') + ' left today.' : 'OpenSubtitles allows only a few downloads a day.') + ' The others are free.</p>' : '');
+      var have = {};
+      r.list.forEach(function (x) { have[x.kind || 'full'] = (have[x.kind || 'full'] || 0) + 1; });
+      var kinds = KINDS.filter(function (k) { return !k[0] || have[k[0]]; });
+      var chips = kinds.length > 2 ? '<div class="os-kinds" role="group" aria-label="Which kind of subtitles">' + kinds.map(function (k, i) { return '<button class="chip' + (i ? '' : ' on') + '" data-kind="' + k[0] + '" aria-pressed="' + (i ? 'false' : 'true') + '">' + k[1] + (k[0] ? ' <span class="dim">' + have[k[0]] + '</span>' : '') + '</button>'; }).join('') + '</div>' : '';
+      var good = r.list.filter(function (x) { return !x.bad; }), bad = r.list.filter(function (x) { return x.bad; });
+      box.innerHTML = chips + '<ul class="os-ul">' + good.map(function (x) { return rowHtml(x, left); }).join('') +
+        (bad.length ? '<li class="os-sep" data-kind="">Probably not for this video</li>' + bad.map(function (x) { return rowHtml(x, left); }).join('') : '') + '</ul>' + warn +
+        (anyCostly ? '<p class="dim small">' + (left !== null ? 'OpenSubtitles: ' + V.plural(left, 'download') + ' left today.' : 'OpenSubtitles allows only a few downloads a day.') + ' The others are free.</p>' : '') + HELP;
       box.onclick = function (e) {
+        var c = e.target.closest('.os-kinds .chip');
+        if (c) {
+          V.$$('.os-kinds .chip', box).forEach(function (x) { var on = x === c; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+          var want = c.dataset.kind;
+          V.$$('.os-ul > li', box).forEach(function (li) { li.hidden = !!want && li.dataset.kind !== want; });
+          return;
+        }
         var b = e.target.closest('.os-pick');
         if (!b || b.disabled) return;
         b.disabled = true;
-        V.api('/api/opensubs/get', { body: { id: b.dataset.f, fileId: b.dataset.f } }).then(function (g) {
+        V.api('/api/opensubs/get', { body: { id: b.dataset.f, fileId: b.dataset.f, k: it.k, dur: dur } }).then(function (g) {
           V.addExtSub(p, g.url, subLabel(b.dataset.l, b.dataset.s), b.dataset.l);
+          p._extAuto = null; // (picked by hand: never swapped for another automatically)
           var d = body.closest('dialog'); if (d && d._finish) d._finish(null);
-          p.osd && p.osd('Subtitles on', 1200);
+          if (g.warn) V.toast('These may be the wrong subtitles. ' + g.warn, { ms: 9000 });
+          else p.osd && p.osd(g.moved ? movedWords(g.moved) : 'Subtitles on', g.moved ? 3500 : 1200);
         }).catch(function (err) { b.disabled = false; V.fail(err); });
       };
       var first = V.$('.os-pick:not([disabled])', box); if (first) first.focus();
     }).catch(function (e) { var box = V.$('.os-list', body); if (box) box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  /** "{ secs, speed }" from the server's listening, as a line for the screen. */
+  var movedWords = function (m) {
+    if (!m) return 'Subtitles checked against the sound: in time';
+    if (m.speed) return 'Subtitles re-timed to this copy’s speed';
+    var s = Math.abs(m.secs);
+    return 'Subtitles moved ' + (s >= 10 ? Math.round(s) : s.toFixed(1)) + ' s ' + (m.secs > 0 ? 'later' : 'earlier') + ' to match the sound';
   };
 
   // ------------------------------------------------------------ subtitles made from the film's sound (lib/subgen.js)
@@ -168,11 +226,18 @@
       return !hasSubsIn(p, lang());
     };
     var tryFetch = function (costly) {
-      return V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang(), costly: costly } }).then(function (r) {
-        if (r && r.url && still() && wanted()) { V.addExtSub(p, r.url, subLabel(r.lang, r.from), r.lang); p.osd && p.osd('Subtitles from ' + (r.from || 'online'), 2000); return true; }
+      return V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang(), costly: costly, dur: durOf(p) } }).then(function (r) {
+        if (r && r.url && still() && wanted()) {
+          V.addExtSub(p, r.url, subLabel(r.lang, r.from), r.lang);
+          p._extAuto = r.id || tokenOf(r.url); // (fetched without being asked: swapped for another if it turns out not to match)
+          // (unsure: the only ones left are ones that didn't line up with the sound — better than none, and said.)
+          p.osd && p.osd(r.unsure ? 'No better subtitles found: these may be out of time' : r.moved ? movedWords(r.moved) : 'Subtitles from ' + (r.from || 'online'), r.unsure || r.moved ? 3500 : 2000);
+          return true;
+        }
         return false;
       }).catch(function () { return false; });
     };
+    p._subsAgain = function (costly) { return tryFetch(!!costly); };
     setTimeout(function () {
       if (!still() || !wanted()) return;
       tryFetch(false).then(function (got) {
@@ -190,6 +255,63 @@
     }, 15000);
   });
 
+
+  // ------------------------------------------------------------ wrong or mistimed subtitles
+  var shownExt = function (p) { var l = (p._extSubs || []).filter(function (x) { return x.url === p._extOn && tokenOf(x.url); })[0]; return l || null; };
+  var dropExt = function (p, e) { if (e.el) e.el.remove(); p._extSubs = (p._extSubs || []).filter(function (x) { return x !== e; }); if (p._extOn === e.url) p._extOn = null; if (p._extKeep && p._extKeep.url === e.url) p._extKeep = null; if (p._menuRefresh) p._menuRefresh(); };
+  /** "These are the wrong subtitles": told to the server (never fetched for this title again), and the next best tried. */
+  V.subsWrong = function (p) {
+    var e = shownExt(p), it = p.it;
+    if (!e || !it) return;
+    V.api('/api/opensubs/bad', { body: { k: it.k, id: tokenOf(e.url) } }).then(function () {
+      dropExt(p, e);
+      p.osd && p.osd('Looking for other subtitles…', 4000);
+      var lang = (e.lang || 'en').slice(0, 2);
+      return V.api('/api/opensubs/auto', { body: { k: it.k, lang: lang, costly: true, dur: durOf(p) } }).then(function (r) {
+        if (p.it !== it) return;
+        if (r && r.url) { V.addExtSub(p, r.url, subLabel(r.lang, r.from), r.lang); p._extAuto = r.id || tokenOf(r.url); p.osd && p.osd(r.unsure ? 'The only others found may be out of time' : 'Other subtitles, from ' + (r.from || 'online'), 3000); }
+        else { p.osd && p.osd('No other subtitles fit this video', 3000); V.findSubtitles(p); }
+      });
+    }).catch(V.fail);
+  };
+  /** "Fix timing by listening": the server lines the subtitles up with the sound; the outcome arrives as "subsync". */
+  V.subsListen = function (p) {
+    var e = shownExt(p), it = p.it;
+    if (!e || !it) return;
+    V.api('/api/opensubs/check', { body: { k: it.k, id: tokenOf(e.url), dur: durOf(p) } }).then(function () {
+      p.osd && p.osd('Listening to the sound to line the subtitles up… about a minute', 6000);
+    }).catch(V.fail);
+  };
+  V.on('subsync', function (d) {
+    var p = V.player;
+    if (!p || !p.it || !d || p.it.k !== d.k) return;
+    var e = (p._extSubs || []).filter(function (x) { return tokenOf(x.url) === d.id; })[0];
+    if (!e) return;
+    var showing = p._extOn === e.url;
+    if (d.state === 'ok') {
+      if (d.url && d.url !== e.url) {
+        // (Its times are right in the file now: a nudge made by hand would be added on top.)
+        if (showing && p.subDelay && p.setSubDelay) p.setSubDelay(0);
+        V.addExtSub(p, d.url, e.label, e.lang, true, !showing);
+        if (showing && p.osd) p.osd(movedWords(d.moved), 4000);
+      } else if (d.byHand && showing && p.osd) p.osd(movedWords(d.moved), 3500);
+    } else if (d.state === 'mismatch') {
+      if (!showing) return;
+      if (p._extAuto === d.id && (p._extSwaps = (p._extSwaps || 0) + 1) <= 2) {
+        dropExt(p, e);
+        p.osd && p.osd('Those subtitles didn’t match this video. Trying others…', 4000);
+        if (p._subsAgain) p._subsAgain(false).then(function (got) { if (!got && p.it && p.it.k === d.k && p.osd) p.osd('No subtitles found that match this video', 3000); });
+      } else V.toast(d.cut ? 'These subtitles match in places but not others: they look made for a different cut of this.' : 'These subtitles don’t line up with this video’s sound: they look made for something else. Try another from Find subtitles.', { ms: 9000 });
+    } else if (d.byHand && showing && p.osd) p.osd('Couldn’t tell from the sound (too much music or noise). Timing left as it was.', 5000);
+  });
+  /* In the subtitles menu, while subtitles fetched online are showing. */
+  V.ccMenuExtras = (function (prev) {
+    return function (p, main, pages) {
+      if (prev) prev(p, main, pages);
+      if (!shownExt(p) || !p.it || (S.profile && S.profile.guest)) return;
+      main.push({ label: 'Wrong subtitles?', value: 'Try others', fn: function () { V.subsWrong(p); } });
+    };
+  })(V.ccMenuExtras);
 
   // ------------------------------------------------------------ playback health → Admin → Overview
   var health = { stalls: 0, stallMs: 0, since: 0, v: null };
@@ -457,7 +579,10 @@
         '<h3>SubDL <span class="dim small">· main source</span></h3><p class="dim small">Free: sign up at subdl.com, then your account → API key. 2,000 searches a day; downloads aren’t counted.</p>' +
         '<div class="int-fields">' + secretField('sd.apiKey', 'API key', sd.apiKey) + '</div>' +
         '<label class="switch"><input type="checkbox" data-src="gestdown"' + (src.gestdown !== false ? ' checked' : '') + '><span class="sw"></span><span><b>Addic7ed (through Gestdown)</b><small>Free, no key needed. TV episodes only — often the quickest after an episode airs.</small></span></label>' +
-        '<div class="btn-row"><button class="btn primary" data-save="sd">Save</button><button class="btn" data-test="all">Test all sources</button></div><div class="all-test small"></div></section>' +
+        '<div class="btn-row"><button class="btn primary" data-save="sd">Save</button><button class="btn" data-test="all">Test all sources</button></div><div class="all-test small"></div>' +
+        '<h3>Checking them against the sound</h3><p class="dim small">Subtitles found online are often timed for another copy, or are for another episode. The server can listen to a few minutes of the film’s sound, line the subtitles up with the speech, move them if they are off, and drop ones that don’t match at all. Only the sound is read; nothing about how the film plays changes. Reading it from a provider uses one of that provider’s connections for about a minute.</p>' +
+        (I.canListen ? '<label class="field"><span>Listen</span><select class="input" data-sub-listen>' + [['spare', 'When it costs no provider connection, or one is known to be free (recommended)'], ['always', 'Whenever the provider isn’t known to be full'], ['never', 'Never']].map(function (o) { return '<option value="' + o[0] + '"' + (I.subListen === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>'
+          : '<p class="note">' + V.icon('info') + ' <span>This needs ffmpeg, which isn’t on this server.</span></p>') + '</section>' +
         '<section class="card-sec"><h2>Backup: OpenSubtitles.com</h2><p class="dim">The biggest library, used when the free sources have nothing. A free API key (opensubtitles.com → your profile → API consumers) allows 5 downloads a day, shared by everyone here; subtitles already saved here don’t count again. Signing in with an account only raises that with a VIP subscription.</p>' +
         '<div class="int-fields">' + secretField('os.apiKey', 'API key', o.apiKey) + secretField('os.username', 'Account username (optional)', o.username) + '<label class="field"><span>Account password</span><input class="input" type="password" data-f="os.password" value="' + V.esc(o.password) + '" autocomplete="new-password"></label></div>' +
         left +
@@ -479,6 +604,7 @@
       if (!body._subgenWired) {
         body._subgenWired = true;
         body.addEventListener('change', function (e) {
+          if (e.target.hasAttribute('data-sub-listen')) { V.put('/api/admin/integrations', { subListen: e.target.value }).then(function () { S.settings.subListen = e.target.value !== 'never'; V.toast('Saved'); }).catch(V.fail); return; }
           if (!e.target.hasAttribute('data-subgen-mode')) return;
           V.adminSave({ subGen: e.target.value }).then(function () { S.settings.subGen = e.target.value === 'off' ? '' : e.target.value; }).catch(function () {});
         });

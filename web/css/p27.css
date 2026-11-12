@@ -304,3 +304,33 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
   .hero-more span { display: none; }
   .hero-acts .icon-btn { flex: none; }
 }
+
+/* ---------- Find subtitles: each listing said in plain words (what it is, what it was made for, what may be wrong) */
+.os-kinds { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .6rem; }
+.os-ul { max-height: min(58vh, 34rem); grid-template-columns: minmax(0, 1fr); }
+.os-ul > li { min-width: 0; }
+.os-pick { display: flex; flex-direction: column; align-items: stretch; gap: .2rem; padding: .6rem .75rem; white-space: normal; width: 100%; min-width: 0; }
+.os-top { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .45rem; }
+.os-what { font-weight: 600; }
+.os-what::before { content: "· "; color: var(--dim); font-weight: 400; }
+.os-head { min-width: 0; }
+.os-tag { font-size: .74rem; line-height: 1.2; padding: .14rem .45rem; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+.os-tag.best { background: var(--accent); border-color: var(--accent); color: var(--on); font-weight: 600; }
+.os-line { display: block; font-size: .84rem; text-align: left; min-width: 0; }
+.os-rel { font-weight: 400; color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-note { font-weight: 400; color: var(--dim); font-style: italic; overflow-wrap: anywhere; }
+.os-warnline { font-weight: 500; color: var(--warn); overflow-wrap: anywhere; }
+.os-warnline .icon { vertical-align: -.15em; }
+.os-pick small { text-align: left; }
+.os-bad { opacity: .78; }
+.os-sep { margin: .5rem 0 .1rem; font-size: .8rem; font-weight: 600; color: var(--dim); text-transform: none; }
+.os-help { margin-top: .8rem; font-size: .88rem; }
+.os-help summary { cursor: pointer; color: var(--dim); padding: .3rem 0; }
+.os-help dl { margin: .4rem 0 0; display: grid; gap: .15rem; }
+.os-help dt { font-weight: 600; margin-top: .45rem; }
+.os-help dd { margin: 0; color: var(--dim); }
+@media (max-width: 520px) {
+  .os-kinds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -1rem; padding-right: 1rem; }
+  .os-kinds::-webkit-scrollbar { display: none; }
+  .os-kinds .chip { flex: none; }
+}

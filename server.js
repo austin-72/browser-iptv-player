@@ -3356,6 +3356,8 @@ otherAppConns = () => [...p4.outputs.active].filter(([, a]) => a.kind === 'hdhr'
 const p5 = require('./lib/routes-p5')({
   route, requireProfile, requireAdmin, readJSON, D, lists, accounts, userdata, hub, tmdb, item, clientIp, listUsage, srcList, connLimit, accountAlerts, COMMANDS,
   catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }), log, overrides,
+  // (Checking fetched subtitles against a title's sound: lib/subcheck.js.)
+  inputOf, media, dvrHooks, relayExtra: (id) => relayFinished.extra(id),
 });
 p5Public = p5.publicFlags;
 

@@ -91,14 +91,19 @@
     var cur = round(p.subDelay || 0);
     main.push({ label: 'Subtitle timing', value: cur ? label(cur) : 'In sync', page: 'subdelay' });
     var adj = function (d) { return function () { p.nudgeSubs(d); }; };
+    // (Subtitles fetched online can be lined up with the sound by the server: integrations.js.)
+    var byEar = S.settings.subListen && V.subsListen && p._extOn && /\/api\/opensubs\/file\//.test(p._extOn) && !(S.profile && S.profile.guest);
     pages.subdelay = [
       { label: describe(cur), on: false, inert: true, fn: function () {}, back: 'subdelay' },
+    ].concat(byEar ? [{ label: 'Fix by listening', value: 'Automatic', fn: function () { V.subsListen(p); } }] : []).concat([
       { label: 'Earlier', value: '−0.1 s', fn: adj(-0.1), back: 'subdelay' },
       { label: 'Later', value: '+0.1 s', fn: adj(0.1), back: 'subdelay' },
       { label: 'Much earlier', value: '−0.5 s', fn: adj(-0.5), back: 'subdelay' },
       { label: 'Much later', value: '+0.5 s', fn: adj(0.5), back: 'subdelay' },
+      { label: 'Far earlier', value: '−5 s', fn: adj(-5), back: 'subdelay' },
+      { label: 'Far later', value: '+5 s', fn: adj(5), back: 'subdelay' },
       { label: 'Reset', value: '0 s', fn: function () { p.setSubDelay(0); }, back: 'subdelay' },
-    ];
+    ]);
   };
   V.ccMenuExtras = (function (prev) {
     return function (p, main, pages) { if (prev) prev(p, main, pages); V.subTimingMenu(p, main, pages); };

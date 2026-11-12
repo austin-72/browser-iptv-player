@@ -130,7 +130,8 @@ test('a job: the film’s sound, the words, a WebVTT file kept — one at a time
     process.env.WHISPER_FAKE_SLOW = '20000';
     g.start({ k: 'movie:slow', name: 'Slow', input: film, local: true, pid: 'p1' });
     assert.ok(await until(() => g.status('movie:slow').state === 'writing'));
-    assert.strictEqual(g.status('movie:slow').pct, 50);
+    // (How far along it is arrives a moment after it starts writing.)
+    assert.ok(await until(() => g.status('movie:slow').pct === 50), String(g.status('movie:slow').pct));
     g.remove('movie:slow');
     delete process.env.WHISPER_FAKE_SLOW;
     assert.ok(await until(() => !g.current));
