@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0b0d12">
+<title>Set up your server</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0d12; color: #e8eaf0; font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  form { width: 100%; max-width: 360px; background: #151821; border: 1px solid #262b38; border-radius: 16px; padding: 28px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; }
+  p { margin: 0 0 20px; color: #9aa3b5; font-size: 14px; }
+  label { display: block; font-size: 13px; color: #9aa3b5; margin-bottom: 6px; }
+  .pw { position: relative; }
+  input { width: 100%; font: inherit; color: inherit; background: #0f1117; border: 1px solid #2c3242; border-radius: 10px; padding: 12px 44px 12px 14px; outline: none; }
+  input:focus { border-color: #8ab4ff; box-shadow: 0 0 0 3px rgba(138,180,255,.25); }
+  .eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: #9aa3b5; padding: 8px; cursor: pointer; border-radius: 8px; }
+  .eye:focus-visible { outline: 2px solid #8ab4ff; }
+  button[type=submit] { margin-top: 18px; width: 100%; font: inherit; font-weight: 600; color: #0b0d12; background: #e8eaf0; border: 0; border-radius: 10px; padding: 12px; cursor: pointer; }
+  button[type=submit]:focus-visible { outline: 3px solid #8ab4ff; outline-offset: 2px; }
+  button[disabled] { opacity: .6; cursor: progress; }
+  .err { min-height: 20px; margin-top: 12px; color: #ff8a8a; font-size: 14px; }
+  .alt { margin-top: 6px; width: 100%; font: inherit; font-size: 14px; color: inherit; background: none; border: 1px solid #2c3242; border-radius: 10px; padding: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .alt:focus-visible { outline: 3px solid #8ab4ff; outline-offset: 2px; }
+  #pair { width: 100%; max-width: 420px; background: #151821; border: 1px solid #262b38; border-radius: 16px; padding: 28px 24px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  #pair .code { font: 700 44px/1.1 ui-monospace, "SF Mono", Consolas, monospace; letter-spacing: .08em; margin: 14px 0 6px; }
+  #pair .qr { display: inline-block; background: #fff; padding: 10px; border-radius: 12px; margin: 10px 0 4px; }
+  #pair .qr svg { display: block; width: 200px; height: 200px; }
+  #pair ol { text-align: left; color: #9aa3b5; font-size: 14px; padding-left: 20px; margin: 14px 0; }
+  #pair .link { color: #8ab4ff; word-break: break-all; }
+  #pair .wait { color: #9aa3b5; font-size: 13px; }
+  .hide { display: none !important; }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme: light; }
+    html, body { background: #f2f3f7; color: #15171c; }
+    form { background: #fff; border-color: #dfe2ea; box-shadow: 0 20px 60px rgba(20,25,40,.08); }
+    input { background: #f7f8fb; border-color: #d4d8e2; }
+    p, label, .eye { color: #5b6476; }
+    button[type=submit] { background: #15171c; color: #fff; }
+    #pair { background: #fff; border-color: #dfe2ea; }
+    .alt { border-color: #d4d8e2; }
+    .err { color: #c62828; }
+    #pair ol, #pair .wait { color: #5b6476; }
+    #pair .link { color: #1a5fd0; }
+  }
+  /* A TV is read from across the room: everything bigger. */
+  html.tv body { zoom: 1.45; }
+  @media (max-height: 760px) { html.tv body { zoom: 1.1; } }
+  form { max-width: 420px; }
+  .field { margin-top: 16px; }
+  .field:first-of-type { margin-top: 0; }
+  .hint { margin: 6px 0 0; font-size: 13px; color: #9aa3b5; }
+  #pin { padding-right: 14px; letter-spacing: .3em; }
+  #name { padding-right: 14px; }
+  .step { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #9aa3b5; margin: 22px 0 10px; padding-top: 16px; border-top: 1px solid #262b38; }
+  .lead { margin-bottom: 18px; }
+  .away { margin: 0 0 16px; padding: 10px 12px; border-radius: 10px; background: #3a1f24; color: #ffd0d0; font-size: 14px; }
+  @media (prefers-color-scheme: light) {
+    .hint, .step { color: #5b6476; }
+    .step { border-top-color: #dfe2ea; }
+    .away { background: #fde8e8; color: #8a1c1c; }
+  }
+</style>
+</head>
+<body>
+<main style="display:contents">
+<form id="f" autocomplete="off" novalidate>
+  <h1>Welcome</h1>
+  <p class="lead">Two things and you're in: a password for this server, and your own profile.</p>
+  <!--away-->
+  <div class="step">The site password</div>
+  <div class="field">
+    <label for="pw">Password for this server</label>
+    <div class="pw">
+      <input id="pw" name="password" type="password" autocomplete="new-password" minlength="6" required autofocus aria-describedby="pwh">
+      <button class="eye" type="button" id="eye" aria-label="Show password" aria-pressed="false">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+    <p class="hint" id="pwh">Everyone in your household types it once on each device (a TV can scan a code from a phone instead). At least 6 characters.</p>
+  </div>
+  <div class="step">Your profile</div>
+  <div class="field">
+    <label for="name">Your name</label>
+    <input id="name" name="name" maxlength="30" required aria-describedby="nameh" autocomplete="nickname">
+    <p class="hint" id="nameh">Your profile is the admin: the only one that can add playlists and change the settings. Everyone else adds their own profile afterwards.</p>
+  </div>
+  <div class="field">
+    <label for="pin">A PIN for it, 4 to 8 digits</label>
+    <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="8" required aria-describedby="pinh" autocomplete="new-password">
+    <p class="hint" id="pinh">So nobody else can open the admin settings.</p>
+  </div>
+  <button type="submit" id="go">Set up and start</button>
+  <div class="err" id="err" role="alert" aria-live="assertive"></div>
+</form>
+</main>
+<script src="/setup.js"></script>
+</body>
+</html>

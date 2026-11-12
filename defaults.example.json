@@ -3,7 +3,7 @@
     "name": "Superstation",
     "accent": ""
   },
-  "sitePassword": "changeme",
+  "sitePassword": "",
   "port": 8080,
   "allowedHosts": [],
   "trustProxy": false

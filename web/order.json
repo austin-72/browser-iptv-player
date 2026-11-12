@@ -45,6 +45,7 @@
     "profiles.js",
     "settings.js",
     "admin.js",
+    "setupguide.js",
     "adminsources.js",
     "mychannels.js",
     "adminstats.js",

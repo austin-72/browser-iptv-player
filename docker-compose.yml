@@ -1,30 +1,40 @@
-# docker compose up -d   →   open http://<this computer's IP>:8080
+# Superstation IPTV
+#   docker compose up -d   →   open http://<this computer's address>:8080 and set it up there.
+# Works as it is in Portainer, Dockge, Synology Container Manager, TrueNAS and CasaOS ("custom app" / "stack").
 services:
   iptv:
-    build: .
-    image: superstation-iptv:latest
+    image: ghcr.io/austin-72/superstation-iptv:latest
     container_name: iptv
     restart: unless-stopped
     ports:
-      - "8080:8080"          # this computer's port : the app's port (keep the second number equal to PORT)
-    environment:
-      - TZ=America/Chicago
-      - PORT=8080
-      # The site password used the very first time (change it in Admin → Security afterwards):
-      # - SITE_PASSWORD=changeme
-      # Domain names this server answers to while the default password is in use (IPs and .local names always work):
-      # - ALLOWED_HOSTS=tv.example.com
-      # Behind a reverse proxy (Caddy, nginx, Traefik) that adds https:
-      # - TRUST_PROXY=1
-      # Hardware transcoding (also uncomment "devices" below): vaapi | qsv | nvenc
-      # - HWACCEL=vaapi
+      - "8080:8080"          # this computer's port : the app's port
     volumes:
-      - ./data:/data
-      # The app's own files, so updates (copied into this folder, or uploaded in Admin → Backups, updates & apps)
-      # take effect without rebuilding: web pages at once, server code the next time you restart it.
-      - ./:/app
+      - ./data:/data         # everything the app saves: settings, profiles, lists, recordings, backups
       # Folders of your own videos, read-only. Add them in Admin → Lists → "Folder on the server" as /media/…
       # - /path/to/your/movies:/media/movies:ro
       # - /path/to/your/shows:/media/shows:ro
+    environment:
+      - PORT=8080            # the app's port (keep it the same as the second number under "ports")
+      # Nothing else is needed. The time zone comes from your browser when you set the server up (Admin → Security
+      # changes it); set TZ only to fix it here instead, e.g.:
+      # - TZ=Europe/London
+      # Behind a reverse proxy (Caddy, nginx, Traefik) that adds https:
+      # - TRUST_PROXY=1
+      # Domain names it answers to before it's set up (IPs and .local names always work):
+      # - ALLOWED_HOSTS=tv.example.com
+
+    # Hardware transcoding (optional: ffmpeg in the image works without it). Choose it in Admin → Playback.
+    # Intel or AMD graphics (VAAPI / Quick Sync):
     # devices:
     #   - /dev/dri:/dev/dri
+    # NVIDIA (needs the NVIDIA Container Toolkit on this computer):
+    # runtime: nvidia
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]
+
+# Building from the source instead of the ready-made image: replace the "image:" line with  build: .

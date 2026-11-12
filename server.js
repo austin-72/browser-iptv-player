@@ -96,10 +96,23 @@ const DEFAULT_SETTINGS = {
   // Category clean-up: tidy names, plus the admin's rules [{ match, to, hide, types }].
   tidyGroups: true, groupRules: [],
   backupDays: 7, // nightly backups kept
+  // The server's time zone (for the guide's days, recordings and screen time) when TZ isn't set in the environment:
+  // the setup page fills it in from the admin's browser; Admin → Security can change it.
+  timeZone: '',
+  setupDone: false, // the setup guide (web/js/setupguide.js) finished or put away
 };
 const settingsStore = new JsonFile(path.join(D, 'settings.json'), DEFAULT_SETTINGS);
 const settings = () => settingsStore.data;
-const defaultPassword = process.env.SITE_PASSWORD || preset.sitePassword || 'changeme';
+// The starting site password, when one is given (SITE_PASSWORD, defaults.json). Without one a new install opens the
+// setup page, where the admin chooses it ("changeme" is still what installs made before that were given).
+const presetPassword = process.env.SITE_PASSWORD || preset.sitePassword || '';
+const defaultPassword = presetPassword || 'changeme';
+// The time zone: TZ in the environment (docker-compose, the system's) wins; otherwise the one in the settings.
+const TZ_FROM_ENV = process.env.TZ || '';
+const validTz = (tz) => { try { return !!tz && !!new Intl.DateTimeFormat('en-US', { timeZone: tz }).resolvedOptions().timeZone; } catch { return false; } };
+const applyTz = () => { if (TZ_FROM_ENV) return; const tz = settings().timeZone; if (validTz(tz)) process.env.TZ = tz; else delete process.env.TZ; };
+applyTz();
+const IN_DOCKER = fs.existsSync('/.dockerenv') || (() => { try { return /docker|containerd|kubepods/.test(fs.readFileSync('/proc/1/cgroup', 'utf8')); } catch { return false; } })();
 
 const media = new Media(cfg, D, settings);
 const proxy = new Proxy(settings);
@@ -114,7 +127,7 @@ function countBytes(res, kind) {
   res.end = function (c, ...a) { if (c && typeof c !== 'function') n += c.length || 0; return e.call(this, c, ...a); };
   res.once('close', () => stats.bytes(kind, n));
 }
-const accounts = new Accounts(D, { defaultPassword });
+const accounts = new Accounts(D, { defaultPassword, setupIfNew: !presetPassword });
 const userdata = new UserData(path.join(D, 'users'));
 const hub = new Hub();
 const social = new Social(D, { hub, accounts });
@@ -740,6 +753,26 @@ route('POST', '/api/login', async (req, res) => {
   const { password } = await readObj(req);
   const token = accounts.login(password, clientIp(req), req.headers['user-agent']);
   res.setHeader('Set-Cookie', accounts.cookie(token, secureReq(req)));
+  return { ok: true };
+}, 'public');
+// ---- setting up a new install (web/setup.html): the site password and the admin profile, chosen once
+route('POST', '/api/setup', async (req, res) => {
+  const ready = () => { if (!accounts.d.site.setup || accounts.profiles.length) throw new HttpError(409, 'This server has been set up already. Sign in with its password.'); };
+  ready();
+  // (From the home network only: a server reachable from the internet before it's set up can't be taken over.)
+  if (awayFrom(req)) throw new HttpError(403, 'Set the server up from a device on the same home network as the server.');
+  const b = await readObj(req);
+  ready(); // (two devices at once: the first one wins)
+  const pw = String(b.password || '');
+  if (pw.length < 6) throw new HttpError(400, 'Choose a site password of at least 6 characters.');
+  // The admin profile first (its name and PIN are checked there), then the password.
+  const prof = accounts.create({ name: b.name, pin: b.pin, avatar: b.avatar }, null, settings());
+  accounts.setSitePassword(pw);
+  if (!TZ_FROM_ENV && validTz(b.tz)) { settings().timeZone = String(b.tz); settingsStore.save(); applyTz(); }
+  const token = accounts.newSession(clientIp(req), req.headers['user-agent']);
+  accounts.select(accounts.sessionOf(token), prof.id, String(b.pin || ''), true);
+  res.setHeader('Set-Cookie', accounts.cookie(token, secureReq(req)));
+  log(`Set up: the site password was chosen and the admin profile “${prof.name}” made`);
   return { ok: true };
 }, 'public');
 route('POST', '/api/logout', (req, res) => {
@@ -2414,7 +2447,7 @@ route('POST', '/api/pair/approve', async (req, res, p, q, ctx) => {
   return { ok: true, device: deviceNameOf(x.ua) };
 });
 const { deviceName: deviceNameOf } = require('./lib/accounts');
-const { qrSvg } = require('./lib/qr');
+const { qrSvg, qrTerminal } = require('./lib/qr');
 // A QR code (SVG) for an address of this app, e.g. the TV's "Control from your phone" (opens its remote on the phone).
 route('GET', '/api/qr', (req, res, p, q, ctx) => {
   requireProfile(ctx);
@@ -2571,6 +2604,14 @@ route('POST', '/api/cast/link', async (req, res, p, q, ctx) => {
 });
 
 // ---- admin
+// A QR code of this server's address, for the setup guide's "open it on your phone" (web/js/setupguide.js).
+route('GET', '/api/admin/qr', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const t = String(q.get('text') || '');
+  if (!/^https?:\/\/[^\s]{1,200}$/.test(t)) throw new HttpError(400, 'Only a web address');
+  return { svg: qrSvg(t, { size: 180 }) };
+});
+// ---- admin
 route('GET', '/api/admin', (req, res, p, q, ctx) => {
   const who = requireAdmin(ctx);
   // A manager: names and how each list and guide is doing — no addresses, sign-in details, settings or devices.
@@ -2601,6 +2642,7 @@ route('GET', '/api/admin', (req, res, p, q, ctx) => {
       epg: epg.stats(), tmdb: { enabled: tmdb.enabled(), error: tmdb.lastError, matched: Object.keys(tmdb.meta.data.m).length }, intro: !!markers.detector,
       dataDir: D, listen: `${cfg.host}:${cfg.port}`, platform: `${process.platform} ${os.release()}`, node: process.version, uptime: Math.round(process.uptime()), mem: process.memoryUsage().rss, items: catalog.items.length,
       defaultPassword: accounts.d.site.isDefault, needsRestart: !!update.needsRestart, exportBase: `/k/${s.exportKey}`, alerts: accountAlerts(), errors: reports.summary(),
+      tz: { now: Intl.DateTimeFormat().resolvedOptions().timeZone, env: TZ_FROM_ENV }, docker: IN_DOCKER, lanUrls: lanUrls(),
     },
     watching: [...hub.conns].filter((c) => c.playing).map((c) => ({ pid: c.pid, device: c.deviceName, k: c.playing.k, n: c.playing.n, at: c.playing.at })),
   };
@@ -2634,6 +2676,13 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   num('epgDays', 1, 21); num('epgPastDays', 0, 14); num('epgRefreshHours', 1, 168); num('transcodeCrf', 16, 35); num('transcodeMaxHeight', 240, 2160);
   num('maxTranscodes', 0, 32); num('maxSessions', 1, 64); num('remuxReadrate', 0, 10);
   if (Array.isArray(b.allowedHosts)) s.allowedHosts = b.allowedHosts.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+  if (typeof b.timeZone === 'string') {
+    const tz = b.timeZone.trim();
+    if (tz && !validTz(tz)) throw new HttpError(400, `“${tz}” isn’t a time zone this server knows. It looks like Europe/London or America/New_York.`);
+    s.timeZone = tz;
+    applyTz();
+  }
+  if ('setupDone' in b) s.setupDone = !!b.setupDone;
   if (b.brand && typeof b.brand === 'object') {
     s.brand = {
       name: String(b.brand.name || '').trim().slice(0, 60) || s.brand.name,
@@ -3450,6 +3499,7 @@ function appHtml() {
   return b.html.replace(/__V__/g, b.v).replace(/__BRAND__/g, esc(brand.name)).replace('__ACCENT__', /^#[0-9a-f]{6}$/i.test(brand.accent || '') ? `<style>:root{--brand:${brand.accent}}</style>` : '');
 }
 const LOGIN_HTML = () => fs.readFileSync(path.join(WEB, 'login.html'), 'utf8');
+const SETUP_HTML = () => fs.readFileSync(path.join(WEB, 'setup.html'), 'utf8');
 
 /**
  * What the pages may load and run — the backstop if a title, a channel name or a guide entry from a provider ever
@@ -3479,6 +3529,17 @@ const CSP = [
 
 // ---------------------------------------------------------------- server
 const HOSTNAME = os.hostname().toLowerCase();
+/**
+ * This computer's addresses on the home network, as links. In a container (Docker's own network) its addresses are
+ * the container's, of no use to anyone outside it: those (172.16–31.x) are left out, and usually nothing is left.
+ */
+function lanUrls() {
+  if (!['0.0.0.0', '::'].includes(cfg.host)) return [];
+  const proto = cfg.httpsCert && cfg.httpsKey ? 'https' : 'http';
+  return Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal && !(IN_DOCKER && /^172\.(1[6-9]|2\d|3[01])\./.test(i.address)))
+    .map((i) => `${proto}://${i.address}:${cfg.port}`);
+}
 function hostAllowed(hostHeader) {
   if (!hostHeader) return true;
   const h = hostHeader.toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
@@ -3499,7 +3560,7 @@ async function handle(req, res) {
   const ctx = { sess: null, profile: null, conn: String(req.headers['x-conn'] || '').slice(0, 40) };
   try {
     if (!hostAllowed(cfg.trustProxy && req.headers['x-forwarded-host'] ? req.headers['x-forwarded-host'] : req.headers.host)) {
-      throw new HttpError(403, `This server doesn’t answer to “${req.headers.host}”. Add it with the ALLOWED_HOSTS setting (see README), or change the site password first.`);
+      throw new HttpError(403, `This server doesn’t answer to “${req.headers.host}”. Add it with the ALLOWED_HOSTS setting (see README), or open it by its IP address and set the server up first.`);
     }
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -3612,7 +3673,11 @@ async function handle(req, res) {
     if (!ctx.sess) {
       if (pathname === '/favicon.ico' || pathname === '/icon.svg') return serveFile(req, res, path.join(PUBLIC, 'icon.svg'), { cache: 'max-age=86400' });
       if (pathname === '/login.js') return serveFile(req, res, path.join(WEB, 'login.js'), { type: 'text/javascript; charset=utf-8' });
+      // A new install: the setup page (the site password and the admin profile) instead of signing in.
+      const setup = !!accounts.d.site.setup;
+      if (setup && pathname === '/setup.js') return serveFile(req, res, path.join(WEB, 'setup.js'), { type: 'text/javascript; charset=utf-8' });
       if (pathname !== '/') { res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' }); return res.end(); }
+      if (setup) return sendText(res, 200, SETUP_HTML().replace('<!--away-->', awayFrom(req) ? '<p class="away" role="alert">This device isn’t on the same home network as the server. Set it up from one that is: on the server itself, open http://localhost:' + cfg.port + '</p>' : ''), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
       return sendText(res, 200, LOGIN_HTML(), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
     }
     const b = getBundle();
@@ -3747,17 +3812,22 @@ process.on('unhandledRejection', (e) => { console.error('Unhandled promise rejec
   // Under the front (lib/front.js), which holds the port and hands over each connection; otherwise on the port itself.
   const front = require('./lib/front');
   const announce = () => {
+    const urls = lanUrls();
     log(`Answering ${process.uptime().toFixed(1)} s after starting (memory limit ${(require('v8').getHeapStatistics().heap_size_limit / 1073741824).toFixed(1)} GB)`);
     const shown = ['0.0.0.0', '::'].includes(cfg.host) ? 'localhost' : cfg.host;
-    const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
     console.log('');
     console.log(`  ${settings().brand.name} ${cfg.version} is running`);
-    console.log(`  ➜ Open      ${tls ? 'https' : 'http'}://${shown}:${cfg.port}`);
-    for (const ip of ['0.0.0.0', '::'].includes(cfg.host) ? ips : []) console.log(`  ➜ Network   ${tls ? 'https' : 'http'}://${ip}:${cfg.port}`);
+    console.log(`  ➜ Open      ${tls ? 'https' : 'http'}://${shown}:${cfg.port}   (on this computer)`);
+    for (const u of urls) console.log(`  ➜ Network   ${u}   (from a phone, TV or another computer)`);
+    // (In a container its own addresses mean nothing outside it: the computer's address is what to open.)
+    if (!urls.length) console.log(`  ➜ Network   ${tls ? 'https' : 'http'}://<this computer's address>:${cfg.port}   (from a phone, TV or another computer)`);
     console.log(`  ➜ Data      ${D}`);
     console.log(`  ➜ ffmpeg    ${ff.ffmpeg ? `found (${ff.version})` : 'NOT FOUND – conversion of MKV/AVI/HEVC/RTMP etc. is off'}`);
     if (accounts.presetApplied) console.log(`  ➜ Password  changed to the new one in ${process.env.SITE_PASSWORD ? "SITE_PASSWORD" : "defaults.json"} — everyone has been signed out`);
+    else if (accounts.d.site.setup) console.log('  ➜ Set up    open it in a browser to choose the site password and make your admin profile (only from your home network)');
     else if (accounts.d.site.isDefault) console.log(`  ➜ Password  the site password is still the default (${defaultPassword}) — change it in Admin`);
+    // A phone can scan this to open it (not when it's a container: its address isn't known in here).
+    if (urls[0] && process.stdout.isTTY !== false && qrTerminal) { try { console.log(''); console.log(qrTerminal(urls[0]).split('\n').map((l) => '    ' + l).join('\n')); } catch {} }
     console.log('');
   };
   if (front.attachToFront(server)) { announce(); front.tellFrontReady(); } else server.listen(cfg.port, cfg.host, announce);

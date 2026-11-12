@@ -295,7 +295,7 @@ V.route('home', function (view) {
     if (sec && sec._hid) V.homeUsed(sec._hid);
   });
   if (!rows.children.length) {
-    rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists?add=1">Add a list</a>' : '');
+    rows.innerHTML = S.items.length ? V.empty('Nothing here yet', 'Start watching something and this page fills up with picks for you.') : V.empty('No channels or videos yet', S.profile.admin ? 'Add your playlists in Admin → Lists. Everyone sees them as soon as they’re loaded.' : 'The admin hasn’t added any playlists yet.', S.profile.admin ? '<a class="btn primary" href="#/admin/lists?add=1">Add a list</a>' + (S.admin && S.admin.settings && S.admin.settings.setupDone ? '' : ' <a class="btn" href="#/setup">The setup guide</a>') : '');
   }
   if (!S.recs || Date.now() - (S.recsAt || 0) > 5 * 60e3) V.loadRecs();
   if (V.loadHomeLists) V.loadHomeLists();
