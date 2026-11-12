@@ -35,7 +35,7 @@
 
 Line up films, series and episodes to watch one after another.
 
-- **Play next** puts something at the front of the queue, **Add to queue** at the end: on a title page (the queue button next to *My List*), in the … menu of any poster (long press on a phone, Menu/Info on a remote) and in an episode's … menu.
+- **Play next** puts something at the front of the queue, **Add to queue** at the end: on a title page (under *More*, next to *My List*), in the … menu of any poster (long press on a phone, Menu/Info on a remote) and in an episode's … menu.
 - When a film or episode ends, the first thing in the queue starts with the usual *Up next* countdown (*Play now* / *Not now*); the Next button and the N key go to it too. The queue comes before the next episode of a series. A queued series plays from where you are in it. With *Autoplay next episode* off, the *Finished* screen offers it instead.
 - Something leaves the queue when it starts playing, however you started it.
 - See and change it in **My stuff → Queue** (on phones: My List → Queue), or from the player's menu → *Your queue*, which opens beside the video: play, move up or down, remove, *Play the queue*, *Clear*. Everything works with arrow keys and OK on a remote.

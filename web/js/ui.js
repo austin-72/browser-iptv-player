@@ -393,6 +393,8 @@ V.grid = function (host, items, o) {
     g.insertAdjacentHTML('beforeend', html);
     if (n >= items.length && sentinel) { io.disconnect(); sentinel.remove(); sentinel = null; }
   };
+  // (Drawn as far as card i: a jump to a letter further down than what's drawn yet.)
+  g._upTo = function (i) { while (n <= i && n < items.length) more(); };
   var sentinel = document.createElement('div');
   sentinel.className = 'sentinel';
   host.appendChild(sentinel);

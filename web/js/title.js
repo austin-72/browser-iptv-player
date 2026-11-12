@@ -1,4 +1,4 @@
-/* A movie's or series' page: details, play/resume, seasons and episodes, more like this. */
+/* A movie's or series' page: what it is and Play, then tabs — episodes or bookmarks, details, cast, reviews, more like this. */
 'use strict';
 
 V.similar = function (it, n) {
@@ -19,6 +19,9 @@ V.similar = function (it, n) {
   return scored.slice(0, n || 18).map(function (x) { return x[1]; });
 };
 
+// The page: a big picture with what it is and what to do, then tabs — Episodes (or, for a film, its bookmarks),
+// Details, Cast, Reviews, More like this — one shown at a time, so everything is close to the top.
+var tabMemo = {}; // (the tab last chosen on each title's page: Back from a title picked in More like this lands on it again)
 V.route('title', function (view, r) {
   var it = V.entry(r.args[0]);
   if (!it) { view.innerHTML = V.empty('Not found', 'It may have been removed from the lists.', '<div class="btn-row empty-acts"><a class="btn" href="#/search">Search</a><a class="btn" href="#/home">Home</a></div>'); return; }
@@ -27,53 +30,114 @@ V.route('title', function (view, r) {
   // (Light catalogue: a film's stream address fetched while its page is read, so Play doesn't wait for it.)
   if (!isShow && it.lz && !it.u && V.fetchAddresses) V.fetchAddresses([it.k]).catch(function () {});
   var p = V.progressOf(it.k);
-  view.innerHTML = '<article class="title-page">' +
-    '<div class="tp-hero" style="--tint:' + V.tint(it.n) + '"><div class="tp-bg">' + (it.bd || it.i ? '<img src="' + V.esc(it.bd || it.i) + '" alt="" referrerpolicy="no-referrer"' + (it.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
+  var TABS = [[isShow ? 'eps' : 'bm', isShow ? 'Episodes' : 'Bookmarks'], ['details', 'Details'], ['cast', 'Cast'], ['reviews', 'Reviews'], ['more', 'More like this']];
+  var panel = function (id, html) { return '<section class="tp-panel" data-panel="' + id + '" id="tpp-' + id + '" role="tabpanel" aria-labelledby="tpt-' + id + '" tabindex="-1" hidden>' + html + '</section>'; };
+  view.innerHTML = '<article class="title-page tp-a">' +
+    '<div class="tp-hero' + (it.bd ? '' : ' no-bd') + '" style="--tint:' + V.tint(it.n) + '"><div class="tp-bg">' + (it.bd || it.i ? '<img src="' + V.esc(it.bd || it.i) + '" alt="" referrerpolicy="no-referrer"' + (it.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
     '<div class="tp-main">' + (it.i ? '<div class="tp-poster">' + V.art(it.i, it.n, 'art') + '</div>' : '') + '<div class="tp-info">' +
-    '<div class="dim">' + V.esc(isShow ? 'Series' : 'Movie') + ' · ' + V.esc(V.catLabel ? V.catLabel(it) : it.g) + '</div><h1>' + V.esc(it.n) + '</h1>' +
+    '<div class="tp-kind">' + V.esc(isShow ? 'Series' : 'Movie') + (V.catLabel && V.catLabel(it) ? ' · ' + V.esc(V.catLabel(it)) : it.g ? ' · ' + V.esc(it.g) : '') + '</div><h1>' + V.esc(it.n) + '</h1>' +
     (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
-    (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select>' + ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></section>' : '') +
-    '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-extra"></div><div class="tp-more"></div></article>';
+    '<div class="tabs tp-tabs" role="tablist" aria-label="About ' + V.esc(it.n) + '">' + TABS.map(function (t) {
+      return '<button type="button" class="tab" role="tab" id="tpt-' + t[0] + '" data-tab="' + t[0] + '" aria-controls="tpp-' + t[0] + '" aria-selected="false"' + (t[0] === 'bm' || t[0] === 'cast' || t[0] === 'reviews' ? ' hidden' : '') + '>' + t[1] + '<span class="tab-n"></span></button>';
+    }).join('') + '</div>' +
+    (isShow ? panel('eps', '<div class="tp-eps"><div class="eps-h"><h2 class="sr-only">Episodes</h2><select class="input" data-season aria-label="Season" hidden></select><span class="tp-order"></span><span class="sp"></span>' + ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></div><section class="tp-bm" hidden></section>')
+      : panel('bm', '<section class="tp-bm" hidden></section>')) +
+    panel('details', '<dl class="facts tp-facts"></dl><div class="tp-links"></div>') +
+    panel('cast', '<div class="tp-crew"></div><div class="tp-cast-host"></div>') +
+    panel('reviews', '<div class="tp-reviews-host"></div>') +
+    panel('more', '<section class="tp-col" hidden></section><div class="tp-alike"></div>') +
+    '</article>';
   // A poster that doesn't load isn't replaced with initials here — the title is right next to it anyway.
   var pimg = V.$('.tp-poster img', view);
   if (pimg) pimg.addEventListener('error', function () { var pp = V.$('.tp-poster', view); if (pp) pp.hidden = true; });
+
+  // ---- tabs
+  var tabsEl = V.$('.tp-tabs', view);
+  var tabBtn = function (id) { return V.$('[data-tab="' + id + '"]', tabsEl); };
+  var cur = '', wanted = tabMemo[it.k] || '';
+  var select = function (id, focus, byUser) {
+    var b = tabBtn(id);
+    if (!b || b.hidden) return;
+    cur = id; tabMemo[it.k] = id;
+    if (byUser) wanted = '';
+    V.$$('[role=tab]', tabsEl).forEach(function (t) { t.setAttribute('aria-selected', String(t === b)); t.classList.toggle('on', t === b); });
+    V.$$('.tp-panel', view).forEach(function (pn) { pn.hidden = pn.dataset.panel !== id; });
+    if (focus) b.focus();
+    // (A phone: the chosen tab scrolled into the strip's view.)
+    if (tabsEl.scrollWidth > tabsEl.clientWidth) tabsEl.scrollLeft = Math.max(0, b.offsetLeft - tabsEl.offsetLeft - (tabsEl.clientWidth - b.offsetWidth) / 2);
+    if (id === 'more') loadAlike();
+  };
+  /** A tab with something in it shows (with how many, when that helps); one with nothing hides. */
+  var showTab = function (id, on, n) {
+    var b = tabBtn(id);
+    if (!b) return;
+    b.hidden = !on;
+    V.$('.tab-n', b).textContent = on && n ? ' ' + n : '';
+    if (!on && cur === id) select(isShow ? 'eps' : 'details');
+    // (The tab chosen last time on this page comes back once it has something in it.)
+    if (on && wanted === id && cur !== id) select(id);
+  };
+  tabsEl.addEventListener('click', function (e) { var b = e.target.closest('[role=tab]'); if (b) select(b.dataset.tab, false, true); });
+  tabsEl.addEventListener('keydown', function (e) {
+    var dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (!dir || V.tvMode) return;
+    var list = V.$$('[role=tab]', tabsEl).filter(function (t) { return !t.hidden; }), i = list.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    select(list[(i + dir + list.length) % list.length].dataset.tab, true, true);
+  });
+  // (With a remote, the tab under the focus is the one shown: no extra press.)
+  tabsEl.addEventListener('focusin', function (e) {
+    var b = e.target.closest('[role=tab]');
+    if (!b || !V.tvMode || b.dataset.tab === cur) return;
+    // (Coming down onto the tabs lands on the one showing; moving along them shows each in turn.)
+    if (!e.relatedTarget || !tabsEl.contains(e.relatedTarget)) { var on = tabBtn(cur); if (on) { on.focus(); return; } }
+    select(b.dataset.tab, false, true);
+  });
+  view._tpShowTab = showTab;
 
   var meta = function (d) {
     var bits = [d.y, d.c ? '<span class="cert">' + V.esc(d.c) + '</span>' : '', d.r ? '★ ' + d.r : '', !isShow && d.d ? V.fmtLen(d.d) : '', isShow && d.ne ? V.plural(d.ne, 'episode') : '', (d.lg || []).map(V.langName).join(', '), d.nt || it.nt ? '<span class="note">' + V.esc(d.nt || it.nt) + '</span>' : ''].filter(Boolean);
     V.$('.tp-meta', view).innerHTML = bits.join('<span class="dot-sep"></span>') + (d.gn && d.gn.length ? '<div class="tp-genres">' + d.gn.map(function (g) { return '<a class="chip sm" href="#/' + (isShow ? 'series' : 'movies') + '?genre=' + encodeURIComponent(g) + '">' + V.esc(g) + '</a>'; }).join('') + '</div>' : '');
   };
   meta(it);
+
+  // ---- what to do: Play (saying what it plays, with how far in), then everything else with its name on it
+  var trailer = null; // (a YouTube address, once known: the provider's or TMDB's)
+  var pill = function (a, icon, label, pressed, extra) { return '<button type="button" class="tp-pill" data-a="' + a + '"' + (pressed !== undefined ? ' aria-pressed="' + pressed + '"' : '') + (extra || '') + '>' + V.icon(icon) + '<span>' + label + '</span></button>'; };
   var drawActs = function (eps) {
-    var html = '';
+    var html = '<div class="tp-primary">';
+    var bar = function (pct) { return pct > 0 && pct < 1 ? '<span class="tp-bar" aria-hidden="true"><i style="width:' + Math.round(pct * 100) + '%"></i></span>' : ''; };
     if (isShow) {
       var rp = V.resumePoint(it, eps || []);
       if (rp.ep && V.warmPlay) V.warmPlay(rp.ep);
-      html += '<button class="btn primary lg" data-a="play"' + (rp.ep ? '' : ' disabled') + '>' + V.icon('play') + ' ' + V.esc(rp.label) + '</button>';
+      var pe = rp.ep ? V.progressOf(rp.ep.k) : null;
+      html += '<button class="btn primary lg tp-play" data-a="play"' + (rp.ep ? '' : ' disabled') + '>' + V.icon('play') + '<span class="tp-pl"><span>' + V.esc(rp.label) + '</span>' + bar(rp.ep ? V.pctOf(rp.ep.k) : 0) + '</span></button>';
       if (V.shuffleShow && eps && eps.length > 1) html += '<button class="btn lg" data-a="shuffle">' + V.icon('shuffle') + ' Shuffle</button>';
+      if (pe && !pe.w && pe.d && pe.p > 20) html += '<span class="tp-left">' + V.esc(V.fmtLeft(pe.d - pe.p)) + (rp.ep.et ? ' in “' + V.esc(rp.ep.et) + '”' : '') + '</span>';
     } else {
       var resume = p && !p.w && p.p > 20;
       if (V.warmPlay) V.warmPlay(it);
-      html += '<button class="btn primary lg" data-a="play">' + V.icon('play') + ' ' + (resume ? 'Resume' : 'Play') + '</button>';
+      html += '<button class="btn primary lg tp-play" data-a="play">' + V.icon('play') + '<span class="tp-pl"><span>' + (resume ? 'Resume' + (p.d ? ' · ' + V.esc(V.fmtLeft(p.d - p.p)) : '') : 'Play') + '</span>' + bar(resume ? V.pctOf(it.k) : 0) + '</span></button>';
       if (resume) html += '<button class="btn lg" data-a="restart">' + V.icon('restart') + ' From the start</button>';
     }
-    // The round buttons: only what's used most (My List, rating, download, new-episode alerts). Queue, Send and Watch
-    // together are under More — a long row of icons wrapped onto two or three lines, and was hard to read.
+    html += '</div>';
+    // Each with its name (it used to be a row of round icons): only what's used most; Queue, Send and Watch together
+    // are under More.
     var inList = V.inList('list', it.k), rate = V.ratingOf(it.k);
-    html += '<div class="tp-icons">' +
-      '<button class="icon-btn lg" data-a="list" aria-pressed="' + inList + '" title="My List" aria-label="My List">' + V.icon(inList ? 'check' : 'plus') + '</button>' +
-      '<button class="icon-btn lg" data-a="up" aria-pressed="' + (rate > 0) + '" title="I like this" aria-label="I like this">' + V.icon(rate > 0 ? 'thumbupf' : 'thumbup') + '</button>' +
-      '<button class="icon-btn lg" data-a="down" aria-pressed="' + (rate < 0) + '" title="Not for me" aria-label="Not for me">' + V.icon(rate < 0 ? 'thumbdownf' : 'thumbdown') + '</button>' +
-      ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="icon-btn lg" data-a="dl" title="' + (isShow ? 'Download episodes' : 'Download') + '" aria-label="' + (isShow ? 'Download episodes' : 'Download') + '">' + V.icon('download') + '</button>' : '') +
-      (isShow && V.bellButton ? V.bellButton(it) : '') + // (alerts for new episodes: homelists.js)
-      '<button class="icon-btn lg" data-a="more" title="More: queue, send, watch together…" aria-label="More">' + V.icon('dots') + '</button></div>';
+    html += '<div class="tp-pills">' +
+      pill('list', inList ? 'check' : 'plus', inList ? 'In My List' : 'My List', inList) +
+      pill('up', rate > 0 ? 'thumbupf' : 'thumbup', rate > 0 ? 'Liked' : 'Like', rate > 0) +
+      pill('down', rate < 0 ? 'thumbdownf' : 'thumbdown', 'Not for me', rate < 0) +
+      (trailer ? pill('trailer', 'film', 'Trailer') : '') +
+      ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? pill('dl', 'download', 'Download', undefined, isShow ? ' aria-label="Download episodes"' : '') : '') +
+      (isShow && V.bellButton ? V.bellButton(it, true) : '') + // (alerts for new episodes: homelists.js)
+      pill('more', 'dots', 'More', undefined, ' aria-haspopup="menu" title="Queue, send, watch together…"') + '</div>';
     // (Drawn again — the episodes arrived, a rating — the button that had the focus keeps it: on a TV it would be lost.)
     var had = document.activeElement && V.$('.tp-acts', view).contains(document.activeElement) ? document.activeElement.getAttribute('data-a') : null;
     V.$('.tp-acts', view).innerHTML = html;
     if (had) { var back = V.$('.tp-acts [data-a="' + had + '"]', view); if (back) back.focus({ preventScroll: true }); }
-    // Short names under the round buttons (shown on touch screens and TVs, where there's no hover to explain them).
-    var names = { list: 'My List', queue: 'Queue', up: 'Like', down: 'Not for me', share: 'Send', party: 'Together', dl: 'Download', bell: 'Alerts', more: 'More' };
-    V.$$('.tp-acts .icon-btn', view).forEach(function (b) { var n = names[b.dataset.a] || b.getAttribute('aria-label') || ''; if (n) b.setAttribute('data-l', n); });
   };
   drawActs(S.epsByShow.get(it.k));
 
@@ -84,11 +148,13 @@ V.route('title', function (view, r) {
     var b = e.target.closest('[data-a]');
     if (!b) return;
     var a = b.dataset.a;
+    var again = function () { drawActs(it._eps || S.epsByShow.get(it.k)); };
     if (a === 'play') V.play(it);
     else if (a === 'restart') V.play(it, { startAt: 0 });
     else if (a === 'shuffle') V.shuffleShow(it);
-    else if (a === 'list') V.toggle('list', it.k).then(function (on) { b.innerHTML = V.icon(on ? 'check' : 'plus'); b.setAttribute('aria-pressed', on); V.toast(on ? 'Added to My List' : 'Removed from My List'); });
-    else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var cur = V.ratingOf(it.k); V.rate(it.k, cur === v ? 0 : v); drawActs(it._eps || S.epsByShow.get(it.k)); if (cur !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
+    else if (a === 'list') V.toggle('list', it.k).then(function (on) { again(); V.toast(on ? 'Added to My List' : 'Removed from My List'); });
+    else if (a === 'up' || a === 'down') { var v = a === 'up' ? 1 : -1; var was = V.ratingOf(it.k); V.rate(it.k, was === v ? 0 : v); again(); if (was !== v) V.toast(v > 0 ? 'Thanks — you’ll see more like this' : 'Got it — you’ll see less like this'); }
+    else if (a === 'trailer' && trailer) V.playTrailer(trailer, it.n);
     else if (a === 'share') V.shareDialog(it);
     else if (a === 'party') V.party.startDialog(it);
     else if (a === 'dl') { if (isShow) { var ss = V.$('[data-season]', view); V.downloads.chooseSeries(it, ss && ss.value !== '' ? +ss.value : undefined); } else V.downloads.start(it); }
@@ -97,30 +163,52 @@ V.route('title', function (view, r) {
     else if (a === 'queue') V.queue.menu(b, it);
   });
 
+  // ---- Details: the basics here, TMDB's facts added by titlemore.js (view._tpFacts)
+  var baseFacts = [];
+  var drawFacts = function () {
+    var rows = baseFacts.concat(view._tpFacts || []);
+    V.$('.tp-facts', view).innerHTML = rows.map(function (x) { return '<div><dt>' + x[0] + '</dt><dd>' + x[1] + '</dd></div>'; }).join('');
+  };
+  view._tpDrawFacts = drawFacts;
+  var factsOf = function (d) {
+    var out = [];
+    if (!isShow && d.d) out.push(['Length', V.esc(V.fmtLen(d.d))]);
+    if (isShow && d.ne) out.push(['Here', V.esc(V.plural(d.ne, 'episode'))]);
+    if (d.lg && d.lg.length) out.push(['Language', V.esc(d.lg.map(V.langName).join(', '))]);
+    if (d.c) out.push(['Age rating', V.esc(d.c)]);
+    if (it.g) out.push(['In your lists under', V.esc(it.g)]);
+    if (it.ad) { try { out.push(['Added', V.esc(new Date(it.ad * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))]); } catch (e) {} }
+    return out;
+  };
+  baseFacts = factsOf(it); drawFacts();
+
   // Full details from the server (plot, cast, trailer, episodes; TMDB when enabled).
   V.api('/api/item/' + encodeURIComponent(it.k)).then(function (d) {
     Object.keys(d).forEach(function (k) { if (d[k] && !it[k] && ['bd', 'gn', 'c', 'y', 'r', 'd'].indexOf(k) >= 0) it[k] = d[k]; });
     meta(d);
-    if (d.bd) { var img = V.$('.tp-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } else V.$('.tp-bg', view).innerHTML = '<img src="' + V.esc(d.bd) + '" alt="" referrerpolicy="no-referrer">'; }
+    if (d.bd) { var img = V.$('.tp-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } else V.$('.tp-bg', view).innerHTML = '<img src="' + V.esc(d.bd) + '" alt="" referrerpolicy="no-referrer">'; V.$('.tp-hero', view).classList.remove('no-bd'); }
     V.$('.tp-plot', view).textContent = d.plot || '';
-    var people = function (s) { return String(s).split(',').map(function (x) { x = x.trim(); return x ? '<a href="#/search?q=' + encodeURIComponent(x) + '">' + V.esc(x) + '</a>' : ''; }).filter(Boolean).join(', '); };
-    V.$('.tp-credits', view).innerHTML = (d.cast ? '<div><b>Cast:</b> ' + people(d.cast) + '</div>' : '') + (d.dir ? '<div><b>' + (isShow ? 'Created by' : 'Director') + ':</b> ' + people(d.dir) + '</div>' : '') +
-      (d.tr && V.ytId(d.tr) ? '<div><button class="linkish" data-trailer>' + V.icon('film') + ' Watch the trailer</button></div>' : '') +
-      (S.settings.tmdb && !S.profile.kids ? '<div class="tp-fix"><button class="linkish" data-fix>' + (d.fixed ? 'Details corrected by your household · change' : 'Wrong poster or details?') + '</button></div>' : '');
-    var tb = V.$('[data-trailer]', view);
-    if (tb) tb.onclick = function () { V.playTrailer(d.tr, it.n); }; // (here, not on a YouTube tab: web/js/trailers.js)
-    // No trailer from the provider: TMDB's, when there's one.
-    else if (S.settings.tmdb && !V.areaOff('trailers') && (it.t === 'movie' || it.t === 'show')) V.api('/api/trailers?k=' + encodeURIComponent(it.k)).then(function (t) {
-      var x = t && t[it.k], cr = V.$('.tp-credits', view);
-      if (!x || !x.v || !cr || V.$('[data-trailer]', cr)) return;
-      var div = document.createElement('div');
-      div.innerHTML = '<button class="linkish" data-trailer>' + V.icon('film') + ' Watch the trailer</button>';
-      var fix = V.$('.tp-fix', cr);
-      cr.insertBefore(div, fix || null);
-      V.$('[data-trailer]', div).onclick = function () { V.playTrailer(x.v, it.n); };
-    }).catch(function () {});
+    baseFacts = factsOf(Object.assign({}, it, d)); drawFacts();
+    var people = function (s, max) { return String(s).split(',').map(function (x) { return x.trim(); }).filter(Boolean).slice(0, max || 99).map(function (x) { return '<a href="#/search?q=' + encodeURIComponent(x) + '">' + V.esc(x) + '</a>'; }).join(', '); };
+    // One short line under the story (all of them are on the Cast tab): who made it, who's in it.
+    V.$('.tp-credits', view).innerHTML = [d.dir ? '<span class="tp-made">' + (isShow ? 'Created by ' : 'Directed by ') + people(d.dir, 2) + '</span>' : '', d.cast ? '<span class="tp-star">Starring ' + people(d.cast, 3) + '</span>' : ''].filter(Boolean).join('<span class="dot-sep"></span>');
+    // The Cast tab, from the provider's names until TMDB's (with faces) come.
+    if (d.cast || d.dir) {
+      V.$('.tp-crew', view).innerHTML = d.dir ? '<p><b>' + (isShow ? 'Created by' : 'Director') + ':</b> ' + people(d.dir) + '</p>' : '';
+      V.$('.tp-cast-host', view).innerHTML = d.cast ? '<p class="tp-cast-plain">' + people(d.cast) + '</p>' : '';
+      showTab('cast', true);
+    }
+    var links = V.$('.tp-links', view);
+    if (S.settings.tmdb && !S.profile.kids) links.innerHTML = '<button class="linkish" data-fix>' + (d.fixed ? 'Details corrected by your household · change' : 'Wrong poster or details?') + '</button>';
     var fx = V.$('[data-fix]', view);
     if (fx) fx.onclick = function () { V.fixDetails(it, d); };
+    if (d.tr && V.ytId(d.tr)) { trailer = d.tr; drawActs(it._eps || S.epsByShow.get(it.k)); }
+    // No trailer from the provider: TMDB's, when there's one.
+    else if (S.settings.tmdb && !V.areaOff('trailers') && (it.t === 'movie' || it.t === 'show')) V.api('/api/trailers?k=' + encodeURIComponent(it.k)).then(function (t) {
+      var x = t && t[it.k];
+      if (!x || !x.v || trailer || !V.$('.tp-acts', view)) return;
+      trailer = x.v; drawActs(it._eps || S.epsByShow.get(it.k));
+    }).catch(function () {});
     // Its logo, the cast with faces, who made it, facts, release dates, what viewers wrote (TMDB): titlemore.js.
     if (V.titleMore) V.titleMore(view, it, d);
     if (d.col) V.drawCollection(V.$('.tp-col', view), it);
@@ -146,7 +234,7 @@ V.route('title', function (view, r) {
       if (d.next && d.next.air) V.$('.tp-meta', view).insertAdjacentHTML('beforeend', '<div class="tp-next">' + V.icon('clock', 'tiny') + ' Next episode ' + V.esc(V.epLabel({ t: 'episode', s: d.next.s, e: d.next.e })) + (d.next.et && !/^Episode \d+$/i.test(d.next.et) ? ' “' + V.esc(d.next.et) + '”' : '') + ' — ' + V.esc(V.airsOn(d.next.air)) + '</div>');
       else if (d.ended) V.$('.tp-meta', view).insertAdjacentHTML('beforeend', '<div class="tp-next dim">Series ended</div>');
       drawActs(eps);
-      if (typeof drawBookmarks === 'function') drawBookmarks(); // (episode bookmarks, now the episodes are known)
+      drawBookmarks(); // (episode bookmarks, now the episodes are known)
     }
   }).catch(function (e) {
     if (!isShow) return;
@@ -210,24 +298,88 @@ V.route('title', function (view, r) {
     };
   }
 
-  // Bookmarks for this title (drawn again once a series' episodes are known: theirs are found by the episode).
-  var drawBookmarks = function () {
-  var bms = S.data.bookmarks.filter(function (b) { var x = V.entry(b.k); return b.k === it.k || (x && x.sk === it.k); });
-  if (bms.length) {
+  // Bookmarks for this title: under the episodes for a series, in their place (their own tab) for a film. Drawn
+  // again once a series' episodes are known: theirs are found by the episode.
+  function drawBookmarks() {
     var bs = V.$('.tp-bm', view);
+    if (!bs) return;
+    var bms = S.data.bookmarks.filter(function (b) { var x = V.entry(b.k); return b.k === it.k || (x && x.sk === it.k); });
+    if (!bms.length) { bs.hidden = true; if (!isShow) showTab('bm', false); return; }
     bs.hidden = false;
     // In order (by episode, then time); bookmarks with nothing to say but the time sit side by side.
     bms = bms.slice().sort(function (a, b) { var xa = V.entry(a.k) || {}, xb = V.entry(b.k) || {}; return ((xa.s || 0) - (xb.s || 0)) || ((xa.e || 0) - (xb.e || 0)) || (a.t - b.t); });
     // (The same moment saved twice shows once.)
     bms = bms.filter(function (b, i) { return !bms.slice(0, i).some(function (o) { return o.k === b.k && Math.abs(o.t - b.t) < 3 && (o.note || '') === (b.note || ''); }); });
     var bare = bms.every(function (b) { var x = V.entry(b.k); return !b.note && !(x && x.t === 'episode'); });
-    bs.innerHTML = '<h2>Your bookmarks</h2><ul class="bms' + (bare ? ' bare' : '') + '">' + bms.map(function (b) { var x = V.entry(b.k); return '<li><button class="btn sm" data-bm="' + b.id + '">' + V.icon('play') + ' ' + V.fmtDur(b.t) + '</button><span>' + (x && x.t === 'episode' ? '<b>' + V.esc(V.epLabel(x)) + '</b> ' : '') + V.esc(b.note || '') + '</span></li>'; }).join('') + '</ul>';
+    bs.innerHTML = '<h2' + (isShow ? '' : ' class="sr-only"') + '>Your bookmarks</h2><ul class="bms' + (bare ? ' bare' : '') + '">' + bms.map(function (b) { var x = V.entry(b.k); return '<li><button class="btn sm" data-bm="' + b.id + '">' + V.icon('play') + ' ' + V.fmtDur(b.t) + '</button><span>' + (x && x.t === 'episode' ? '<b>' + V.esc(V.epLabel(x)) + '</b> ' : '') + V.esc(b.note || '') + '</span></li>'; }).join('') + '</ul>';
     bs.onclick = function (e) { var b = e.target.closest('[data-bm]'); if (!b) return; var bm = bms.filter(function (x) { return x.id === b.dataset.bm; })[0]; V.play(V.entry(bm.k), { startAt: bm.t }); };
+    if (!isShow) showTab('bm', true, bms.length);
   }
-  };
   drawBookmarks();
-  var more = V.row({ id: 'similar', title: 'More like this', items: V.similar(it) });
-  if (more) V.$('.tp-more', view).appendChild(more);
+
+  // ---- More like this: everything here that's alike (TMDB's picks, then by genre, makers, cast…: lib/alike.js),
+  // and under it "More": what's like those, and so on — each press goes one step further out.
+  var alike = null;
+  function loadAlike() {
+    if (alike) return;
+    var host = V.$('.tp-alike', view);
+    alike = { shown: [it.k], last: [] };
+    host.innerHTML = '<div class="spinner"></div>';
+    var here = function () { return document.documentElement.contains(host); };
+    var take = function (keys) {
+      var items = keys.map(V.entry).filter(function (x) { return x && (x.t === 'movie' || x.t === 'show') && !V.inList('hidden', x.k) && alike.shown.indexOf(x.k) < 0; });
+      items.forEach(function (x) { alike.shown.push(x.k); });
+      if (items.length) alike.last = items.map(function (x) { return x.k; });
+      return items;
+    };
+    // (The server's answer, topped up with the same kind of guess made here when it has only a few.)
+    var ask = function (body, fallback) {
+      return V.api('/api/alike', { body: body }).then(function (r) {
+        var keys = (r && r.keys) || [];
+        return keys.length >= 24 ? keys : keys.concat(fallback().filter(function (k) { return keys.indexOf(k) < 0; }));
+      }).catch(function () { return fallback(); });
+    };
+    // (Made here: by genres and category.)
+    var localOf = function (seeds) {
+      var out = [];
+      seeds.forEach(function (k) { var x = V.entry(k); if (x) V.similar(x, 40).forEach(function (y) { if (out.indexOf(y.k) < 0) out.push(y.k); }); });
+      return out;
+    };
+    ask({ k: it.k }, function () { return localOf([it.k]); }).then(function (keys) {
+      if (!here()) return;
+      var items = take(keys);
+      if (!items.length) { host.innerHTML = '<p class="dim">Nothing in your lists is much like this.</p>'; return; }
+      host.innerHTML = '<div class="grid poster tp-alike-grid" data-list></div><div class="tp-alike-more"><button class="btn" data-alike-more>' + V.icon('plus') + ' More</button><span class="dim small">Like the ones above</span></div>';
+      var g = V.$('.tp-alike-grid', host);
+      g._items = items;
+      g.innerHTML = items.map(function (x) { return V.card(x); }).join('');
+      var btn = V.$('[data-alike-more]', host);
+      btn.onclick = function () {
+        if (btn.disabled) return;
+        var hadFocus = document.activeElement === btn;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner sm"></span> Finding more';
+        ask({ keys: alike.last.slice(0, 24), skip: alike.shown }, function () { return localOf(alike.last.slice(0, 12)); }).then(function (more) {
+          if (!here()) return;
+          var add = take(more);
+          if (!add.length) { V.$('.tp-alike-more', host).innerHTML = '<p class="dim">That’s everything alike.</p>'; return; }
+          var first = g.children.length;
+          g.insertAdjacentHTML('beforeend', add.map(function (x) { return V.card(x); }).join(''));
+          g._items = g._items.concat(add);
+          btn.disabled = false;
+          btn.innerHTML = V.icon('plus') + ' More';
+          if (hadFocus && g.children[first]) g.children[first].focus();
+        });
+      };
+    });
+  }
+
+  // The first tab: the one chosen last time on this page, else Episodes (a series), Bookmarks (a film with some),
+  // else Details.
+  var first = isShow ? 'eps' : !tabBtn('bm').hidden ? 'bm' : 'details';
+  select(wanted && tabBtn(wanted) && !tabBtn(wanted).hidden ? wanted : first);
+  // (Until the remembered tab has something in it — the cast and reviews come a moment later — it isn't forgotten.)
+  if (wanted && cur !== wanted) tabMemo[it.k] = wanted;
 });
 
 // ---------------------------------------------------------------- new episodes

@@ -56,44 +56,49 @@
       // An age rating found where there was none.
       if (m.cert && !d.c && !V.$('.tp-meta .cert', view)) { var tm = V.$('.tp-meta', view); if (tm) tm.insertAdjacentHTML('afterbegin', '<span class="cert">' + V.esc(m.cert) + '</span><span class="dot-sep"></span>'); }
 
-      // Who made it: names that open the person's page.
-      var cr = V.$('.tp-credits', view);
-      if (cr && (m.crew || []).length) {
+      var showTab = view._tpShowTab || function () {};
+      var link = function (c) { return '<a href="' + personHref(c, m.people) + '">' + V.esc(c.name) + '</a>'; };
+      // Who made it: names that open the person's page — all of them on the Cast tab, the first under the story.
+      if ((m.crew || []).length) {
         var by = {}, order = [];
         m.crew.forEach(function (c) { if (!by[c.job]) { by[c.job] = []; order.push(c.job); } by[c.job].push(c); });
         var plural = { Director: 'Directors', Writer: 'Writers', Creator: 'Created by', Music: 'Music', Photography: 'Photography', Book: 'From the book by' };
-        var lines = order.map(function (job) {
+        var crew = V.$('.tp-crew', view);
+        if (crew) crew.innerHTML = '<dl class="facts tp-crew-l">' + order.map(function (job) {
           var l = by[job];
-          return '<div><b>' + V.esc(job === 'Creator' || job === 'Book' || job === 'Music' || job === 'Photography' ? plural[job] : l.length > 1 ? plural[job] : job) + ':</b> ' + l.map(function (c) { return '<a href="' + personHref(c, m.people) + '">' + V.esc(c.name) + '</a>'; }).join(', ') + '</div>';
-        }).join('');
-        // (In place of the one line of names there was: "Director: …" / "Created by: …".)
-        var old = V.$$('.tp-credits > div', view).filter(function (x) { return /^(Director|Created by):/.test(x.textContent); })[0];
-        if (old) old.outerHTML = lines; else cr.insertAdjacentHTML('afterbegin', lines);
+          return '<div><dt>' + V.esc(job === 'Creator' || job === 'Book' || job === 'Music' || job === 'Photography' ? plural[job] : l.length > 1 ? plural[job] : job) + '</dt><dd>' + l.map(link).join(', ') + '</dd></div>';
+        }).join('') + '</dl>';
+        var lead = by.Creator || by.Director;
+        var made = V.$('.tp-made', view);
+        if (lead) {
+          var mh = '<span class="tp-made">' + (by.Creator ? 'Created by ' : 'Directed by ') + lead.slice(0, 2).map(link).join(', ') + '</span>';
+          var cr0 = V.$('.tp-credits', view);
+          if (made) made.outerHTML = mh; else if (cr0) cr0.insertAdjacentHTML('afterbegin', mh + (cr0.children.length ? '<span class="dot-sep"></span>' : ''));
+        }
+        showTab('cast', true);
       }
-      // A series whose episodes may be in another order than TMDB's usual.
-      if (cr && isShow && m.order !== undefined && !S.profile.kids && !V.$('[data-order]', cr)) {
-        var fix = V.$('.tp-fix', cr);
-        var ob = document.createElement('div');
+      // A series whose episodes may be in another order than TMDB's usual: said by the episode list.
+      var ob = V.$('.tp-order', view);
+      if (ob && isShow && m.order !== undefined && !S.profile.kids && !V.$('[data-order]', ob)) {
         ob.innerHTML = '<button class="linkish" data-order>' + (m.order ? 'Episodes shown in another order · change' : 'Episodes in the wrong order?') + '</button>';
-        cr.insertBefore(ob, fix || null);
         V.$('[data-order]', ob).onclick = function () { V.episodeOrder(it); };
       }
 
-      var host = V.$('.tp-extra', view);
-      if (!host) return;
-      var html = '';
-      // The cast, with faces.
-      if ((m.cast || []).length) {
-        html += '<section class="tp-cast"><h2>Cast</h2><ul class="pc-row">' + m.cast.map(function (c) {
+      // The cast, with faces (in place of the provider's names).
+      var castHost = V.$('.tp-cast-host', view);
+      if ((m.cast || []).length && castHost) {
+        castHost.innerHTML = '<section class="tp-cast"><h2 class="sr-only">Cast</h2><ul class="pc-grid">' + m.cast.map(function (c) {
           return '<li><a class="pc" href="' + personHref(c, m.people) + '"><span class="pc-face" style="--tint:' + V.tint(c.name) + '">' + faceHtml(c) + '</span><span class="pc-n">' + V.esc(c.name) + '</span>' +
             (c.as ? '<span class="pc-as">' + V.esc(c.as) + '</span>' : '') + (c.n ? '<span class="pc-as">' + V.plural(c.n, 'episode') + '</span>' : '') + '</a></li>';
         }).join('') + '</ul></section>';
-        var plain = V.$$('.tp-credits > div', view).filter(function (x) { return /^Cast:/.test(x.textContent); })[0];
-        if (plain) plain.hidden = true;
+        var star = V.$('.tp-star', view), sh = '<span class="tp-star">Starring ' + m.cast.slice(0, 3).map(link).join(', ') + '</span>';
+        var cr1 = V.$('.tp-credits', view);
+        if (star) star.outerHTML = sh; else if (cr1) cr1.insertAdjacentHTML('beforeend', (cr1.children.length ? '<span class="dot-sep"></span>' : '') + sh);
+        showTab('cast', true, m.cast.length);
       }
-      // Facts.
+      // Facts, on the Details tab after the basics (title.js draws them together).
       var f = m.facts || {}, rows = [];
-      var row = function (k, v) { if (v) rows.push('<div><dt>' + k + '</dt><dd>' + v + '</dd></div>'); };
+      var row = function (k, v) { if (v) rows.push([k, v]); };
       row('Status', V.esc(f.status || ''));
       row('Original title', f.original ? V.esc(f.original) + (f.lang && V.langName(f.lang) && V.langName(f.lang) !== f.lang ? ' <span class="dim">(' + V.esc(V.langName(f.lang)) + ')</span>' : '') : '');
       if (!f.original && f.lang && f.lang !== 'en') row('Original language', V.esc(V.langName(f.lang) || f.lang));
@@ -111,24 +116,24 @@
       if (f.site) links.push('<a href="' + V.esc(f.site) + '" target="_blank" rel="noopener noreferrer">Official site</a>');
       if (m.imdb) links.push('<a href="https://www.imdb.com/title/' + V.esc(m.imdb) + '/" target="_blank" rel="noopener noreferrer">IMDb</a>');
       if (!S.profile.kids) row('Links', links.join(' · '));
-      if (rows.length) html += '<section class="tp-facts"><h2>Details</h2><dl class="facts">' + rows.join('') + '</dl></section>';
+      view._tpFacts = rows;
+      if (view._tpDrawFacts) view._tpDrawFacts();
       // What viewers wrote.
-      if ((m.reviews || []).length) {
-        html += '<section class="tp-reviews"><h2>What viewers wrote</h2><p class="dim small">From people on TMDB. They may give the story away.</p>' + m.reviews.map(function (r, i) {
+      var host = V.$('.tp-reviews-host', view);
+      if ((m.reviews || []).length && host) {
+        host.innerHTML = '<section class="tp-reviews"><h2 class="sr-only">What viewers wrote</h2><p class="dim small">From people on TMDB. They may give the story away.</p>' + m.reviews.map(function (r, i) {
           var long = r.text.length > 420;
           return '<article class="rv"><div class="rv-h"><b>' + V.esc(r.by) + '</b>' + (r.stars ? '<span class="rv-s">★ ' + r.stars + '<span class="dim">/10</span></span>' : '') + (r.at ? '<span class="dim">' + V.esc(date(r.at)) + '</span>' : '') + '</div>' +
             '<p class="rv-t' + (long ? ' clamped' : '') + '" id="rv' + i + '">' + V.esc(r.text).replace(/\n+/g, '<br>') + '</p>' + (long ? '<button class="linkish" data-rv="' + i + '" aria-expanded="false" aria-controls="rv' + i + '">Read it all</button>' : '') + '</article>';
         }).join('') + '</section>';
+        host.onclick = function (e) {
+          var b = e.target.closest('[data-rv]');
+          if (!b) return;
+          var t = V.$('#rv' + b.getAttribute('data-rv'), host), open = t.classList.toggle('clamped') === false;
+          b.textContent = open ? 'Show less' : 'Read it all'; b.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+        showTab('reviews', true, m.reviews.length);
       }
-      host.innerHTML = html;
-      host.onclick = function (e) {
-        var b = e.target.closest('[data-rv]');
-        if (!b) return;
-        var t = V.$('#rv' + b.getAttribute('data-rv'), host), open = t.classList.toggle('clamped') === false;
-        b.textContent = open ? 'Show less' : 'Read it all'; b.setAttribute('aria-expanded', open ? 'true' : 'false');
-      };
-      var pr = V.$('.pc-row', host);
-      if (pr && V.rowDrag) V.rowDrag(pr);
     }).catch(function () {});
   };
 

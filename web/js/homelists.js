@@ -387,13 +387,19 @@
     return { on: !muted && (explicit || autoFollow(sk)), explicit: explicit, muted: muted, auto: autoFollow(sk) };
   };
   var bellLabel = function (on) { return on ? 'Alerts for new episodes are on' : 'Get an alert for new episodes'; };
-  V.bellButton = function (it) {
+  V.bellButton = function (it, pill) {
     if (it.t !== 'show') return '';
     var st = FOLLOW.pid === S.profile.id ? stateOf(it.k) : { on: autoFollow(it.k) };
     if (FOLLOW.pid !== S.profile.id || Date.now() - FOLLOW.at > 10 * 60e3) loadFollow().then(function () { var b = V.$('[data-a=bell]'); if (b) paint(b, stateOf(it.k).on); }).catch(function () {});
+    // (pill: with its name beside it — a title's page.)
+    if (pill) return '<button type="button" class="tp-pill" data-a="bell" aria-pressed="' + st.on + '" title="' + bellLabel(st.on) + '">' + V.icon(st.on ? 'bellf' : 'bell') + '<span>' + (st.on ? 'Alerts on' : 'Alerts') + '</span></button>';
     return '<button class="icon-btn lg" data-a="bell" aria-pressed="' + st.on + '" title="' + bellLabel(st.on) + '" aria-label="' + bellLabel(st.on) + '">' + V.icon(st.on ? 'bellf' : 'bell') + '</button>';
   };
-  function paint(b, on) { b.innerHTML = V.icon(on ? 'bellf' : 'bell'); b.setAttribute('aria-pressed', String(on)); b.title = bellLabel(on); b.setAttribute('aria-label', bellLabel(on)); }
+  function paint(b, on) {
+    b.setAttribute('aria-pressed', String(on)); b.title = bellLabel(on);
+    if (b.classList.contains('tp-pill')) { b.innerHTML = V.icon(on ? 'bellf' : 'bell') + '<span>' + (on ? 'Alerts on' : 'Alerts') + '</span>'; return; }
+    b.innerHTML = V.icon(on ? 'bellf' : 'bell'); b.setAttribute('aria-label', bellLabel(on));
+  }
   V.toggleBell = function (it, b) {
     loadFollow().then(function () {
       var st = stateOf(it.k);

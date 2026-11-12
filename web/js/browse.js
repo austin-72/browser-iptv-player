@@ -43,19 +43,53 @@ V.browseMemo = function (key, fn) {
   return m[key];
 };
 
+// Movies and Series: the categories in a list down the side (as on Live TV), the titles of the one chosen beside it,
+// with the filters that are on shown as chips, a sort, and letters to jump to when it's A–Z. On a phone the list is
+// a button at the top that opens it.
+
+/** "For you": what's in progress, My List, recommendations and what hasn't been watched yet — this profile's own. */
+var forYouGroups = function (type) {
+  var only = function (list) {
+    var seen = new Set(), out = [];
+    list.forEach(function (x) { if (x && x.t === 'episode') x = V.showOf(x); if (x && x.t === type && !seen.has(x.k) && !V.inList('hidden', x.k)) { seen.add(x.k); out.push(x); } });
+    return out;
+  };
+  return [
+    { v: '__cw', l: 'Continue watching', empty: 'Nothing started yet.', items: function () { return only(V.continueWatching().map(function (c) { return c.it; })); } },
+    { v: '__list', l: 'My List', empty: 'Nothing in My List yet.', items: function () { return only(V.myListOrdered ? V.myListOrdered() : (S.data.list || []).map(V.entry)); } },
+    { v: '__recs', l: 'Recommended', empty: 'Recommendations come once something has been watched.', items: function () {
+      var r = S.recs || {}, keys = (r.top || []).slice();
+      (r.rows || []).forEach(function (row) { keys = keys.concat(row.keys || []); });
+      return only(keys.map(V.entry));
+    } },
+    { v: '__unw', l: 'Not watched yet', empty: 'You’ve started everything here.', items: function () {
+      var d = S.data || {}, prog = d.progress || {}, hist = d.history || [];
+      return V.browseMemo('unw|' + type + '|' + Object.keys(prog).length + '|' + hist.length + '|' + (hist[0] ? hist[0].at : 0), function () {
+        var seen = new Set(), k;
+        for (k in prog) { seen.add(k); if (prog[k].sk) seen.add(prog[k].sk); }
+        hist.forEach(function (h) { seen.add(h.k); if (h.sk) seen.add(h.sk); });
+        return (type === 'movie' ? S.movies : S.shows).filter(function (x) { return !seen.has(x.k); });
+      });
+    } },
+  ];
+};
+// (Kinds of category shown open; the rest are one line each until opened — there can be hundreds of studios.)
+var LIB_OPEN = { top: 1, net: 1, genre: 1, prov: 1 };
+var LIB_FIRST = { net: 6, genre: 8 }; // (open kinds with many: the biggest few, then "All 84")
+var LETTERS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
 function vodPage(view, r, type, title) {
   var all = type === 'movie' ? S.movies : S.shows;
+  var noun = type === 'movie' ? 'movies' : 'series', noun1 = type === 'movie' ? 'movie' : 'series';
   var g = r.q.get('g') || '';
   var genre = r.q.get('genre') || '';
   var sort = r.q.get('sort') || (V.ls.get('sort.' + type) || 'default');
   var smart = V.smart && V.smart.on();
   var groups = V.groupList(type);
+  var mine = forYouGroups(type);
+  var mineCur = mine.filter(function (x) { return x.v === g; })[0] || null;
   var chart = g.indexOf('tr:') === 0; // (TMDB's charts: in their own order)
-  var genres = V.browseMemo('genres|' + type + '|' + g, function () {
-    var out = [];
-    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || V.inGroup(list[i], g))) n++; if (n >= 1) out.push({ name: name, n: n }); });
-    return out.sort(function (a, b) { return b.n - a.n; });
-  });
+  var curGroup = groups.filter(function (x) { return x.name === g; })[0] || null;
   var hidden = new Set(S.data.hidden);
   var dec = r.q.get('dec') || '', minR = +(r.q.get('rmin') || 0), maxLen = +(r.q.get('len') || 0);
   var decOk = function (x) {
@@ -67,35 +101,167 @@ function vodPage(view, r, type, title) {
   };
   var lenOk = function (x) { if (!maxLen || type !== 'movie') return true; if (!x.d) return false; return maxLen > 0 ? x.d <= maxLen * 60 : x.d >= -maxLen * 60; };
   // (Sorted once, then filtered: the same order as filtering first, as the sorts keep ties in catalogue order.)
-  // (Suggested: a chart's own order; with smarter categories, what's popular worldwide first; otherwise A–Z.)
-  var sortBy = sort === 'default' ? (chart ? 'rank' : g || genre ? (smart ? 'pop' : 'az') : 'new') : sort;
-  var base = g ? V.groupItems(type, g) : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
-  var sorted = V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy + (chart ? '|' + V.smart.trendAt() : ''), function () { return sortBy === 'rank' ? base : V.sortItems(base, sortBy); });
-  var items = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || V.inGroup(x, g)) && (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
+  // (Suggested: a chart's own order, and For you's; with smarter categories, what's popular worldwide first; otherwise A–Z.)
+  var sortBy = sort === 'default' ? (chart || mineCur ? 'rank' : g || genre ? (smart ? 'pop' : 'az') : 'new') : sort;
+  var base = mineCur ? mineCur.items() : g ? V.groupItems(type, g) : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
+  var sorted = mineCur ? (sortBy === 'rank' ? base : V.sortItems(base, sortBy)) : V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy + (chart ? '|' + V.smart.trendAt() : ''), function () { return sortBy === 'rank' ? base : V.sortItems(base, sortBy); });
+  var inCat = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || mineCur || V.inGroup(x, g)); });
+  var items = inCat.filter(function (x) { return (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
   if (chart && V.smart) V.smart.loadTrend();
+  if (g === '__recs' && !S.recs && V.loadRecs) V.loadRecs().then(function () { if (S.recs && document.body.dataset.page === r.name && new URLSearchParams(location.hash.split('?')[1] || '').get('g') === '__recs') V.router.refresh(); });
   var setQ = function (k, v) { var q = new URLSearchParams(r.q); if (v) q.set(k, v); else q.delete(k); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
-  view.innerHTML = V.pageHead(title, '<div class="page-tools">' +
-    '<label class="sel"><span class="sr-only">Category</span><select class="input" data-f="g"><option value="">All categories</option>' + V.groupOptions(groups, g) + '</select></label>' +
-    (genres.length ? '<label class="sel"><span class="sr-only">Genre</span><select class="input" data-f="genre"><option value="">All genres</option>' + genres.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).map(function (x) { return '<option value="' + V.esc(x.name) + '"' + (x.name === genre ? ' selected' : '') + '>' + V.esc(x.name) + ' (' + x.n + ')</option>'; }).join('') + '</select></label>' : '') +
-    '<label class="sel"><span class="sr-only">Years</span><select class="input" data-f="dec">' + [['', 'Any year'], ['new', 'Last 2 years'], ['2020', '2020s'], ['2010', '2010s'], ['2000', '2000s'], ['1990', '1990s'], ['1980', '1980s'], ['1970', '1970s'], ['old', 'Before 1970']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === dec ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
-    '<label class="sel"><span class="sr-only">Rating</span><select class="input" data-f="rmin">' + [['', 'Any rating'], ['6', '★ 6+'], ['7', '★ 7+'], ['8', '★ 8+']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(minR || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
-    (type === 'movie' ? '<label class="sel"><span class="sr-only">Length</span><select class="input" data-f="len">' + [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === String(maxLen || '') ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' : '') +
-    '<label class="sel"><span class="sr-only">Sort</span><select class="input" data-f="sort">' + [['default', chart ? 'Chart order' : 'Suggested'], ['pop', 'Popular worldwide'], ['new', 'Newest'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
-    (g ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to home</button>' : '') +
-    '<a class="btn sm" href="#/trailers?t=' + (type === 'show' ? 'show' : 'movie') + '">' + V.icon('film') + ' Trailers</a></div>') +
-    // (No row of genre buttons as well: the Genre list above does the same, and the page starts sooner. With smarter
-    // categories: the charts, the holiday in season and the big services, one tap away.)
-    (smart ? V.smart.chips(type, g, r.name) : '') +
-    '<p class="count dim">' + V.plural(items.length, type === 'movie' ? 'movie' : 'series', type === 'movie' ? 'movies' : 'series') + (g || genre || dec || minR || maxLen ? ' · <button class="linkish" data-clear-f>Clear filters</button>' : '') + '</p><div class="grid-host"></div>';
+  var hrefG = function (v) { var q = new URLSearchParams(); if (v) q.set('g', v); var s2 = r.q.get('sort'); if (s2) q.set('sort', s2); return '#/' + r.name + (q.toString() ? '?' + q : ''); };
+  // Categories chosen lately (the phone's quick picks).
+  var recentKey = 'libRecent.' + type, recent = V.ls.get(recentKey, []) || [];
+  if (g && recent[0] !== g) { recent = [g].concat(recent.filter(function (x) { return x !== g; })).slice(0, 6); V.ls.set(recentKey, recent); }
+
+  // ---- the list of categories
+  var item = function (v, label, n) {
+    var on = v === g;
+    return '<a class="grp lib-i' + (on ? ' on' : '') + '" href="' + hrefG(v) + '"' + (on ? ' aria-current="page"' : '') + '><span class="truncate">' + V.esc(label) + '</span>' + (n !== undefined && n !== '' ? '<small>' + (typeof n === 'number' ? n.toLocaleString() : n) + '</small>' : '') + '</a>';
+  };
+  var kinds = [], byKind = {};
+  groups.forEach(function (x) { var k = x.kind || 'prov'; if (!byKind[k]) { byKind[k] = []; kinds.push(k); } byKind[k].push(x); });
+  var kindName = function (k) { return smart ? V.smart.kindName(k) || 'More' : 'Categories'; };
+  var open = V.ls.get('libOpen.' + type, {}) || {};
+  var mineN = mine.map(function (x) { return x.v === '__recs' && !S.recs ? '' : x.items().length; });
+  var kindHtml = function (k) {
+      var list = byKind[k], has = curGroup && (curGroup.kind || 'prov') === k;
+      var isOpen = open[k] !== undefined ? !!open[k] : !!(LIB_OPEN[k] || has);
+      var first = LIB_FIRST[k], full = open[k + '+'] || has && first && list.slice().sort(function (a, b) { return b.items.length - a.items.length; }).slice(0, first).indexOf(curGroup) < 0;
+      var shown = isOpen ? (first && !full && list.length > first + 2 ? list.slice().sort(function (a, b) { return b.items.length - a.items.length; }).slice(0, first) : list) : [];
+      return '<div class="lib-kind" data-kind="' + V.esc(k) + '"><button type="button" class="grp-h lib-kh" aria-expanded="' + isOpen + '" data-kind-t="' + V.esc(k) + '"><span>' + V.esc(kindName(k)) + '</span><small>' + list.length + '</small>' + V.icon('next', 'lib-chev') + '</button>' +
+        (isOpen ? shown.map(function (x) { return item(x.name, x.label, x.items.length); }).join('') + (shown.length < list.length ? '<button type="button" class="grp lib-all" data-all="' + V.esc(k) + '"><span>All ' + list.length + '</span></button>' : '') : '') + '</div>';
+  };
+  var rail = item('', 'All ' + noun, all.length) +
+    '<div class="grp-h">For you</div>' + mine.map(function (x, i) { return item(x.v, x.l, mineN[i]); }).join('') +
+    kinds.map(kindHtml).join('');
+
+  // ---- what's chosen, and the filters on it
+  var label = mineCur ? mineCur.l : curGroup ? curGroup.label : g ? (V.smart && V.smart.isId(g) ? V.smart.label(g, type) : g) : genre ? genre : 'All ' + noun;
+  var crumb = mineCur ? 'For you' : curGroup ? kindName(curGroup.kind || 'prov') : genre ? 'Genre' : '';
+  var genres = V.browseMemo('genres|' + type + '|' + g, function () {
+    var out = [];
+    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || g.indexOf('__') === 0 || V.inGroup(list[i], g))) n++; if (n >= 1) out.push({ name: name, n: n }); });
+    return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  });
+  var DEC = [['', 'Any year'], ['new', 'Last 2 years'], ['2020', '2020s'], ['2010', '2010s'], ['2000', '2000s'], ['1990', '1990s'], ['1980', '1980s'], ['1970', '1970s'], ['old', 'Before 1970']];
+  var RAT = [['', 'Any rating'], ['6', '★ 6+'], ['7', '★ 7+'], ['8', '★ 8+']];
+  var LEN = [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']];
+  var nameOf = function (list, v) { var o = list.filter(function (x) { return x[0] === String(v || ''); })[0]; return o ? o[1] : v; };
+  var chips = [];
+  if (genre) chips.push(['genre', 'Genre: ' + genre]);
+  if (dec) chips.push(['dec', nameOf(DEC, dec)]);
+  if (minR) chips.push(['rmin', nameOf(RAT, minR)]);
+  if (maxLen && type === 'movie') chips.push(['len', nameOf(LEN, maxLen)]);
+  var filtered = genre || dec || minR || maxLen;
+  var SORTS = [['default', chart ? 'Chart order' : mineCur ? 'Their own order' : 'Suggested'], ['pop', 'Popular worldwide'], ['new', 'Newest here'], ['az', 'A–Z'], ['za', 'Z–A'], ['year', 'Release year'], ['rating', 'Rating'], ['genre', 'Genre']];
+  var az = sortBy === 'az' || sortBy === 'za';
+  var canPin = g && !mineCur;
+  var catBtn = '<button type="button" class="lib-catbtn" data-cats aria-haspopup="dialog"><span class="lib-cb-t"><small>' + V.esc(crumb || title) + '</small><b>' + V.esc(label) + ' <span class="dim">· ' + inCat.length.toLocaleString() + '</span></b></span><span class="lib-cb-all">All categories</span>' + V.icon('next', 'lib-chev') + '</button>' +
+    (recent.length > 1 ? '<div class="lib-recent" role="group" aria-label="Lately"><span class="dim small">Lately</span>' + recent.filter(function (x) { return x !== g; }).slice(0, 5).map(function (x) {
+      var m = mine.filter(function (y) { return y.v === x; })[0], gg = groups.filter(function (y) { return y.name === x; })[0];
+      var l = m ? m.l : gg ? gg.label : V.smart && V.smart.isId(x) ? V.smart.label(x, type) : x;
+      return '<a class="chip sm" href="' + hrefG(x) + '">' + V.esc(l) + '</a>';
+    }).join('') + '</div>' : '');
+  view.innerHTML = '<div class="lib" data-type="' + type + '">' +
+    '<nav class="lib-side groups" aria-label="' + V.esc(title) + ' categories"><label class="lib-find">' + V.icon('search') + '<input type="search" class="input" data-cat-find placeholder="Find a category" aria-label="Find a category"></label><div class="lib-list">' + rail + '</div></nav>' +
+    '<div class="lib-main">' + catBtn +
+    '<div class="lib-crumb dim">' + V.esc(title) + (crumb ? ' › ' + V.esc(crumb) : '') + '</div>' +
+    '<header class="lib-h"><h1>' + V.esc(label) + '</h1><span class="lib-count dim">' + (filtered ? items.length.toLocaleString() + ' of ' + V.plural(inCat.length, noun1, noun) : V.plural(items.length, noun1, noun)) + '</span></header>' +
+    '<div class="lib-tools">' + chips.map(function (c) { return '<button type="button" class="chip on lib-chip" data-unf="' + c[0] + '" aria-label="Remove filter: ' + V.esc(c[1]) + '">' + V.esc(c[1]) + V.icon('x') + '</button>'; }).join('') +
+    '<button type="button" class="chip lib-addf" data-addf>' + V.icon('plus') + ' Filter</button>' + (filtered ? '<button type="button" class="linkish" data-clear-f>Clear filters</button>' : '') + '<span class="sp"></span>' +
+    '<label class="lib-sort"><span aria-hidden="true">Sort</span><select class="input" data-f="sort" aria-label="Sort">' + SORTS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+    (canPin ? '<button class="btn sm" data-pin-g>' + V.icon('pin') + ' Pin to Home</button>' : '') +
+    '<a class="btn sm" href="#/trailers?t=' + (type === 'show' ? 'show' : 'movie') + '">' + V.icon('film') + ' Trailers</a></div>' +
+    '<div class="lib-body"><div class="grid-host"></div>' + (az && items.length > 30 ? '<nav class="lib-az" aria-label="Jump to a letter"></nav>' : '') + '</div></div></div>';
+
+  // ---- the list: finding a category, opening a kind, "All 84"
+  var side = V.$('.lib-side', view);
+  var saveOpen = function (k, v) { open[k] = v; V.ls.set('libOpen.' + type, open); };
+  // Opening or closing a kind, or "All 84": that kind drawn again where it is (the focus stays on it).
+  var kindClick = function (e) {
+    var kh = e.target.closest('[data-kind-t]'), al = e.target.closest('[data-all]');
+    if (!kh && !al) return;
+    var k = kh ? kh.dataset.kindT : al.dataset.all;
+    if (kh) saveOpen(k, kh.getAttribute('aria-expanded') !== 'true'); else saveOpen(k + '+', true);
+    var box = (kh || al).closest('.lib-kind'), tmp = document.createElement('div');
+    tmp.innerHTML = kindHtml(k);
+    box.parentNode.replaceChild(tmp.firstChild, box);
+    var again = V.$('[data-kind="' + k + '"]', e.currentTarget);
+    var f = again && (al ? V.$$('.lib-i', again)[LIB_FIRST[k] || 0] : V.$('[data-kind-t]', again));
+    if (f) f.focus();
+  };
+  side.addEventListener('click', kindClick);
+  var findIn = function (box, q) {
+    q = V.norm ? V.norm(q) : q.toLowerCase();
+    // (Every category of every kind is searched, opened or not.)
+    var html = mine.map(function (x) { return { name: x.v, label: x.l }; }).concat(groups).filter(function (x) { return (V.norm ? V.norm(x.label) : x.label.toLowerCase()).indexOf(q) >= 0; }).slice(0, 80).map(function (x) { return item(x.name, x.label, x.items ? x.items.length : ''); }).join('');
+    var res = V.$('.lib-found', box);
+    if (!res) { res = document.createElement('div'); res.className = 'lib-found'; var ll = V.$('.lib-list', box); ll.parentNode.insertBefore(res, ll); }
+    res.innerHTML = html || '<p class="dim small">No category by that name.</p>';
+  };
+  var wireFind = function (box) {
+    var inp = V.$('[data-cat-find]', box);
+    if (!inp) return;
+    inp.addEventListener('input', V.debounce(function () {
+      var q = inp.value.trim(), list = V.$('.lib-list', box);
+      list.hidden = !!q;
+      var res = V.$('.lib-found', box);
+      if (!q) { if (res) res.remove(); return; }
+      findIn(box, q);
+    }, 120));
+  };
+  wireFind(side);
+
+  // ---- the phone's button: the same list in a sheet
+  var cb = V.$('[data-cats]', view);
+  cb.onclick = function () {
+    V.dialog({ title: title + ' categories', cls: 'lib-sheet', body: '<label class="lib-find">' + V.icon('search') + '<input type="search" class="input" data-cat-find placeholder="Find a category" aria-label="Find a category"></label><div class="lib-list">' + rail.replace('aria-current="page"', 'aria-current="page" autofocus') + '</div>',
+      onOpen: function (d) {
+        wireFind(d);
+        d.addEventListener('click', kindClick);
+        // (The one chosen in view.)
+        var on = V.$('.lib-i.on', d); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'center' });
+      } });
+  };
+
+  // ---- filters
   V.$$('[data-f]', view).forEach(function (s) { s.onchange = function () { if (s.dataset.f === 'sort') V.ls.set('sort.' + type, s.value); setQ(s.dataset.f, s.value === 'default' ? '' : s.value); }; });
-  V.$$('[data-genre]', view).forEach(function (b) { b.onclick = function () { setQ('genre', b.dataset.genre); }; });
+  V.$$('[data-unf]', view).forEach(function (b) { b.onclick = function () { setQ(b.dataset.unf, ''); }; });
   var cf = V.$('[data-clear-f]', view);
-  if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['g', 'genre', 'dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
+  if (cf) cf.onclick = function () { var q = new URLSearchParams(r.q); ['genre', 'dec', 'rmin', 'len'].forEach(function (k) { q.delete(k); }); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
+  V.$('[data-addf]', view).onclick = function () {
+    var sel = function (k, lbl, opts, cur) { return '<label class="field"><span>' + lbl + '</span><select class="input" data-ff="' + k + '">' + opts.map(function (o) { return '<option value="' + V.esc(o[0]) + '"' + (String(o[0]) === String(cur || '') ? ' selected' : '') + '>' + V.esc(o[1]) + '</option>'; }).join('') + '</select></label>'; };
+    V.dialog({ title: 'Filter ' + label, body: '<div class="lib-ff">' +
+      (genres.length ? sel('genre', 'Genre', [['', 'Any genre']].concat(genres.map(function (x) { return [x.name, x.name + ' (' + x.n + ')']; })), genre) : '') +
+      sel('dec', 'Years', DEC, dec) + sel('rmin', 'Rating', RAT, minR || '') + (type === 'movie' ? sel('len', 'Length', LEN, maxLen || '') : '') + '</div>',
+      actions: [{ label: 'Cancel' }, { label: 'Show them', primary: true, fn: function (d) {
+        var q = new URLSearchParams(r.q);
+        V.$$('[data-ff]', d).forEach(function (s) { if (s.value) q.set(s.dataset.ff, s.value); else q.delete(s.dataset.ff); });
+        setTimeout(function () { V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); }, 0);
+      } }] });
+  };
   var pin = V.$('[data-pin-g]', view);
   if (pin) pin.onclick = function () { var id = type + '|' + g; if (S.data.home.pinned.indexOf(id) < 0) { S.data.home.pinned.push(id); V.saveHome(); } V.toast('Pinned to your home page'); };
-  if (g && V.smart && V.smart.isId(g)) { var h1 = V.$('h1', view); if (h1) h1.textContent = title + ': ' + V.smart.label(g, type); }
   if (!all.length) { V.$('.grid-host', view).innerHTML = V.empty('No ' + title.toLowerCase() + ' yet', 'None of the lists have any, or your language settings hide them.', '<div class="btn-row empty-acts"><a class="btn" href="#/settings">Language settings</a></div>'); return; }
-  V.grid(V.$('.grid-host', view), items, { empty: 'Nothing matches.' });
+  var grid = V.grid(V.$('.grid-host', view), items, { empty: mineCur ? mineCur.empty : 'Nothing matches.' });
+
+  // ---- letters to jump to (A–Z): the first title under each; letters with none can't be picked
+  var azEl = V.$('.lib-az', view);
+  if (azEl && grid) {
+    var firstAt = {};
+    items.forEach(function (x, i) { var c = V.norm ? V.norm(x.n).charAt(0).toUpperCase() : String(x.n).charAt(0).toUpperCase(); if (!/[A-Z]/.test(c)) c = '#'; if (firstAt[c] === undefined) firstAt[c] = i; });
+    azEl.innerHTML = (sortBy === 'za' ? LETTERS.slice().reverse() : LETTERS).map(function (c) { return firstAt[c] === undefined ? '<span class="lib-az-x" aria-hidden="true">' + c + '</span>' : '<button type="button" data-az="' + c + '" aria-label="' + (c === '#' ? 'Numbers and symbols' : c) + '">' + c + '</button>'; }).join('');
+    azEl.onclick = function (e) {
+      var b = e.target.closest('[data-az]');
+      if (!b) return;
+      var i = firstAt[b.dataset.az];
+      if (grid._upTo) grid._upTo(i + 20);
+      var card = grid.children[i];
+      if (card) { card.scrollIntoView({ block: 'start', behavior: V.reduceMotion && V.reduceMotion() ? 'auto' : 'smooth' }); card.focus({ preventScroll: true }); }
+    };
+  }
 }
 V.route('movies', function (view, r) { vodPage(view, r, 'movie', 'Movies'); });
 V.route('series', function (view, r) { vodPage(view, r, 'show', 'Series'); });

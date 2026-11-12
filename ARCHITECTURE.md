@@ -40,6 +40,7 @@ Three tables in `server.js` decide, at the one place requests are matched to rou
 | **Film and series details** | `tmdb.js` · recommendations: `recs.js` · Home rows from TMDB lists: `homelists.js` · Wishlist: `wishlist.js` · a Letterboxd or IMDb watchlist file into it: `watchlist-import.js` |
 | **Playing** | how a browser can reach a stream itself: `reach.js` · passing a stream through: `proxy.js` · converting with ffmpeg (HLS sessions, probing, thumbnails): `media.js` · one connection shared by a watch party: `fanout.js` · the stream relay's side here: `streamrelay.js` · outgoing connections and proxies: `net.js` |
 | **More from TMDB, on demand** | a title's logo, cast with photos, facts, release dates and reviews; people; episode orders; rows made by choosing: `tmdbmore.js`, `routes-p14.js` · in the browser: `titlemore.js` |
+| **More like this** | everything here alike to a title (TMDB's own picks, then genres, makers, cast, language, decade), and what's like those: `alike.js`, `routes-p15.js` · in the browser: `title.js` |
 | **Subtitles** | found online: `subtitles.js`, `subsources.js`; what a listing is, read from its name and comment: `subnames.js`; the right episode, the video's length and lining a file up with the sound: `subcheck.js` · picture subtitles (PGS, VobSub, DVB): `picsubs.js` · made from a film's sound by an optional whisper on the server: `subgen.js` (the program for a Docker install is built by `tools/whisper`) |
 | **Skip intro / credits** | `intro.js`, `markers.js` |
 | **Recording** | `dvr.js` |

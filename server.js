@@ -3382,6 +3382,8 @@ require('./lib/routes-p14')({
   byTmdb: (t, id) => trending._index().m.get(t + id) || [],
 });
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p13.publicFlags() }); }
+// [routes:p15] Titles alike, for "More like this" on a title's page (and more like those).
+require('./lib/routes-p15')({ route, requireProfile, readJSON, HttpError, catalog: () => catalog, recs, tmdb, userdata });
 // [routes:p7] The play queue (per profile, synced between its devices).
 require('./lib/routes-p7')({ route, requireProfile, readJSON, HttpError, userdata, hub, catalog: () => catalog });
 // [routes:p9] Channel health (dead channels, uptime, background checks) and finding guides and logos in public databases.
