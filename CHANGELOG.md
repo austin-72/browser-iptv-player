@@ -3,6 +3,13 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.3
+
+- **Category headings in the accent colour everywhere:** Admin's sections (Status, Lists & channels, Viewing…) and its
+  profile settings, the category lists of Live TV and Radio, the phone's category button and the player's menu — a
+  little towards the text colour, so they stay readable in every theme.
+- **The setup guide's card in Admin** is for new installs only: an install from before the setup page doesn't get it.
+
 ## 2.8.2
 
 - **Genres that were nearly empty for series:** TMDB's list of series genres has no Horror, Thriller, Romance,

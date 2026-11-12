@@ -546,7 +546,10 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
   .sg-steps a { white-space: nowrap; padding: .45rem .6rem; }
   .sg-steps a:not(.on) span:not(.sg-n) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 }
-/* The headings in the list of categories (For you, Popular worldwide, Genres…) in the theme's accent colour — a little
-   towards the text colour, so they stay readable on the list's background in every theme. */
-.lib .grp-h, .lib-sheet .grp-h { color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); }
+/* Category headings in the theme's accent colour: the lists of categories (Live TV, Radio, Movies and Series: For you,
+   Popular worldwide, Genres…), Admin's sections (Lists & channels, Status…) and its profile settings, the phone's
+   category button, and the player's menu. A little towards the text colour, so they stay readable on their
+   backgrounds in every theme (pure accent red on the dark themes falls under the 4.5:1 small text needs). */
+.grp-h, .adm-gh, .ap-sec h4, .lib-cb-t small { color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); }
+.vp-menu .mg { color: var(--accent); color: color-mix(in srgb, var(--accent) 60%, #fff); }
 .lib .lib-kh:hover, .lib-sheet .lib-kh:hover { color: var(--text); }

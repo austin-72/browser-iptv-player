@@ -99,7 +99,7 @@ const DEFAULT_SETTINGS = {
   // The server's time zone (for the guide's days, recordings and screen time) when TZ isn't set in the environment:
   // the setup page fills it in from the admin's browser; Admin → Security can change it.
   timeZone: '',
-  setupDone: false, // the setup guide (web/js/setupguide.js) finished or put away
+  setupDone: true, // the setup guide (web/js/setupguide.js) finished or put away (a new install: false from the setup page on)
 };
 const settingsStore = new JsonFile(path.join(D, 'settings.json'), DEFAULT_SETTINGS);
 const settings = () => settingsStore.data;
@@ -768,7 +768,9 @@ route('POST', '/api/setup', async (req, res) => {
   // The admin profile first (its name and PIN are checked there), then the password.
   const prof = accounts.create({ name: b.name, pin: b.pin, avatar: b.avatar }, null, settings());
   accounts.setSitePassword(pw);
-  if (!TZ_FROM_ENV && validTz(b.tz)) { settings().timeZone = String(b.tz); settingsStore.save(); applyTz(); }
+  if (!TZ_FROM_ENV && validTz(b.tz)) { settings().timeZone = String(b.tz); applyTz(); }
+  settings().setupDone = false; // (the setup guide comes next)
+  settingsStore.save();
   const token = accounts.newSession(clientIp(req), req.headers['user-agent']);
   accounts.select(accounts.sessionOf(token), prof.id, String(b.pin || ''), true);
   res.setHeader('Set-Cookie', accounts.cookie(token, secureReq(req)));
