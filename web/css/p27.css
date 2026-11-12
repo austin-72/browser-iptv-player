@@ -553,3 +553,13 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
 .grp-h, .adm-gh, .ap-sec h4, .lib-cb-t small { color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); }
 .vp-menu .mg { color: var(--accent); color: color-mix(in srgb, var(--accent) 60%, #fff); }
 .lib .lib-kh:hover, .lib-sheet .lib-kh:hover { color: var(--text); }
+
+/* Reviews: a sort and "More reviews" (2.8.4). */
+.rv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin: -.4rem 0 .6rem; }
+.rv-bar > p { margin: 0; }
+.rv-bar .sp { flex: 1; }
+.rv-sort { display: inline-flex; align-items: center; gap: .5rem; font-size: .9rem; color: var(--dim); }
+.rv-sort select { width: auto; min-width: 11rem; }
+.rv-more { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; border-top: 1px solid var(--line); padding-top: .9rem; }
+.rv-more .btn .spinner { margin-right: .3rem; }
+@media (max-width: 600px) { .rv-bar .sp { display: none; } .rv-sort { width: 100%; } .rv-sort select { flex: 1; } }

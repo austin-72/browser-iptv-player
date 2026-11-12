@@ -118,23 +118,84 @@
       if (!S.profile.kids) row('Links', links.join(' · '));
       view._tpFacts = rows;
       if (view._tpDrawFacts) view._tpDrawFacts();
-      // What viewers wrote.
+      // What viewers wrote: the first few, sorted as chosen, and more from TMDB a page at a time.
       var host = V.$('.tp-reviews-host', view);
-      if ((m.reviews || []).length && host) {
-        host.innerHTML = '<section class="tp-reviews"><h2 class="sr-only">What viewers wrote</h2><p class="dim small">From people on TMDB. They may give the story away.</p>' + m.reviews.map(function (r, i) {
+      if ((m.reviews || []).length && host) { V.titleReviews(host, it, m); showTab('reviews', true, Math.max(m.reviewCount || 0, m.reviews.length)); }
+    }).catch(function () {});
+  };
+
+  // ---------------------------------------------------------------- what viewers wrote
+  var RV_SORTS = [['tmdb', 'As on TMDB'], ['new', 'Newest first'], ['old', 'Oldest first'], ['high', 'Highest rated first'], ['low', 'Lowest rated first'], ['long', 'Longest first']];
+  var rvSorted = function (list, by) {
+    var a = list.slice(), st = function (r) { return r.stars || 0; };
+    if (by === 'new') a.sort(function (x, y) { return String(y.at).localeCompare(String(x.at)); });
+    else if (by === 'old') a.sort(function (x, y) { return String(x.at).localeCompare(String(y.at)); });
+    // (Reviews with no rating go last either way.)
+    else if (by === 'high') a.sort(function (x, y) { return (!st(x) - !st(y)) || st(y) - st(x); });
+    else if (by === 'low') a.sort(function (x, y) { return (!st(x) - !st(y)) || st(x) - st(y); });
+    else if (by === 'long') a.sort(function (x, y) { return y.text.length - x.text.length; });
+    return a;
+  };
+  /** A title's reviews on its Reviews tab: a sort, "Read it all" on long ones, and "More reviews" until there are no more. */
+  V.titleReviews = function (host, it, m) {
+    var list = (m.reviews || []).slice(), total = m.reviewCount == null ? null : Math.max(m.reviewCount, list.length), page = 0, pages = null, busy = false;
+    var sort = V.ls.get('reviewSort', 'tmdb');
+    if (!RV_SORTS.some(function (x) { return x[0] === sort; })) sort = 'tmdb';
+    var key = function (r) { return r.id || r.by + '|' + r.at + '|' + r.text.slice(0, 40); };
+    // (Not known how many in all — from an older server — when the first six came: perhaps more.)
+    var moreLeft = function () { return pages === null ? (total === null ? list.length >= 6 : total > list.length) : page < pages; };
+    var draw = function (focus) {
+      var shown = rvSorted(list, sort);
+      host.innerHTML = '<section class="tp-reviews"><h2 class="sr-only">What viewers wrote</h2>' +
+        '<div class="rv-bar"><p class="dim small">From people on TMDB. They may give the story away.</p><span class="sp"></span>' +
+        '<label class="rv-sort"><span>Sort</span><select class="input" data-rv-sort>' + RV_SORTS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label></div>' +
+        shown.map(function (r, i) {
           var long = r.text.length > 420;
           return '<article class="rv"><div class="rv-h"><b>' + V.esc(r.by) + '</b>' + (r.stars ? '<span class="rv-s">★ ' + r.stars + '<span class="dim">/10</span></span>' : '') + (r.at ? '<span class="dim">' + V.esc(date(r.at)) + '</span>' : '') + '</div>' +
             '<p class="rv-t' + (long ? ' clamped' : '') + '" id="rv' + i + '">' + V.esc(r.text).replace(/\n+/g, '<br>') + '</p>' + (long ? '<button class="linkish" data-rv="' + i + '" aria-expanded="false" aria-controls="rv' + i + '">Read it all</button>' : '') + '</article>';
-        }).join('') + '</section>';
-        host.onclick = function (e) {
-          var b = e.target.closest('[data-rv]');
-          if (!b) return;
-          var t = V.$('#rv' + b.getAttribute('data-rv'), host), open = t.classList.toggle('clamped') === false;
-          b.textContent = open ? 'Show less' : 'Read it all'; b.setAttribute('aria-expanded', open ? 'true' : 'false');
-        };
-        showTab('reviews', true, m.reviews.length);
-      }
-    }).catch(function () {});
+        }).join('') +
+        '<div class="rv-more">' + (moreLeft() ? '<button class="btn" data-rv-more>' + (busy ? '<span class="spinner sm"></span> ' : '') + 'More reviews</button>' : '') +
+        (list.length > 1 ? '<span class="dim small">' + V.plural(list.length, 'review') + (total > list.length ? ' of ' + total.toLocaleString() : '') + '</span>' : '') + '</div></section>';
+      var f = focus && V.$(focus, host);
+      if (f) f.focus();
+    };
+    var loadMore = function () {
+      if (busy) return;
+      busy = true; draw('[data-rv-more]');
+      var b = V.$('[data-rv-more]', host); if (b) b.disabled = true;
+      var before = list.length;
+      // (TMDB's first page holds the few already shown and up to 20 in all: asked for once, then the next ones.)
+      var want = function () {
+        page++;
+        return V.api('/api/title/' + encodeURIComponent(it.k) + '/reviews?page=' + page).then(function (r) {
+          var seen = new Set(list.map(key));
+          (r.reviews || []).forEach(function (x) { if (!seen.has(key(x))) { seen.add(key(x)); list.push(x); } });
+          pages = r.pages || page; total = Math.max(r.total || 0, list.length);
+          // (Nothing new on this page — only the ones already shown — and another to come: on to it.)
+          if (list.length === before && page < pages) return want();
+        });
+      };
+      want().catch(function (e) { V.toast(e.message, { error: true }); page = Math.max(0, page - 1); }).then(function () {
+        busy = false;
+        if (!document.documentElement.contains(host)) return;
+        // (All of them now: TMDB's count takes in reviews too short to show.)
+        if (pages !== null && page >= pages) total = list.length;
+        draw(moreLeft() ? '[data-rv-more]' : '[data-rv-sort]');
+      });
+    };
+    host.onclick = function (e) {
+      if (e.target.closest('[data-rv-more]')) return loadMore();
+      var b = e.target.closest('[data-rv]');
+      if (!b) return;
+      var t = V.$('#rv' + b.getAttribute('data-rv'), host), open = t.classList.toggle('clamped') === false;
+      b.textContent = open ? 'Show less' : 'Read it all'; b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    host.onchange = function (e) {
+      if (!e.target.matches('[data-rv-sort]')) return;
+      sort = e.target.value; V.ls.set('reviewSort', sort);
+      draw('[data-rv-sort]');
+    };
+    draw();
   };
 
   // ---------------------------------------------------------------- the order of a series' episodes

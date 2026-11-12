@@ -82,6 +82,10 @@ test('a film’s page: logo, tagline, cast and makers, facts, release dates, rev
   assert.strictEqual(t.reviews[0].text, 'I have watched this three times.\n\n Still holds up — see my blog for more words about it and why.');
   assert.ok(t.reviews[1].by === 'Manuel São Bento' && t.reviews[1].text.length <= 2401 && t.reviews[1].text.endsWith('…'));
   assert.strictEqual(M.reviewsOf({ reviews: { results: [{ content: 'y'.repeat(50), url: 'https://evil.example/review/1', author: 'a' }] } })[0].url, '');
+  // A page of reviews on its own (GET /reviews): all of it, each with its id.
+  const page = { results: Array.from({ length: 20 }, (_, i) => ({ id: 'id' + i, author: 'a' + i, content: 'z'.repeat(60) })) };
+  assert.strictEqual(M.reviewsOf(page).length, 6);
+  assert.deepStrictEqual([M.reviewsOf(page, 0).length, M.reviewsOf(page, 0)[19].id], [20, 'id19']);
   assert.deepStrictEqual(t.aka, ['The Matrix 1', 'Матрица', 'Matrix'], 'not its own name again; the US and British ones first');
   assert.strictEqual(M.shapeTitle({ ...FILM, homepage: 'javascript:alert(1)', imdb_id: 'x', external_ids: {} }, { type: 'movie' }).facts.site, '');
   assert.strictEqual(M.shapeTitle({ ...FILM, homepage: 'http://insecure.example', imdb_id: '<b>', external_ids: {} }, { type: 'movie' }).imdb, '');
@@ -202,6 +206,11 @@ function fakeTmdb() {
     if (p === '/search/movie') return send({ results: /matrix/i.test(u.searchParams.get('query')) ? [{ id: 603, title: 'The Matrix', release_date: '1999-03-31' }] : /obscur/i.test(u.searchParams.get('query')) ? [{ id: 900, title: 'Obscura', release_date: '2015-01-01' }] : /toy/i.test(u.searchParams.get('query')) ? [{ id: 862, title: 'Toy Story', release_date: '1995-11-22' }] : [] });
     if (p === '/search/tv') return send({ results: /firefly/i.test(u.searchParams.get('query')) ? [{ id: 1437, name: 'Firefly', first_air_date: '2002-09-20' }] : [] });
     if (p === '/movie/603') return send({ ...FILM, overview: 'A hacker learns the truth.', genres: [{ name: 'Action' }], runtime: 136, vote_average: 8.2 });
+    if (p === '/movie/603/reviews') {
+      const pg = Number(u.searchParams.get('page')) || 1;
+      const more = [1, 2].map((n) => ({ id: 'r' + n, author: 'p' + n, author_details: { rating: n * 4 }, created_at: `2024-0${n}-01T00:00:00.000Z`, content: `Page two review number ${n}, long enough to be shown here.` }));
+      return send({ id: 603, page: pg, total_pages: 2, total_results: 5, results: pg === 1 ? FILM.reviews.results : pg === 2 ? more : [] });
+    }
     if (p === '/movie/862') return send({ id: 862, title: 'Toy Story', release_date: '1995-11-22', genres: [{ name: 'Family' }], credits: { cast: [{ id: 31, name: 'Tom Hanks', character: 'Woody (voice)' }], crew: [] }, release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'G', type: 3, release_date: '1995-11-22T00:00:00.000Z' }] }] }, reviews: { results: [{ author: 'a', content: 'A lovely film for everyone, start to finish, and it still looks good.' }] } });
     if (p === '/movie/900') return send({ id: 900, title: 'Obscura', original_title: 'Obskura', release_date: '2015-01-01', genres: [], credits: { cast: [{ id: 6384, name: 'Keanu Reeves', character: 'Walk-on', order: 30 }], crew: [] }, release_dates: { results: [{ iso_3166_1: 'DE', release_dates: [{ certification: '18', type: 3, release_date: '2015-01-01T00:00:00.000Z' }] }] } });
     if (p === '/tv/1437') return send({ id: 1437, name: 'Firefly', first_air_date: '2002-09-20', status: 'Canceled', genres: [], seasons: [{ season_number: 1 }], credits: { cast: [], crew: [] }, content_ratings: { results: [] }, aggregate_credits: { cast: [], crew: [] } });
@@ -287,6 +296,18 @@ test('through the server: a title’s extras, a person, episode orders, a row by
     assert.strictEqual((await more(a, film.k)).reviews.length, 0);
     assert.strictEqual((await a.req('PUT', '/api/admin/settings', { off: { reviews: false } })).status, 200);
     assert.strictEqual((await a.req('GET', `/api/title/${encodeURIComponent(film.k)}/more`)).json.reviews.length, 2);
+    // More of them, a page at a time: how many in all, then each page (the short one left out), and none past the last.
+    const rv = (d, n) => d.req('GET', `/api/title/${encodeURIComponent(film.k)}/reviews?page=${n}`);
+    assert.strictEqual((await more(a, film.k)).reviewCount, 3);
+    const r1 = (await rv(a, 1)).json;
+    assert.deepStrictEqual([r1.page, r1.pages, r1.total, r1.reviews.map((r) => r.by)], [1, 2, 5, ['ohlalipop', 'Manuel São Bento']]);
+    const r2 = (await rv(a, 2)).json;
+    assert.deepStrictEqual([r2.page, r2.reviews.map((r) => [r.id, r.stars, r.at])], [2, [['r1', 4, '2024-01-01'], ['r2', 8, '2024-02-01']]]);
+    assert.strictEqual((await rv(a, 'x')).json.page, 1);
+    assert.strictEqual((await a.req('PUT', '/api/admin/settings', { off: { reviews: true } })).status, 200);
+    assert.strictEqual((await rv(a, 2)).status, 404, 'reviews switched off');
+    assert.strictEqual((await more(a, film.k)).reviewCount, 0);
+    assert.strictEqual((await a.req('PUT', '/api/admin/settings', { off: { reviews: false } })).status, 200);
 
     // A person: what is here first (the walk-on in Obscura too, though its own page lists only the leads), the rest for the Wishlist.
     const p = (await a.req('GET', '/api/person/6384')).json;

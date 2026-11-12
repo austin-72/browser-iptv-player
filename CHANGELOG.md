@@ -3,6 +3,14 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.4
+
+- **More reviews on a title's page:** the Reviews tab counts all of a title's reviews on TMDB, and "More reviews"
+  under them loads the rest, 20 at a time, until there are no more (GET /api/title/:k/reviews?page=N; not on kids
+  profiles, nor with reviews switched off in Admin).
+- **Sorting reviews:** as on TMDB, newest or oldest first, highest or lowest rated first (those with no rating last),
+  or longest first. The choice is remembered on the device for every title.
+
 ## 2.8.3
 
 - **Category headings in the accent colour everywhere:** Admin's sections (Status, Lists & channels, Viewing…) and its
