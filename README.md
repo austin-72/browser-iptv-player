@@ -6,7 +6,7 @@ You run one small server at home (Docker or Node.js) and add your playlists or p
 
 <sub>Called *Browser IPTV Player* until version 2.3. Old links, backups and installs keep working.</sub>
 
-![The Superstation IPTV home screen: a big featured title, mood buttons and a Continue watching row](docs/screenshots/home.jpg)
+![The Superstation IPTV home screen: a featured title with what else is in progress, the Right now panel showing who else is watching, mood buttons and the My List row](docs/screenshots/home.jpg)
 
 <p align="center">
   <a href="#why-this-one">Why this one?</a> ·
@@ -114,7 +114,7 @@ Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./
 docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/superstation-iptv:latest
 ```
 
-Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.3.0` stays on that version.
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.4.0` stays on that version.
 </details>
 
 <details>
@@ -186,6 +186,8 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 ### Finding something to watch
 
 - A home page with Continue watching, Top picks, "Because you watched…", New episodes, trending in the household, trending worldwide, holiday picks in season, On TV now, genre rows and mood buttons ("Something funny", "Edge of my seat"…). Every row can be hidden, pinned or reordered.
+- **Right now, on Home:** a small panel inside the banner shows what's happening in the household this minute: who else is watching (with *Watch it too* and *Use as remote*), a watch party you're invited to, a new message with *Reply*, your next reminder, and a couple of your channels with what's on and how long is left. Each part is only there when it has something to say, the panel folds away to one line, and on a phone it starts folded and opens into cards to swipe under the banner. Beside what you're resuming sit the next two things you're in the middle of (on a wide screen), and the Continue watching row under the banner starts with what the banner doesn't already show. A profile can leave the panel out (Customise), the admin can switch it off for everyone (*What's switched on*), and who sees what you're watching is still yours to decide (Settings → Privacy).
+- **Rows you can page through:** on a computer every row has two page buttons that are always there, with which page of how many ("2 / 5"). A page moves by whole posters, so none is left cut in half at the start, and a row can also be dragged sideways with the mouse. Swiping with a finger, a trackpad and Shift + the mouse wheel scroll it as before; on a TV the arrow keys do.
 - **Recommendations** blend what the profile watches and rates, what's related (from TMDB) and what the household likes. **Surprise me** picks one title, and **Pick for several of us** finds something everyone should like and nobody has seen.
 - **Search** is instant and typo-tolerant, with voice search where the browser supports it. It also understands people ("tom hanks"), genres and decades ("90s comedy"), and with smarter categories on, holidays and services ("christmas", "halloween", "netflix").
 - **On later:** films and sport (by competition) coming up in the next two days, with one-tap reminders, plus an "On later today" row on the home page.
@@ -215,7 +217,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Together:** messages with titles and reactions, shared watchlists, and **watch parties** that keep play, pause and seek in sync, with chat and emoji reactions. A party **shares one provider connection**: the server fetches the stream once for everyone in it.
 - **Your channel lists:** each profile can put its favourites in its own order, make its own lists ("Football", "Kids' channels"), and choose which list Live TV and the guide open on.
 - **No adult content at all:** Admin → Languages & content → *Leave out adult (18+) content for everyone* takes porn channels and films out of the catalogue altogether, for every profile (the admin too): nothing to browse, search or play, and a profile's *Allow adult (18+) groups* then does nothing. Every device loads the new catalogue straight away. The page says what counts as adult in your lists, by the providers' categories (*FOR ADULTS*, *VOD - ADULT +18*, …). Adult content is known by its category or the provider's own mark; a title that only holds a word (*Adult Swim*, *xXx: Return of Xander Cage*, *The Hustler*, a film marked *(+18)*) is an ordinary title, and no longer needs the adult permission. Something adult left over? Tick its category under *Hidden categories* on the same page.
-- **Only the parts you use:** Admin → Playback → *What’s switched on* has a switch for each extra — messages, watch parties, downloads, multiview, trailers, “pick something for me”, the play queue, the wishlist, teams and competitions, viewing statistics and the choice of looks — and one button, *Simple: just watching*, that turns them all off. A part that’s off goes from every menu and page for everyone, and the server stops answering for it; nothing is deleted, so switching it back on brings it back as it was.
+- **Only the parts you use:** Admin → Playback → *What’s switched on* has a switch for each extra — messages, watch parties, downloads, multiview, trailers, “pick something for me”, the play queue, the wishlist, teams and competitions, viewing statistics, the choice of looks and Home's *Right now* panel — and one button, *Simple: just watching*, that turns them all off. A part that’s off goes from every menu and page for everyone, and the server stops answering for it; nothing is deleted, so switching it back on brings it back as it was.
 - **A manager:** the admin can make a second grown-up’s profile a *manager* (Admin → Profiles; the profile needs a PIN). A manager gets a small *Manage* page: fix channels (names, logos, numbers, guide, hiding), fetch a list or guide again, see which channels are failing, deal with error reports, and answer requests for more screen time. Everything else stays the admin’s — settings, the lists’ addresses and sign-in details, profiles, PINs and parental locks, devices, backups, updates — and the server refuses it, not just the page.
 - **Parental locks:** lock channels or whole categories behind a PIN. The server enforces it, and Kids profiles can't unlock.
 - **Screen time and bedtime:** a daily limit (the same every day, school days and weekends, or each day), the hours watching is allowed and a bedtime, set in Admin → Profiles. The server counts and enforces it (all devices, parties and multiview together); viewers see what's left, get a 5- and 1-minute warning and a friendly *That's all for today* screen. They can *Ask for more time*: the admin gets one pop-up with *Give* / *Not today* on whatever device they're using (or the next time they open the app), and can also give extra time in Admin → Profiles.
@@ -315,7 +317,7 @@ Nothing is shown to someone who hasn't signed in: not the brand, the channels or
 - **Buffering, explained:** when a video has waited 5 seconds, or stops for the third time in three minutes, the player
   checks the connection between the device and the server and says where the hold-up is — this device's connection, or
   the provider sending slowly — with *Try another copy* when there is one, so nobody restarts things that were fine.
-  And the big banner on Home can be switched off (Customise).
+  And the big banner on Home can be switched off (Customise), and so can its *Right now* panel.
 - **Timeline, easier and finer:** a taller place to press and a knob that's always there on touch screens; while
   dragging, moving away from the bar (up or down) slows it to a half, a quarter, then a tenth, for landing within a
   few seconds; the time shows how far you're jumping; the mouse wheel over the bar steps 5 seconds (1 with Shift); the

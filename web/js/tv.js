@@ -70,6 +70,13 @@
     } else {
       // Left/right: things on the same line come first, so Right along the header doesn't drop into the page below.
       cands.forEach(function (c) { var q = c.r; c.band = q.bottom >= cur.top && q.top <= cur.bottom ? 0 : 1; });
+      // Home's banner: "Right now" sits higher than the buttons and titles beside it, so it's never on their line.
+      // Right from the last of them goes into it (not down to the chips under the banner); Left from it comes back.
+      var hero = from.closest('.hero'), inRn = !!from.closest('.rn');
+      if (hero && V.$('.rn', hero) && !cands.some(function (c) { return !c.band && hero.contains(c.el); })) {
+        var across = cands.filter(function (c) { return hero.contains(c.el) && (dir === 'right' ? !inRn && !!c.el.closest('.rn') : inRn && !c.el.closest('.rn')); });
+        if (across.length) { cands = across; row = null; }
+      }
       // At the left/right edge of the page (the Live TV groups, say), stay put rather than jump up into the header
       // bar: Up gets there.
       if (!from.closest('#topbar')) cands = cands.filter(function (c) { return !c.band || !c.el.closest('#topbar'); });

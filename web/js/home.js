@@ -93,18 +93,31 @@ V.route('home', function (view) {
     var pr = V.progressOf(resumeIt.k), left = pr && pr.d && !pr.w ? Math.max(1, Math.round((pr.d - pr.p) / 60)) : 0;
     return [resumeIt.t === 'episode' ? V.epLabel(resumeIt) + (resumeIt.et ? ' · ' + resumeIt.et : '') : heroIt.y, resumeNext ? 'Next episode' : left ? left + ' min left' : ''].filter(Boolean);
   };
+  // Beside what you're resuming: the next two things you're in the middle of (wide screens only: p27.css .hero-also).
+  // (What the banner shows isn't shown again in the Continue watching row right under it: inBanner.)
+  var WIDE = '(min-width: 1240px)', inBanner = {};
+  var alsoOn = !!(window.matchMedia && window.matchMedia(WIDE).matches);
+  var alsoHtml = function () {
+    if (!resumeIt || !alsoOn) return '';
+    var rest = V.continueWatching().slice(1, 3).filter(function (c) { return c.it && (c.it.t === 'movie' || c.it.t === 'episode'); });
+    if (!rest.length) return '';
+    rest.forEach(function (c) { inBanner[c.it.k] = 1; });
+    return '<div class="hero-also"><div class="hero-kicker">Also in progress</div><div class="hero-also-c">' + rest.map(function (c) { return V.card(c.it, { shape: 'wide', showName: true, next: c.next }); }).join('') + '</div></div>';
+  };
   if (!heroIt && hasVod) { var pool = S.movies.concat(S.shows).filter(function (x) { return x.i; }); heroIt = pool[Math.floor(Math.random() * Math.min(pool.length, 200))]; }
   var html = '';
   if ((S.data.home.hidden || []).indexOf('hero') >= 0) { heroIt = null; resumeIt = null; } // (Customise → "The big banner at the top": off)
   if (heroIt && (heroIt.t === 'movie' || heroIt.t === 'show')) {
+    if (resumeIt) inBanner[resumeIt.k] = 1;
     html += '<section class="hero" style="--tint:' + V.tint(heroIt.n) + '"><div class="hero-bg">' + (heroIt.bd || heroIt.i ? '<img src="' + V.esc(heroIt.bd || heroIt.i) + '" alt="" referrerpolicy="no-referrer"' + (heroIt.bd ? '' : ' class="blur"') + '>' : '') + '</div>' +
       '<div class="hero-body"><div class="hero-kicker">' + (resumeIt ? 'Continue watching' : V.esc(heroIt.t === 'show' ? 'Series' : 'Movie') + (recs.hero === heroIt.k ? ' · Picked for you' : '')) + '</div><h2 class="hero-t">' + V.esc(heroIt.n) + '</h2>' +
       '<div class="hero-meta">' + (resumeIt ? resumeMeta() : [heroIt.y, heroIt.c, heroIt.r ? '★ ' + heroIt.r : '', (heroIt.gn || []).slice(0, 3).join(' · ')].filter(Boolean)).map(V.esc).join('<span class="dot-sep"></span>') + '</div>' +
       (resumeIt && !resumeNext && V.pctOf(resumeIt.k) > 0 ? '<div class="hero-prog" role="presentation"><i style="width:' + Math.round(V.pctOf(resumeIt.k) * 100) + '%"></i></div>' : '') +
       '<p class="hero-plot" hidden></p>' +
-      '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + (resumeIt ? (resumeNext ? ' Play ' : ' Resume ') + (resumeIt.t === 'episode' ? V.esc(V.epLabel(resumeIt)) : '') : ' Play') + '</button><a class="btn lg" href="' + V.hrefOf(heroIt) + '">' + V.icon('info') + ' More info</a>' +
-      '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div></section>';
-  }
+      '<div class="hero-acts"><button class="btn primary lg" data-hero="play">' + V.icon('play') + (resumeIt ? (resumeNext ? ' Play ' : ' Resume ') + (resumeIt.t === 'episode' ? V.esc(V.epLabel(resumeIt)) : '') : ' Play') + '</button><a class="btn lg hero-more" href="' + V.hrefOf(heroIt) + '" aria-label="More info">' + V.icon('info') + '<span> More info</span></a>' +
+      '<button class="icon-btn lg" data-hero="list" aria-label="My List">' + V.icon(V.inList('list', heroIt.k) ? 'check' : 'plus') + '</button></div></div>' +
+      alsoHtml() + V.rightNow.html(false) + '</section>';
+  } else html += V.rightNow.html(true); // (no banner — nothing but live TV, or switched off in Customise: the panel stands by itself)
   if (hasVod && !V.areaOff('moods')) html += '<div class="moods"><button class="chip accent" data-home="surprise">' + V.icon('sparkle') + ' Surprise me</button>' + (S.boot && S.boot.profiles && S.boot.profiles.length > 1 ? '<a class="chip" href="#/together">' + V.icon('party') + ' Pick for several of us</a>' : '') + V.MOODS.filter(function (m) { return !(S.profile && S.profile.kids && (m.id === 'scary' || m.id === 'kids')); }).map(function (m) { return '<a class="chip" href="#/mood/' + m.id + '">' + V.esc(m.label) + '</a>'; }).join('') /* (a kids' profile: no "Something scary", and everything is for kids already) */ + '</div>';
   html += '<div class="rows"></div><div class="home-foot"><button class="btn ghost" data-home="customize">' + V.icon('sliders') + ' Customise this page</button>' + (V.homeFootExtra ? V.homeFootExtra() : '') + '</div>';
   view.innerHTML = '<h1 class="sr-only">Home</h1>' + html;
@@ -123,6 +136,14 @@ V.route('home', function (view) {
     }).catch(function () {});
   }
   V.$('[data-home=customize]', view).onclick = V.customizeHome;
+  // The window grew or shrank past where the banner has room for "Also in progress": drawn again, so those titles are
+  // in the banner or in the row, never in neither.
+  if (resumeIt && window.matchMedia) {
+    var mq = window.matchMedia(WIDE), onMq = function () { if (mq.matches !== alsoOn) V.router.refresh(); };
+    if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+    V.pageCleanup = function () { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); };
+  }
+  V.rightNow.mount(V.$('.rn', view));
   var sb = V.$('[data-home=surprise]', view);
   if (sb) sb.onclick = function () { V.surprise(); };
 
@@ -142,7 +163,7 @@ V.route('home', function (view) {
       // (Light catalogue: these are the likeliest to be played next — their stream addresses fetched now, not after Play.)
       var need = cw.map(function (c) { return c.it; }).filter(function (x) { return x && x.lz && !x.u; }).slice(0, 40).map(function (x) { return x.k; });
       if (need.length && V.fetchAddresses) V.fetchAddresses(need).catch(function () {});
-      add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: cw.map(function (c) { return { it: c.it, next: c.next }; }), cardOpts: { shape: 'wide', showName: true } }); // (opens its page, with Resume: ui.js V.cardClick)
+      add({ id: 'continue', title: 'Continue watching for ' + S.profile.name, items: cw.filter(function (c) { return !(c.it && inBanner[c.it.k]); }).map(function (c) { return { it: c.it, next: c.next }; }), cardOpts: { shape: 'wide', showName: true } }); // (opens its page, with Resume: ui.js V.cardClick)
     },
     list: function () { add({ id: 'list', title: 'My List', items: V.myListOrdered ? V.myListOrdered().filter(notHidden) : keysToItems(S.data.list), more: '#/mine' }); },
     neweps: function () {
@@ -380,7 +401,7 @@ V.customizeHome = function () {
   ['movie', 'show', 'live', 'radio'].forEach(function (t) { V.groupList(t).forEach(function (g) { groupOpts.push('<option value="' + V.esc(t + '|' + g.name) + '">' + V.esc(V.TYPE_NAMES[t] + ' · ' + g.label) + ' (' + g.items.length + ')</option>'); }); });
   V.dialog({
     title: 'Customise your home page', wide: true,
-    body: '<p class="dim">Choose which rows you see. Until you move one, the page orders them itself — by the time of day, this device, and the rows you use; move any with the arrows and they stay in your order (Reset goes back). Recommendations share one “For you” row, and favourite and recent channels one “Your channels” row.</p><label class="check"><input type="checkbox" data-show="hero"' + (hidden.has('hero') ? '' : ' checked') + '><span>The big banner at the top (what to resume, or a pick for you)</span></label><ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
+    body: '<p class="dim">Choose which rows you see. Until you move one, the page orders them itself — by the time of day, this device, and the rows you use; move any with the arrows and they stay in your order (Reset goes back). Recommendations share one “For you” row, and favourite and recent channels one “Your channels” row.</p><label class="check"><input type="checkbox" data-show="hero"' + (hidden.has('hero') ? '' : ' checked') + '><span>The big banner at the top (what to resume, or a pick for you)</span></label>' + (V.areaOff('rightnow') ? '' : '<label class="check"><input type="checkbox" data-show="rightnow"' + (hidden.has('rightnow') ? '' : ' checked') + '><span>Right now: who else is watching, new messages, your next reminder and what’s on</span></label>') + '<ul class="rows-edit"></ul>' + (V.homeFootExtra ? '<p>' + V.homeFootExtra() + '</p>' : '') + '<h3>Pinned categories</h3><p class="dim">Pinned categories get their own row.</p><div class="pins chips"></div>' +
       '<div class="inline"><select class="input" data-pick><option value="">Choose a category…</option>' + groupOpts.join('') + '</select><button class="btn" data-pin>Pin</button></div>',
     actions: [{ label: 'Reset', fn: function () { S.data.home = { order: [], hidden: [], pinned: [] }; V.saveHome(); V.router.refresh(); } }, { label: 'Save', primary: true, fn: function () { S.data.home = { order: moved || V.homeManual() ? order : [], hidden: Array.from(hidden), pinned: pinned }; V.saveHome(); V.router.refresh(); } }],
     onOpen: function (d) {

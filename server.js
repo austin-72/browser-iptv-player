@@ -708,7 +708,7 @@ function publicSettings() {
 // (Admin → Playback → What's switched on. The pages and menus go in the browser — web/js/core.js V.AREAS — and the
 // area's own requests are refused here, so an old tab or another app can't keep using it. Watch parties and
 // downloads have their own older switches: allowParties, allowDownloads.)
-const AREAS = ['messages', 'multiview', 'trailers', 'moods', 'viewing', 'wishlist', 'queue', 'follow', 'themes'];
+const AREAS = ['messages', 'multiview', 'trailers', 'moods', 'viewing', 'wishlist', 'queue', 'follow', 'themes', 'rightnow'];
 const AREA_NAMES = { messages: 'Messages are', trailers: 'Trailers are', viewing: 'Viewing statistics are', wishlist: 'The wishlist is', queue: 'The play queue is', follow: 'Following teams is' };
 const AREA_API = [
   ['messages', /^\/api\/messages(?:-react)?(?:\/|$)/, false],
@@ -2210,6 +2210,8 @@ route('POST', '/api/markers/:k', async (req, res, p, q, ctx) => {
 });
 
 // ---- social
+/** A screen's name says it's a television ("Safari on TV", a Tizen or webOS browser…). */
+const isTvName = (name) => /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(name || '');
 route('GET', '/api/social', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   const presence = [];
@@ -2219,7 +2221,8 @@ route('GET', '/api/social', (req, res, p, q, ctx) => {
     if (pr.presence === false) continue;
     const it = catalog.visible(prof, c.playing.k);
     if (it && overrides.hasLocks && overrides.isLocked(it) && !overrides.allowed(ctx)) continue; // (a locked channel isn't named to those it's locked for)
-    if (it) presence.push({ pid: c.pid, k: c.playing.k, n: it.n, i: it.logo || '', at: c.playing.at });
+    // (An episode says which series and episode it is: the browser only has the episodes of series it has opened.)
+    if (it) presence.push({ pid: c.pid, k: c.playing.k, n: it.n, i: it.logo || '', at: c.playing.at, tv: isTvName(c.deviceName), ...(it.t === 'episode' && it.sk ? { sk: it.sk, s: it.s, e: it.e, et: it.et || '' } : {}) });
   }
   return {
     profiles: accounts.profiles.map((x) => ({ ...accounts.summary(x), online: hub.online().includes(x.id) })),
@@ -2324,7 +2327,7 @@ route('GET', '/api/devices', (req, res, p, q, ctx) => {
   return [...live.values()].filter((c) => c.pid && (canControl(ctx, c) || (!prof.guest && c.sess !== ctx.sess.id))).map((c) => {
     const ok = canControl(ctx, c);
     const asked = !ok && [...remoteAsks.values()].some((a) => a.from === ctx.sess.id && a.to === c.id && !a.no && now - a.at < 60e3);
-    return { conn: c.id, name: c.deviceName, deviceId: ok ? c.deviceId : '', playing: ok ? shown(c) : null, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: /\bTV\b|Tizen|webOS|BRAVIA|Android TV|GoogleTV|AFT/i.test(c.deviceName || ''), ok, asked };
+    return { conn: c.id, name: c.deviceName, deviceId: ok ? c.deviceId : '', playing: ok ? shown(c) : null, at: c.at, profile: c.pid !== ctx.profile.id ? (accounts.profile(c.pid) || {}).name || '' : '', tv: isTvName(c.deviceName), ok, asked };
   });
 });
 const COMMANDS = ['play', 'pause', 'resume', 'stop', 'seek', 'toggle', 'skip', 'volume', 'mute', 'subs', 'audio', 'next', 'prev', 'zap', 'channel', 'sleep', 'watch', 'unwatch', 'restart', 'live', 'takeover', 'key', 'nav'];

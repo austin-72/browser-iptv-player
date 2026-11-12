@@ -24,6 +24,7 @@
     "captions.js",
     "ui.js",
     "motion.js",
+    "rightnow.js",
     "home.js",
     "browse.js",
     "guide.js",

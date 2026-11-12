@@ -91,6 +91,11 @@ test('parts of the app the admin switches off: gone from the settings every devi
     assert.strictEqual((await a.req('GET', '/api/admin/viewing')).status, 200, 'the admin’s own statistics page isn’t that part');
     assert.strictEqual((await a.req('POST', '/api/messages', { to: id('Sam'), text: 'back' })).status, 200, 'messages are on again: the new choice replaced the old');
 
+    // Home's "Right now" panel is a part like the others (it has no requests of its own to refuse).
+    assert.deepStrictEqual((await a.req('PUT', '/api/admin/settings', { off: { rightnow: true } })).json.off, { rightnow: true });
+    assert.deepStrictEqual((await a.req('GET', '/api/boot')).json.off, { rightnow: true });
+    assert.strictEqual((await a.req('GET', '/api/social')).status, 200);
+
     // Everything back on: as it was (the earlier message is still there).
     assert.deepStrictEqual((await a.req('PUT', '/api/admin/settings', { off: {} })).json.off, {});
     const th = await a.req('GET', '/api/messages/all');

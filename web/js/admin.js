@@ -721,6 +721,7 @@ var AREA_SW = [
   ['follow', 'Teams and competitions', 'Following teams to get their games on Home, with reminders.'],
   ['viewing', 'Viewing statistics', 'Your viewing, Your week and Year in review.'],
   ['themes', 'A choice of looks', 'All 25 colour themes. Off: Midnight, Daylight and High contrast only.'],
+  ['rightnow', 'Right now on Home', 'The panel in Home’s banner: who else is watching, new messages, your next reminder and what’s on.'],
 ];
 function areasHtml(s) {
   var off = s.off || {};

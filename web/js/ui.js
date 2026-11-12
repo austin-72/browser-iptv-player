@@ -253,6 +253,46 @@ V.itemMenu = function (anchor, it, opts) {
 };
 
 // ---------------------------------------------------------------- rows (horizontal) & grids
+/** Dragging a row sideways with the mouse (a finger and a trackpad scroll it by themselves). A press that didn't move
+    is still a click on the card. */
+V.rowDrag = function (sc) {
+  var x0 = 0, left0 = 0, down = false, moved = false;
+  var move = function (e) {
+    if (!down) return;
+    var dx = e.clientX - x0;
+    if (!moved && Math.abs(dx) < 6) return;
+    if (!moved) { moved = true; sc.classList.add('dragging'); }
+    sc.scrollLeft = left0 - dx;
+    e.preventDefault();
+  };
+  var up = function () {
+    if (!down) return;
+    down = false;
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+    if (moved) setTimeout(function () { moved = false; sc.classList.remove('dragging'); }, 0); // (after the click that ends the drag — if there is one: let go outside the row and there isn't)
+  };
+  sc.addEventListener('mousedown', function (e) {
+    if (e.button !== 0 || V.tvMode || sc.scrollWidth <= sc.clientWidth) return;
+    down = true; moved = false; x0 = e.clientX; left0 = sc.scrollLeft;
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+  // (The click a drag ends with isn't a click on the card under the pointer.)
+  sc.addEventListener('click', function (e) { if (moved) { moved = false; e.preventDefault(); e.stopPropagation(); } }, true);
+  sc.addEventListener('dragstart', function (e) { e.preventDefault(); });
+};
+/** A row works out its pages once it's on the page and in view (and again when the window changes size). */
+V.rowSeen = (function () {
+  var io = null;
+  try { if (window.IntersectionObserver) io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting && e.target._where) e.target._where(); }); }, { rootMargin: '200px 0px' }); } catch (e) { io = null; }
+  window.addEventListener('resize', V.throttle(function () { V.$$('.row').forEach(function (r) { if (r._where) r._where(); }); }, 200));
+  return function (sec) {
+    if (io) io.observe(sec);
+    else { setTimeout(function () { sec._where(); }, 0); sec.addEventListener('mouseenter', function () { sec._where(); }); }
+  };
+})();
+
 /** A titled horizontal row. o: { id, title, items, more (href), cardOpts, play, numbered } */
 V.row = function (o) {
   if (!o.items || !o.items.length) return null;
@@ -260,7 +300,9 @@ V.row = function (o) {
   sec.className = 'row' + (o.cls ? ' ' + o.cls : '');
   sec.dataset.row = o.id || '';
   sec.setAttribute('aria-label', o.title);
-  sec.innerHTML = '<div class="row-h"><h2>' + (o.more ? '<a href="' + o.more + '">' + V.esc(o.title) + ' ' + V.icon('next') + '</a>' : V.esc(o.title)) + '</h2>' + (o.extra || '') + '</div>' +
+  // (The page buttons: always there on a device with a mouse — see .row-pg in p27.css — with which page of how many.)
+  var pager = '<div class="row-pg"><button class="row-pg-b prev" type="button" aria-label="Previous titles in ' + V.esc(o.title) + '" tabindex="-1" disabled>' + V.icon('back') + '</button><span class="row-pg-n" aria-hidden="true"></span><button class="row-pg-b next" type="button" aria-label="More titles in ' + V.esc(o.title) + '" tabindex="-1">' + V.icon('next') + '</button></div>';
+  sec.innerHTML = '<div class="row-h"><h2>' + (o.more ? '<a href="' + o.more + '">' + V.esc(o.title) + ' ' + V.icon('next') + '</a>' : V.esc(o.title)) + '</h2>' + (o.extra || '') + pager + '</div>' +
     '<div class="row-wrap"><button class="row-btn prev" aria-label="Scroll left" tabindex="-1">' + V.icon('back') + '</button><div class="row-scroll" data-list></div><button class="row-btn next" aria-label="Scroll right" tabindex="-1">' + V.icon('next') + '</button></div>';
   var sc = V.$('.row-scroll', sec);
   sc._items = o.items;
@@ -279,14 +321,56 @@ V.row = function (o) {
     sc.insertAdjacentHTML('beforeend', html);
   };
   batch();
+  // Where the row is: the first and last page switch their button off, and the header says "2 / 5".
+  var pgN = V.$('.row-pg-n', sec), pgPrev = V.$('.row-pg-b.prev', sec), pgNext = V.$('.row-pg-b.next', sec);
+  var where = function () {
+    var w = sc.clientWidth;
+    if (!w) return; // (not on the page yet)
+    var first = sc.firstElementChild, pad = parseFloat(getComputedStyle(sc).paddingLeft) || 0;
+    var gap = first && first.nextElementSibling ? first.nextElementSibling.offsetLeft - first.offsetLeft - first.offsetWidth : 0;
+    var step = first ? first.offsetWidth + gap : w, inner = Math.max(step, w - pad * 2);
+    var per = Math.max(1, Math.floor((inner + gap) / step)), pages = Math.max(1, Math.ceil(o.items.length / per));
+    var atStart = sc.scrollLeft < 8, atEnd = n >= o.items.length && sc.scrollLeft + w > sc.scrollWidth - 8;
+    var cur = atStart ? 1 : atEnd ? pages : Math.min(pages, Math.max(1, Math.round(sc.scrollLeft / (per * step)) + 1));
+    if (!atEnd && cur === pages && pages > 1) cur = pages - 1;
+    if (!atStart && cur === 1 && pages > 1) cur = 2;
+    sec.classList.toggle('at-start', atStart);
+    sec.classList.toggle('at-end', atEnd);
+    sec.classList.toggle('can-page', pages > 1);
+    pgN.textContent = cur + ' / ' + pages;
+    pgPrev.disabled = atStart; pgNext.disabled = atEnd;
+  };
+  sec._where = where;
   sc.addEventListener('scroll', V.throttle(function () {
     if (n < o.items.length && sc.scrollLeft + sc.clientWidth * 2 > sc.scrollWidth) batch();
-    sec.classList.toggle('at-start', sc.scrollLeft < 8);
-    sec.classList.toggle('at-end', sc.scrollLeft + sc.clientWidth > sc.scrollWidth - 8);
+    where();
   }, 120), { passive: true });
   sec.classList.add('at-start');
-  V.$('.prev', sec).onclick = function () { sc.scrollBy({ left: -sc.clientWidth * 0.9, behavior: 'smooth' }); };
-  V.$('.next', sec).onclick = function () { if (n < o.items.length) batch(); sc.scrollBy({ left: sc.clientWidth * 0.9, behavior: 'smooth' }); };
+  // A page at a time, and always whole cards: forward puts the first card that isn't fully in view at the left edge;
+  // back puts the card before the first one in view at the right.
+  var page = function (dir) {
+    if (dir > 0 && n < o.items.length) batch();
+    var kids = sc.children, pad = parseFloat(getComputedStyle(sc).paddingLeft) || 0, box = sc.getBoundingClientRect();
+    var from = box.left + pad, to = box.right - pad, target = null, i, r;
+    if (dir > 0) {
+      for (i = 0; i < kids.length; i++) { r = kids[i].getBoundingClientRect(); if (r.right > to + 2) { target = sc.scrollLeft + r.left - from; break; } }
+      if (target === null) target = sc.scrollWidth;
+    } else {
+      var firstIn = -1;
+      for (i = 0; i < kids.length; i++) { r = kids[i].getBoundingClientRect(); if (r.left >= from - 2) { firstIn = i; break; } }
+      if (firstIn <= 0) target = 0;
+      else {
+        var edge = kids[firstIn].getBoundingClientRect().left - (to - from); // (a page's width before the first card in view)
+        target = 0;
+        for (i = 0; i < firstIn; i++) { r = kids[i].getBoundingClientRect(); if (r.left >= edge - 2) { target = sc.scrollLeft + r.left - from; break; } }
+      }
+    }
+    sc.scrollTo({ left: Math.max(0, target), behavior: V.reduceMotion && V.reduceMotion() ? 'auto' : 'smooth' });
+  };
+  V.$('.row-btn.prev', sec).onclick = pgPrev.onclick = function () { page(-1); };
+  V.$('.row-btn.next', sec).onclick = pgNext.onclick = function () { page(1); };
+  V.rowDrag(sc);
+  V.rowSeen(sec);
   sc.addEventListener('focusin', function (e) { var a = e.target.closest('.card'); if (a && n < o.items.length && Array.prototype.indexOf.call(sc.children, a) > n - 6) batch(); });
   if (o.track) V.trackImpressions(sc);
   return sec;

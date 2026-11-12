@@ -189,3 +189,118 @@ html.theme-light { --ok: #0e6b35; --warn: #7d4e00; --danger: #b01e24; }
 html.theme-light #player-layer, html.theme-light .hero, html.theme-light .tp-hero { --ok: #3ccf7a; --warn: #f5a524; --danger: #ff5a5f; }
 /* A table wider than a phone scrolls sideways: reachable with the keyboard too (web/js/adminstats.js, adminconc.js). */
 .tbl-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Rows of titles: page buttons that are always there on a device with a mouse, with which page of how many, and the
+   row can be dragged sideways (web/js/ui.js V.row, V.rowDrag). A finger or a trackpad scrolls it as before. */
+.row-pg { display: none; align-items: center; gap: .2rem; margin: 0 0 .5rem auto; }
+.row.can-page .row-pg { display: flex; }
+.row-pg-n { min-width: 3.4rem; text-align: center; font-size: .82rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+.row-pg-b { width: 2.1rem; height: 2.1rem; border-radius: 50%; border: 1px solid var(--line); background: var(--bg2); color: var(--text); display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.row-pg-b .i { width: 1rem; height: 1rem; }
+.row-pg-b:hover:not(:disabled) { background: var(--card2); }
+.row-pg-b:disabled { opacity: .35; cursor: default; }
+@media (hover: none), (max-width: 700px) { .row.can-page .row-pg { display: none; } }
+.tv .row.can-page .row-pg { display: none; }
+.row-scroll.dragging { scroll-snap-type: none; cursor: grabbing; -webkit-user-select: none; user-select: none; }
+.row-scroll.dragging .card { pointer-events: none; }
+
+/* Home: the banner is shorter, the next things you're in the middle of sit beside what you're resuming, and
+   "Right now" (web/js/rightnow.js) is a see-through panel inside it. */
+.hero { min-height: min(58vh, 56vw + 120px); gap: 1.5rem; }
+.hero-body { flex: 0 1 40rem; min-width: 0; }
+.hero-also { position: relative; z-index: 1; display: none; flex: none; align-self: flex-end; margin-left: clamp(0rem, 2vw, 3rem); }
+.hero-also .hero-kicker { margin-bottom: .5rem; }
+.hero-also-c { display: flex; gap: .7rem; }
+.hero-also .card { width: clamp(9rem, 11.5vw, 11rem); color: #fff; }
+.hero-also .card .card-s { color: rgba(255,255,255,.8); }
+@media (min-width: 1240px) { .hero-also { display: block; } }
+
+.rn { position: relative; z-index: 2; flex: 0 0 22.5rem; width: 22.5rem; max-width: 100%; align-self: flex-start; margin: -1rem 0 calc(clamp(2rem, 6vw, 5rem) * -1 + 1.5rem) auto; padding: .55rem 1rem .9rem; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: rgba(14,17,24,.86); color: #fff; box-shadow: 0 12px 44px rgba(0,0,0,.4); }
+@supports ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
+  .rn { background: rgba(14,17,24,.66); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .lite .rn { background: rgba(14,17,24,.92); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+.rn[hidden] { display: none; }
+.rn-top { display: flex; align-items: center; gap: .5rem; }
+.rn-top h2 { flex: 1; margin: 0; font-size: 1rem; }
+.rn-top .icon-btn { margin-right: -.45rem; background: transparent; border-color: transparent; color: rgba(255,255,255,.85); }
+.rn-sec { min-width: 0; padding: .55rem 0; border-top: 1px solid rgba(255,255,255,.14); }
+.rn-sec:first-child { border-top: 0; padding-top: .15rem; }
+.rn-sec:last-child { padding-bottom: 0; }
+.rn-row { display: flex; align-items: center; gap: .7rem; min-height: 2.75rem; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; }
+button.rn-row, a.rn-row { cursor: pointer; border-radius: 8px; }
+button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
+.rn-row + .rn-row { margin-top: .15rem; }
+.rn-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.rn-tx b { font-size: .92rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rn-tx small { font-size: .8rem; color: rgba(255,255,255,.78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rn-left { flex: none; font-size: .8rem; color: rgba(255,255,255,.78); }
+.rn-av { position: relative; flex: none; display: block; }
+.rn-dot { display: block; width: .7rem; height: .7rem; border-radius: 50%; background: #3ccf7a; }
+.rn-av .rn-dot { position: absolute; right: -3px; bottom: -3px; border: 2px solid #10141b; box-sizing: content-box; }
+.rn-i { flex: none; width: 1.2rem; height: 1.2rem; margin: 0 .5rem; color: #fff; }
+.rn-i.warn { color: #f5a524; }
+.rn-acts { display: flex; gap: .5rem; margin-top: .5rem; }
+.rn-acts .btn { flex: 1; justify-content: center; min-height: 2.5rem; padding-left: .5rem; padding-right: .5rem; white-space: nowrap; }
+.rn .btn { color: #fff; background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.3); }
+.rn .btn.primary { background: #fff; color: #000; border-color: #fff; }
+.rn .rn-row .btn, .rn .rn-row .icon-btn { flex: none; }
+.rn .rn-row .icon-btn { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.3); color: #fff; }
+.rn-h { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .25rem; }
+.rn-h h3 { flex: 1; margin: 0; font-size: .74rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.78); }
+.rn-h a { font-size: .82rem; font-weight: 600; color: #fff; }
+.rn-logo { flex: none; width: 2.5rem; height: 2.5rem; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
+.rn-logo img { width: 100%; height: 100%; object-fit: contain; }
+.rn-logo .i { width: 1.2rem; height: 1.2rem; }
+.rn :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@media (hover: none) { .rn .btn, .rn .rn-row .icon-btn { min-height: 2.75rem; } .rn .rn-row .icon-btn { width: 2.75rem; } }
+/* Folded away: one line saying what's in it */
+.rn.rn-folded { flex: 0 1 auto; width: auto; padding: 0; border-radius: 2rem; }
+.rn-pill { display: flex; align-items: center; gap: .6rem; min-height: 2.75rem; max-width: 100%; padding: 0 .8rem 0 1rem; border: 0; border-radius: 2rem; background: none; color: #fff; font: inherit; font-size: .9rem; font-weight: 700; cursor: pointer; }
+.rn-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rn-pill .i { flex: none; width: 1.1rem; height: 1.1rem; }
+.rn-chev.up { transform: rotate(-90deg); } .rn-chev.down { transform: rotate(90deg); }
+/* Narrower than a banner with room for it beside the title: under the title, each part a card to swipe through */
+@media (max-width: 899px) {
+  .hero { flex-wrap: wrap; }
+  .hero-body { flex-basis: 100%; }
+  .rn, .lite .rn { flex: 1 1 100%; width: auto; align-self: auto; margin: .2rem 0 calc(clamp(2rem, 6vw, 5rem) * -1 + 1rem); padding: 0; border: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .rn-top { padding-left: .2rem; }
+  .rn-secs { display: flex; gap: .6rem; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; margin: 0 calc(var(--gutter) * -1); padding: 0 var(--gutter) .2rem; scroll-padding: 0 var(--gutter); }
+  .rn-secs::-webkit-scrollbar { display: none; }
+  .rn-sec, .rn-sec:first-child, .rn-sec:last-child { flex: 0 0 min(19rem, 82%); scroll-snap-align: start; padding: .55rem .8rem .65rem; border: 1px solid rgba(255,255,255,.18); border-radius: 12px; background: rgba(14,17,24,.84); }
+  .rn-sec { display: flex; flex-direction: column; justify-content: center; }
+  .rn-sec:only-child { flex-basis: 100%; }
+  .rn.rn-folded, .lite .rn.rn-folded { flex: 0 1 auto; margin-right: auto; border: 1px solid rgba(255,255,255,.18); background: rgba(14,17,24,.84); }
+}
+/* No banner (live TV only, or the banner switched off in Customise): the panel by itself, in the page's own colours */
+.rn.rn-solo { width: auto; flex: none; margin: calc(var(--top) + 1rem) 0 0; background: var(--bg2); border-color: var(--line); color: var(--text); box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.rn.rn-solo .rn-secs { display: flex; flex-wrap: wrap; gap: 0 2rem; }
+.rn.rn-solo .rn-sec, .rn.rn-solo .rn-sec:first-child, .rn.rn-solo .rn-sec:last-child { flex: 1 1 18rem; min-width: 0; border-top: 0; padding: .3rem 0; }
+.rn.rn-solo .rn-tx small, .rn.rn-solo .rn-left, .rn.rn-solo .rn-h h3 { color: var(--dim); }
+.rn.rn-solo .rn-h a, .rn.rn-solo .rn-i, .rn.rn-solo .rn-pill, .rn.rn-solo .rn-top .icon-btn { color: var(--text); }
+.rn.rn-solo .rn-i.warn { color: var(--warn); }
+.rn.rn-solo .btn, .rn.rn-solo .rn-row .icon-btn { color: var(--text); background: var(--card); border-color: var(--line); }
+.rn.rn-solo .btn.primary { background: var(--accent); color: var(--on); border-color: var(--accent); }
+.rn.rn-solo button.rn-row:hover, .rn.rn-solo a.rn-row:hover { background: var(--card); }
+.rn.rn-solo .rn-logo { background: var(--card); }
+.rn.rn-solo :focus-visible { outline-color: var(--accent); }
+.rn.rn-solo.rn-folded { align-self: flex-start; display: inline-block; }
+/* TV mode: a little wider, for the bigger text */
+.tv .rn { flex-basis: 26rem; width: 26rem; }
+@media (max-width: 899px) {
+  .tv .rn { flex-basis: 100%; width: auto; }
+  .rn.rn-solo, .rn.rn-solo.rn-folded { background: none; border: 0; margin: calc(var(--top) + .6rem) 0 0; }
+  .rn.rn-solo .rn-secs { flex-wrap: nowrap; gap: .6rem; }
+  .rn.rn-solo .rn-sec, .rn.rn-solo .rn-sec:first-child, .rn.rn-solo .rn-sec:last-child { flex: 0 0 min(19rem, 82%); padding: .55rem .8rem .65rem; border: 1px solid var(--line); background: var(--bg2); }
+  .rn.rn-solo .rn-sec:only-child { flex-basis: 100%; }
+  .rn.rn-solo.rn-folded { display: inline-block; border: 1px solid var(--line); background: var(--bg2); }
+}
+/* A phone: Resume, More info (just its "i") and My List stay on one line under the title */
+@media (max-width: 520px) {
+  .hero-acts { flex-wrap: nowrap; }
+  .hero-acts .btn.primary { flex: 1 1 auto; min-width: 0; justify-content: center; }
+  .hero-more { flex: none; padding-left: .95rem; padding-right: .95rem; }
+  .hero-more span { display: none; }
+  .hero-acts .icon-btn { flex: none; }
+}
