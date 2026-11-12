@@ -34,7 +34,7 @@ V.route('title', function (view, r) {
     (V.newEpsOf(it.k) ? '<div class="tp-new"><span class="badge new">' + V.esc(V.newEpsLabel(it.k)) + '</span></div>' : '') +
     '<div class="tp-meta"></div><div class="tp-acts"></div><p class="tp-plot"></p><div class="tp-credits dim"></div><div class="tp-social"></div></div></div></div>' +
     (isShow ? '<section class="tp-eps"><div class="eps-h"><h2>Episodes</h2><select class="input" data-season aria-label="Season" hidden></select>' + ((S.settings.allowDownloads || S.profile.admin) && !V.device.tv ? '<button class="btn sm" data-a="dlseason" title="Download this season">' + V.icon('download') + ' Season</button>' : '') + '</div><div class="eps"><div class="spinner"></div></div></section>' : '') +
-    '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-more"></div></article>';
+    '<section class="tp-col" hidden></section><section class="tp-bm" hidden></section><div class="tp-extra"></div><div class="tp-more"></div></article>';
   // A poster that doesn't load isn't replaced with initials here — the title is right next to it anyway.
   var pimg = V.$('.tp-poster img', view);
   if (pimg) pimg.addEventListener('error', function () { var pp = V.$('.tp-poster', view); if (pp) pp.hidden = true; });
@@ -121,6 +121,8 @@ V.route('title', function (view, r) {
     }).catch(function () {});
     var fx = V.$('[data-fix]', view);
     if (fx) fx.onclick = function () { V.fixDetails(it, d); };
+    // Its logo, the cast with faces, who made it, facts, release dates, what viewers wrote (TMDB): titlemore.js.
+    if (V.titleMore) V.titleMore(view, it, d);
     if (d.col) V.drawCollection(V.$('.tp-col', view), it);
     if (d.watchedBy && d.watchedBy.length && S.socialCache) {
       var names = d.watchedBy.map(function (id) { var pr = S.socialCache.profiles.filter(function (x) { return x.id === id; })[0]; return pr ? V.avatar(pr.avatar, 'xs') + V.esc(pr.name) : ''; }).filter(Boolean);

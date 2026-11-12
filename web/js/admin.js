@@ -722,6 +722,9 @@ var AREA_SW = [
   ['viewing', 'Viewing statistics', 'Your viewing, Your week and Year in review.'],
   ['themes', 'A choice of looks', 'All 25 colour themes. Off: Midnight, Daylight and High contrast only.'],
   ['rightnow', 'Right now on Home', 'The panel in Home’s banner: who else is watching, new messages, your next reminder and what’s on.'],
+  ['people', 'People', 'Actors’ and directors’ pages, and the cast’s photos on a title’s page. Off: names only. Needs a TMDB key.'],
+  ['logos', 'Title logos', 'A film’s or series’ own lettering in place of its name in plain text, on its page and Home’s banner. Needs a TMDB key.'],
+  ['reviews', 'Viewers’ reviews', 'What people on TMDB wrote, on a title’s page. Never shown on kids profiles. Needs a TMDB key.'],
 ];
 function areasHtml(s) {
   var off = s.off || {};

@@ -88,10 +88,12 @@
     var body = '<p class="dim">A row on your home page with the titles from a list that are here. It’s checked again every day.</p>' +
       '<label class="field"><span>Paste a list link</span><div class="inline"><input class="input" data-hl-text placeholder="themoviedb.org/list/… , /collection/… or /keyword/…" autocomplete="off"><button class="btn primary" data-hl-go>Add</button></div>' +
       '<small class="dim">A TMDB list (people share lists of Oscar winners, a director’s films…), a collection (every film of a series) or a keyword (“christmas”, “time travel”…).</small></label>' +
+      // …or made by choosing: a genre, years, a rating, a language, a streaming service (TMDB's "discover").
+      (av.tmdb ? '<details class="hl-build"><summary>Or make a row by choosing</summary><div class="hl-build-b"><div class="spinner"></div></div></details>' : '') +
       '<p class="hl-msg err" role="alert" hidden></p>' +
       (av.tmdb ? '' : '<p class="note" data-need="tmdb">' + V.icon('info') + ' <span>TMDB lists aren’t available: they need a TMDB key. ' + (S.profile.admin ? 'Add a free one in <a href="#/admin/recs">Admin → Recommendations</a>.' : 'The admin can add a free one in Admin → Recommendations.') + '</span></p>');
     V.dialog({
-      title: 'Add a row from a list', wide: true, body: body,
+      title: 'Add a row', wide: true, body: body,
       onOpen: function (d, finish) {
         var msg = V.$('.hl-msg', d), input = V.$('[data-hl-text]', d);
         var busy = false;
@@ -125,6 +127,38 @@
           }).then(function () { busy = false; if (btn) btn.disabled = false; });
         };
         V.$('[data-hl-go]', d).onclick = function (e) { var t = input.value.trim(); if (!t) { input.focus(); return; } go({ text: t }, e.currentTarget); };
+        // The builder: its lists (genres, services) are fetched when it is first opened.
+        var det = V.$('.hl-build', d), opts = null;
+        var drawBuilder = function () {
+          var box = V.$('.hl-build-b', d), keep = {};
+          V.$$('[data-b]', box).forEach(function (el) { keep[el.getAttribute('data-b')] = el.value; });
+          var type = keep.type === 'tv' ? 'tv' : 'movie';
+          var sel = function (k, list, label) { return '<label class="field"><span>' + label + '</span><select class="input" data-b="' + k + '">' + list.map(function (o) { return '<option value="' + V.esc(o[0]) + '"' + (String(keep[k] || '') === String(o[0]) ? ' selected' : '') + '>' + V.esc(o[1]) + '</option>'; }).join('') + '</select></label>'; };
+          var year = new Date().getFullYear(), years = [['', 'Any']];
+          for (var y = year; y >= 1930; y -= (y > 2000 ? 1 : 5)) years.push([String(y), String(y)]);
+          var langs = [['', 'Any']].concat(['en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh', 'hi', 'ar', 'tr', 'ru', 'sv', 'da', 'no', 'nl', 'pl'].map(function (c) { return [c, V.langName(c) || c]; }));
+          box.innerHTML = '<div class="hl-build-g">' +
+            sel('type', [['movie', 'Films'], ['tv', 'Series']], 'What') +
+            sel('genre', [['', 'Any']].concat(opts.genres[type].map(function (g) { return [g.id, g.name]; })), 'Genre') +
+            sel('genre2', [['', '—']].concat(opts.genres[type].map(function (g) { return [g.id, g.name]; })), 'And also') +
+            sel('from', years, 'From year') + sel('to', years, 'To year') +
+            sel('stars', [['', 'Any'], ['6', '6 and up'], ['7', '7 and up'], ['7.5', '7.5 and up'], ['8', '8 and up']], 'Rated (of 10)') +
+            sel('lang', langs, 'Made in') +
+            sel('service', [['', 'Any']].concat(opts.services.map(function (x) { return [x.id, x.name]; })), 'Streaming on (' + V.esc(opts.region) + ')') +
+            sel('sort', [['popular', 'Most popular first'], ['rated', 'Best rated first'], ['newest', 'Newest first']], 'Order') +
+            '</div><div class="btn-row"><button class="btn primary" data-hl-build>Add this row</button></div>';
+          V.$('[data-b=type]', box).onchange = drawBuilder;
+          V.$('[data-hl-build]', box).onclick = function (e) {
+            var v = function (k) { var el = V.$('[data-b=' + k + ']', box); return el ? el.value : ''; };
+            var c = { type: v('type'), genres: [v('genre'), v('genre2')].filter(Boolean).map(Number), from: v('from'), to: v('to'), stars: v('stars'), lang: v('lang'), service: v('service'), sort: v('sort') };
+            if (!c.genres.length && !c.from && !c.to && !c.stars && !c.lang && !c.service) { msg.textContent = 'Choose at least one thing for the row: a genre, years, a rating, a language or a service.'; msg.hidden = false; return; }
+            go({ kind: 'tmdb-discover', ref: JSON.stringify(c) }, e.currentTarget);
+          };
+        };
+        if (det) det.addEventListener('toggle', function () {
+          if (!det.open || opts) return;
+          V.api('/api/homelists/options').then(function (o) { opts = o; drawBuilder(); }).catch(function (er) { V.$('.hl-build-b', d).innerHTML = '<p class="err">' + V.esc(er.message) + '</p>'; });
+        });
         input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); V.$('[data-hl-go]', d).click(); } });
         d.addEventListener('click', function (e) {
           if (e.target.closest('a[href^="#/"]')) finish(null);
@@ -152,7 +186,7 @@
       var items = L.items.map(function (x, i) { x.rank = i + 1; x.it = x.k ? V.entry(x.k) : null; if (x.it && hidden.has(x.k)) x.it = null; return x; });
       var here = items.filter(function (x) { return x.it; }), missing = items.filter(function (x) { return !x.it; });
       var list = show === 'here' ? here : show === 'missing' ? missing : items;
-      var src = { 'tmdb-list': 'TMDB list', 'tmdb-collection': 'TMDB collection', 'tmdb-keyword': 'TMDB keyword' }[L.kind] || 'List';
+      var src = { 'tmdb-list': 'TMDB list', 'tmdb-collection': 'TMDB collection', 'tmdb-keyword': 'TMDB keyword', 'tmdb-discover': 'Made by choosing, from TMDB' }[L.kind] || 'List';
       box.innerHTML = V.pageHead(L.name, '<button class="btn" data-hl="refresh">' + V.icon('refresh') + ' Check again</button><button class="icon-btn" data-hl-menu="' + V.esc(L.id) + '" aria-label="Row options">' + V.icon('dots') + '</button>') +
         '<p class="hl-sum"><b>' + here.length + ' of ' + L.total + ' here</b> <span class="dim">· ' + V.esc(src) + (L.listName && L.listName !== L.name ? ': ' + V.esc(L.listName) : '') + (L.at ? ' · checked ' + V.fmtAgo(L.at) : '') + '</span></p>' +
         (L.err ? '<p class="note warn">' + V.icon('info') + ' The last check failed: ' + V.esc(L.err) + '</p>' : '') +

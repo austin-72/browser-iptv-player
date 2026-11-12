@@ -1,4 +1,4 @@
-# Subtitles, rows from lists, the wishlist, your viewing, the viewing dashboard, speed test, error reports and automations
+# Subtitles, people and more from TMDB, rows from lists, the wishlist, your viewing, the viewing dashboard, speed test, error reports and automations
 
 [← Back to the README](../README.md)
 
@@ -110,6 +110,26 @@ Admin → **Integrations** → *Subtitles made from the sound* shows what was fo
 - Machine-made: names and fast speech come out wrong, and the timing is by the sentence.
 - How sure this is: the app's side is tested with a stand-in for the program that takes whisper.cpp's options, and those options and the lines it prints were checked against whisper.cpp 1.9.5's source. The build in `tools/whisper` is the usual way to build whisper.cpp as one file on Alpine, but it isn't run by this project's tests: if it fails on your computer, the script says so and changes nothing.
 
+## More from TMDB on a title's page, and people
+
+With a TMDB key (Admin → Recommendations), opening a film's or series' page asks TMDB once more for that title — one request, kept two weeks — and adds:
+
+- **Its logo** in place of the name in plain text, on its page and in Home's banner (the name stays for screen readers, and shows if the picture doesn't load).
+- **The tagline**, and **the cast with photos and who they play** (for a series: who is in the most episodes). **Who made it**: director, writers, music, photography; a series' creators.
+- **Details**: status (still running, ended, being made), original title and language, when it reached cinemas, digital and disc in your country, seasons and episodes, network, studio, budget and box office, official site, IMDb.
+- **What viewers wrote**: up to six reviews from TMDB, as plain text, the long ones folded. They can give the story away, and say so above them.
+- **An age rating where there was none.** A title's rating is now your country's, then the US one, then another country's that says something ("NR" and "Unrated" don't). Titles with no US rating used to have none, and parental limits let them through. Ratings TMDB gives as an age ("16", "FSK 12", "MA15+") are read as that age; a bare letter that means different things in different countries (a Spanish "A" is for everyone, an Indian "A" is adults only) is not guessed at.
+
+A name in the cast opens **that person's page**: photo, a few lines about them, everything of theirs in your lists (also the films where they are too far down the cast to be listed on the title's own page), and under it what they are best known for that isn't here, one press from your wishlist. Searching for a name leads there too (the row's title).
+
+**Episodes in the wrong order?** on a series' page lists the other orders TMDB has for it — DVD order, numbered straight through, by story arc. Pick the one that matches the episodes your provider has and their titles, pictures and descriptions line up, for everyone. Subtitle searches still ask by the season and episode it was first shown as.
+
+Three switches in Admin → Playback → *What’s switched on*: **People** (off: names only), **Title logos**, **Viewers' reviews** (never shown on a kids profile; a kids profile also can't change an episode order, and a person's page there lists only what that profile may see).
+
+For subtitles, the same answer gives the title's IMDb number (tried when a subtitle site has nothing under the TMDB number, before the name) and the other names it goes by, so a copy named `La.Casa.de.Papel…` isn't doubted for *Money Heist*.
+
+Not tried against TMDB itself by this project's tests: they run against a stand-in that answers in TMDB's documented shapes.
+
 ## Home rows from TMDB lists
 
 **Home → Add a row from a list** (at the bottom of Home, and in *Customise this page*) puts a list on your home page. Paste a link to:
@@ -118,7 +138,9 @@ Admin → **Integrations** → *Subtitles made from the sound* shows what was fo
 - a **collection** (`themoviedb.org/collection/…`): every film of a series, in order;
 - a **keyword** (`themoviedb.org/keyword/…`, films, or `/tv` for series): "christmas", "time travel"…
 
-What's trending and popular worldwide is in Movies and Series (and a Home row) with smarter categories on: Admin → Categories.
+Or open **Or make a row by choosing** in the same dialog and pick any of: films or series, one or two genres, from and to years, a least rating, the language it was made in, a streaming service (in the country set in Admin → Categories), and the order (most popular, best rated, newest). The row names itself — *Best-rated Action films since 2010* — and can be renamed.
+
+What's trending and popular worldwide is in Movies and Series (and a Home row) with smarter categories on: Admin → Categories. Two more of those charts: *Coming to cinemas* (films with a date still to come that your lists already have) and *New episodes today* (series here with an episode out today).
 
 A row shows only the titles your providers have, matched by TMDB (or IMDb) id first, then by title and year, and says how many: *12 of 250 here*. **See the whole list** (the row's title, or its ⋯ menu) shows every entry in the list's order, with *Here* / *Not here* filters; anything that isn't here can go on your wishlist with one click. The ⋯ menu also has *Move to the top*, *Rename*, *Hide this row* and *Remove this row*, and the rows appear in *Customise this page* with the others.
 
@@ -281,4 +303,4 @@ automation:
 
 ### Environment variables (testing only)
 
-`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE` and `OPENSUBTITLES_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`), and `TMDB_BASE` points TMDB at one (`test/mock/tmdb.js`).
+`SUBDL_BASE`, `SUBDL_DL_BASE`, `GESTDOWN_BASE` and `OPENSUBTITLES_BASE` point the integrations at stand-ins (see `test/mock/integrations.js`), and `TMDB_BASE` (with `TMDB_IMG_BASE` for its pictures) points TMDB at one (`test/mock/tmdb.js`).

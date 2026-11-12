@@ -708,7 +708,7 @@ function publicSettings() {
 // (Admin → Playback → What's switched on. The pages and menus go in the browser — web/js/core.js V.AREAS — and the
 // area's own requests are refused here, so an old tab or another app can't keep using it. Watch parties and
 // downloads have their own older switches: allowParties, allowDownloads.)
-const AREAS = ['messages', 'multiview', 'trailers', 'moods', 'viewing', 'wishlist', 'queue', 'follow', 'themes', 'rightnow'];
+const AREAS = ['messages', 'multiview', 'trailers', 'moods', 'viewing', 'wishlist', 'queue', 'follow', 'themes', 'rightnow', 'people', 'reviews', 'logos'];
 const AREA_NAMES = { messages: 'Messages are', trailers: 'Trailers are', viewing: 'Viewing statistics are', wishlist: 'The wishlist is', queue: 'The play queue is', follow: 'Following teams is' };
 const AREA_API = [
   ['messages', /^\/api\/messages(?:-react)?(?:\/|$)/, false],
@@ -3376,6 +3376,11 @@ followsOf = p10.followsOf;
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p10.publicFlags() }); }
 // [routes:p13] Subtitles made from a film's sound, when a speech-to-text program is on the server (lib/subgen.js).
 const p13 = require('./lib/routes-p13')({ route, requireProfile, requireAdmin, readJSON, HttpError, D, settings, catalog: () => catalog, item, inputOf, srcList, connLimit, listUsage, hub, media, hooks: dvrHooks, relayExtra: (id) => relayFinished.extra(id) });
+// [routes:p14] More from TMDB when a page asks: a title's logo, cast with photos, facts and reviews; people; episode orders.
+require('./lib/routes-p14')({
+  route, requireProfile, readJSON, HttpError, tmdb, catalog: () => catalog, item, userdata, areaOff, certLevel: require('./lib/catalog').certLevel, log, hub,
+  byTmdb: (t, id) => trending._index().m.get(t + id) || [],
+});
 { const prev = p5Public; p5Public = () => ({ ...prev(), ...p13.publicFlags() }); }
 // [routes:p7] The play queue (per profile, synced between its devices).
 require('./lib/routes-p7')({ route, requireProfile, readJSON, HttpError, userdata, hub, catalog: () => catalog });

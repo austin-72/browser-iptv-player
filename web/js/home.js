@@ -134,6 +134,10 @@ V.route('home', function (view) {
       // Swap the blurred poster for the backdrop (something else may already have copied the details onto the item).
       if (d.bd) { if (!heroIt.bd) heroIt.bd = d.bd; var img = V.$('.hero-bg img.blur', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
     }).catch(function () {});
+    // The title in its own lettering (TMDB's logo), when there is one: titlemore.js.
+    if (S.settings.tmdb && V.titleMoreData && !V.areaOff('logos') && (heroIt.t === 'movie' || heroIt.t === 'show')) {
+      V.titleMoreData(heroIt.k).then(function (m) { if (m && m.logo) V.titleLogo(V.$('.hero-t', view), m.logo, heroIt.n); }).catch(function () {});
+    }
   }
   V.$('[data-home=customize]', view).onclick = V.customizeHome;
   // The window grew or shrank past where the banner has room for "Also in progress": drawn again, so those titles are

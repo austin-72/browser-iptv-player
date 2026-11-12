@@ -65,7 +65,8 @@ V.route('search', function (view, r) {
         if (empty) empty.remove();
         people.forEach(function (pp) {
           var both = pp.dir.length && pp.cast.length;
-          var mk = function (keys, label) { var items = keys.map(V.entry).filter(Boolean); if (items.length) { var x = V.row({ id: 'p:' + pp.name + label, title: pp.name + label, items: items }); if (x) box.appendChild(x); } };
+          // (The name opens their page — photo, everything of theirs: titlemore.js — when those are on.)
+          var mk = function (keys, label) { var items = keys.map(V.entry).filter(Boolean); if (items.length) { var x = V.row({ id: 'p:' + pp.name + label, title: pp.name + label, items: items, more: V.personLink ? V.personLink(pp.name) : '' }); if (x) box.appendChild(x); } };
           if (pp.dir.length) mk(pp.dir, both || pp.role === 'dir' ? ' · directed' : '');
           if (pp.cast.length) mk(pp.cast, both ? ' · starring' : '');
         });

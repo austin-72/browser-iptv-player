@@ -334,3 +334,70 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
   .os-kinds::-webkit-scrollbar { display: none; }
   .os-kinds .chip { flex: none; }
 }
+
+/* ---------- More from TMDB on a title's page (titlemore.js): its logo, tagline, the cast with faces, facts, reviews */
+.t-logo { display: block; max-width: min(100%, 26rem); max-height: 9.5rem; width: auto; height: auto; object-fit: contain; object-position: left center; filter: drop-shadow(0 2px 14px rgba(0,0,0,.55)); }
+.has-logo { line-height: 0; }
+.hero-t.has-logo { margin-bottom: .9rem; }
+.hero-t .t-logo { max-width: min(100%, 24rem); max-height: 8rem; }
+.lite .t-logo { filter: none; }
+.tp-tag { font-style: italic; color: rgba(255,255,255,.8); margin: .2rem 0 .5rem; max-width: 44rem; }
+.tp-extra { display: grid; gap: 1.6rem; margin: 1.4rem 0 .4rem; }
+.tp-extra > section { min-width: 0; }
+.tp-extra:empty { display: none; }
+.tp-extra h2 { font-size: 1.15rem; margin: 0 0 .7rem; }
+.pc-row { list-style: none; margin: 0; display: flex; gap: .9rem; overflow-x: auto; padding: .35rem .2rem .7rem; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.pc-row.dragging { scroll-snap-type: none; cursor: grabbing; }
+.pc-row > li { flex: 0 0 6.6rem; scroll-snap-align: start; }
+.pc { display: flex; flex-direction: column; align-items: center; gap: .25rem; text-align: center; text-decoration: none; color: var(--text); scroll-snap-align: start; border-radius: 12px; padding: .3rem .2rem; }
+.pc:focus-visible { outline: 3px solid var(--focus, var(--accent)); outline-offset: 2px; }
+.pc-face { width: 5.4rem; height: 5.4rem; border-radius: 50%; overflow: hidden; background: var(--tint, var(--card)); display: grid; place-items: center; flex: none; }
+.pc-face img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; }
+.pc-in { font-weight: 700; font-size: 1.4rem; color: rgba(255,255,255,.85); }
+.pc-n { font-size: .86rem; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.pc-as { font-size: .78rem; color: var(--dim); line-height: 1.2; overflow-wrap: anywhere; }
+.pc:hover .pc-face { box-shadow: 0 0 0 3px var(--text); }
+.tv .pc:focus { outline: none; background: #fff; color: #000; }
+.tv .pc:focus .pc-as { color: #333; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .55rem 1.6rem; margin: 0; max-width: 62rem; }
+.facts > div { min-width: 0; }
+.facts dt { font-size: .78rem; color: var(--dim); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.facts a { color: inherit; }
+.tp-reviews { max-width: 52rem; }
+.tp-reviews > p { margin: -.4rem 0 .8rem; }
+.rv { border-top: 1px solid var(--line); padding: .8rem 0; }
+.rv-h { display: flex; flex-wrap: wrap; gap: .3rem .8rem; align-items: baseline; margin-bottom: .3rem; }
+.rv-s { color: var(--warn); font-weight: 600; }
+.rv-s .dim { font-weight: 400; }
+.rv-t { margin: 0 0 .3rem; line-height: 1.5; overflow-wrap: anywhere; }
+.rv-t.clamped, .pp-bio.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+/* The order of a series' episodes */
+.eo-ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; max-height: 55vh; overflow: auto; }
+.eo-pick { display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; text-align: left; white-space: normal; width: 100%; padding: .6rem .75rem; }
+.eo-pick.cur { border-color: var(--text); }
+.eo-note { font-style: italic; }
+/* A person's page */
+.person-page { padding: 1.2rem 0 2rem; }
+.pp-h { display: flex; gap: 1.6rem; align-items: flex-start; margin-bottom: 1.6rem; }
+.pp-face { flex: 0 0 auto; width: clamp(7rem, 16vw, 12rem); aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden; background: var(--tint, var(--card)); display: grid; place-items: center; }
+.pp-face img { width: 100%; height: 100%; object-fit: cover; }
+.pp-face .pc-in { font-size: 2.6rem; }
+.pp-info { min-width: 0; max-width: 52rem; }
+.pp-info h1 { margin: 0 0 .3rem; font-size: clamp(1.6rem, 4vw, 2.6rem); }
+.pp-facts { margin-bottom: .8rem; }
+.pp-bio { line-height: 1.55; margin: 0 0 .3rem; }
+.person-page h2 { font-size: 1.15rem; margin: 1.4rem 0 .8rem; }
+.person-page h2 .dim { font-weight: 400; font-size: .9rem; margin-left: .3rem; }
+@media (max-width: 640px) {
+  .pp-h { gap: 1rem; }
+  .pp-face { width: 6.2rem; }
+  .pc-row > li { flex-basis: 5.6rem; }
+  .pc-face { width: 4.6rem; height: 4.6rem; }
+  .facts { grid-template-columns: 1fr 1fr; }
+}
+/* A Home row made by choosing */
+.hl-build { margin: .8rem 0; border-top: 1px solid var(--line); padding-top: .6rem; }
+.hl-build summary { cursor: pointer; font-weight: 600; padding: .3rem 0; }
+.hl-build-g { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .6rem .8rem; margin: .7rem 0; }
+.hl-build-g .field { margin: 0; }

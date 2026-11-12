@@ -328,7 +328,7 @@ V.prompt = function (title, o) {
  */
 /** The admin, or a profile the admin gave the manager role (channels, list refreshes, error reports, screen-time requests). */
 V.canManage = function () { return !!(S.profile && (S.profile.admin || (S.profile.manager && !S.profile.kids))); };
-V.AREAS = { messages: [], multiview: ['multiview'], trailers: ['trailers'], moods: ['mood', 'together'], viewing: ['viewing', 'review'], wishlist: ['wishlist'], queue: [], follow: ['follow'], themes: [], rightnow: [] };
+V.AREAS = { messages: [], multiview: ['multiview'], trailers: ['trailers'], moods: ['mood', 'together'], viewing: ['viewing', 'review'], wishlist: ['wishlist'], queue: [], follow: ['follow'], themes: [], rightnow: [], people: ['person'], reviews: [], logos: [] };
 V.areaOff = function (area) { var o = S.settings && S.settings.off; return !!(o && o[area] === true); };
 V.pageOff = function (name) { for (var a in V.AREAS) if (V.AREAS.hasOwnProperty(a) && V.AREAS[a].indexOf(name) >= 0 && V.areaOff(a)) return true; return false; };
 V.applyAreas = function () {
