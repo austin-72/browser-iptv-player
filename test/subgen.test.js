@@ -65,7 +65,7 @@ test('finding the speech-to-text program, and saying why not', () => {
     const bin = fakeWhisper(dir), model = path.join(dir, 'ggml-base.bin');
     fs.writeFileSync(model, 'model');
     assert.deepStrictEqual((({ available, kind, why }) => ({ available, kind, why }))(new SubGen(dir, { ffmpeg }, { bin, model }).detect().info()), { available: true, kind: 'cpp', why: '' });
-    assert.match(new SubGen(dir, { ffmpeg }, { bin, model: '' }).detect().why, /needs a model file: set WHISPER_MODEL/);
+    assert.match(new SubGen(dir, { ffmpeg }, { bin, model: '' }).detect().why, /needs a model file: put one .* in .*whisper, or set WHISPER_MODEL/);
     assert.match(new SubGen(dir, { ffmpeg }, { bin, model: path.join(dir, 'missing.bin') }).detect().why, /isn’t there or can’t be read/);
     assert.match(new SubGen(dir, { ffmpeg }, { bin: path.join(dir, 'nothing-here'), model }).detect().why, /couldn’t be run/);
     // Something else by that name.
@@ -77,6 +77,38 @@ test('finding the speech-to-text program, and saying why not', () => {
     assert.strictEqual(new SubGen(dir, { ffmpeg }, { bin: fakeWhisper(pdir, { python: true }), model: '' }).detect().info().kind, 'py');
     const g = new SubGen(dir, { ffmpeg }, { bin: path.join(dir, 'nothing-here'), model });
     assert.throws(() => g.detect().start({ k: 'x', name: 'X', input: 'x', local: true }), /can’t make subtitles/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a program and a model dropped into the data folder are found with nothing set (a Docker install)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'subgen-own-')), own = path.join(dir, 'whisper');
+  const noPath = (fn) => { const p = process.env.PATH; process.env.PATH = path.join(dir, 'empty'); try { return fn(); } finally { process.env.PATH = p; } };
+  const look = () => noPath(() => new SubGen(dir, { ffmpeg }, { bin: '', model: '' }).detect());
+  try {
+    assert.match(look().why, /No speech-to-text program was found\. Put whisper\.cpp’s whisper-cli and a model file in .*whisper/);
+    fs.mkdirSync(own);
+    fakeWhisper(own);
+    assert.match(look().why, /needs a model file: put one .*ggml-small\.bin.* in /, 'the program alone');
+    // Not models: a download still under way, the little voice-detection model, something tiny.
+    fs.writeFileSync(path.join(own, 'ggml-small.bin.part'), Buffer.alloc(2 * 1024 * 1024));
+    fs.writeFileSync(path.join(own, 'ggml-silero-v6.2.0.bin'), Buffer.alloc(2 * 1024 * 1024));
+    fs.writeFileSync(path.join(own, 'ggml-broken.bin'), 'x');
+    assert.strictEqual(look().available, false);
+    fs.writeFileSync(path.join(own, 'ggml-base.bin'), Buffer.alloc(2 * 1024 * 1024));
+    let i = look().info();
+    assert.deepStrictEqual([i.available, i.kind, i.where, i.bin, i.model], [true, 'cpp', 'data', path.join(own, 'whisper-cli'), path.join(own, 'ggml-base.bin')]);
+    // Two models: the newer one. And WHISPER_MODEL, when set, is the one used.
+    fs.writeFileSync(path.join(own, 'ggml-small.bin'), Buffer.alloc(2 * 1024 * 1024));
+    fs.utimesSync(path.join(own, 'ggml-base.bin'), new Date(Date.now() - 60000), new Date(Date.now() - 60000));
+    assert.strictEqual(look().info().model, path.join(own, 'ggml-small.bin'));
+    assert.strictEqual(noPath(() => new SubGen(dir, { ffmpeg }, { bin: '', model: path.join(own, 'ggml-base.bin') }).detect()).info().model, path.join(own, 'ggml-base.bin'));
+    // Found again from Admin after a model is swapped, without a restart.
+    const g = look();
+    fs.unlinkSync(path.join(own, 'ggml-small.bin'));
+    assert.strictEqual(noPath(() => g.detect()).info().model, path.join(own, 'ggml-base.bin'));
+    // A file that isn't marked as a program (or was built for another system) is said, not run.
+    fs.chmodSync(path.join(own, 'whisper-cli'), 0o644);
+    assert.match(look().why, /can’t be run by this server/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

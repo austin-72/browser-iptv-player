@@ -67,12 +67,40 @@ While it reads from a provider it shows among that provider's connections as *Ch
 
 When nothing is found online, the server can listen to a film or episode and write subtitles in the language spoken: **Find subtitles → Make subtitles from the sound**. A note arrives when they're ready, and from then on they're in that title's Subtitles menu for everyone (marked *made here*).
 
-It is optional and off unless the server has a speech-to-text program. Nothing is bundled and no npm package is used:
+It is optional and off unless the server has a speech-to-text program. Nothing is bundled and no npm package is used. The app looks for one when it starts (and when you press *Look again* in Admin):
 
 | | |
 |---|---|
-| `WHISPER_BIN` | The program. Default: `whisper-cli` (whisper.cpp), then `whisper` (OpenAI's, or `whisper-ctranslate2`), looked for on the `PATH`. |
-| `WHISPER_MODEL` | whisper.cpp: the path of a model file such as `ggml-base.bin` (required). The Python command line: a model name (`base` unless set). |
+| `WHISPER_BIN` | The program. Default: `whisper-cli` (whisper.cpp), then `whisper` (OpenAI's, or `whisper-ctranslate2`), looked for on the `PATH`; then `whisper-cli` in the **`whisper` folder of the data folder**. |
+| `WHISPER_MODEL` | whisper.cpp: the path of a model file such as `ggml-small.bin`. Default: the newest `ggml-*.bin` in the `whisper` folder of the data folder. The Python command line: a model name (`base` unless set). |
+
+### Setting it up with Docker
+
+The image has no speech-to-text program in it, and whisper.cpp publishes none for Alpine Linux (what the image is built on). `tools/whisper` builds one and fetches a model, both into `data/whisper`, where the app finds them — no image of your own, no settings, and it survives updates:
+
+- **Windows:** double-click `tools\whisper\setup-whisper.bat` (Docker Desktop running).
+- **Linux, macOS, a NAS:** `sh tools/whisper/setup-whisper.sh`
+- **By hand**, from the folder with `docker-compose.yml`:
+  ```
+  docker build --output type=local,dest=./data/whisper https://github.com/austin-72/superstation-iptv.git#main:tools/whisper
+  curl -L -o data/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+  ```
+
+Then restart the server, or press *Look again* in Admin → Integrations.
+
+What that does: Docker downloads Alpine Linux and its build tools, takes whisper.cpp's source from `github.com/ggml-org/whisper.cpp` (a fixed release) and compiles its command-line program as one self-contained file, built for the processor of the computer it runs on — so build it on the computer that runs the server. The model comes from whisper.cpp's own collection on Hugging Face. It takes a few minutes and some hundreds of megabytes of Docker's build cache (`docker builder prune` gives that back).
+
+| Model | File | Memory | For |
+|---|---|---|---|
+| `tiny` | 75 MB | ~0.3 GB | A try-out: quick, many mistakes |
+| `base` | 142 MB | ~0.4 GB | Clear speech, a small server |
+| `small` (what the scripts fetch) | 466 MB | ~0.9 GB | The usual choice: films and series come out readable |
+| `medium` | 1.5 GB | ~2.1 GB | Better with accents and mumbling; about three times slower than `small` |
+| `large-v3-turbo` | 1.6 GB | ~2 GB | Close to the biggest models' accuracy at roughly `medium`'s speed |
+
+Give the script a name to fetch another (`setup-whisper.bat medium`); with several in the folder the newest file is used, so delete the ones you don't want. It runs on the processor alone. As a rough guide, a film takes from a quarter of its running time (`small`, a recent desktop) to more than its running time (`medium`, an older or small machine).
+
+The `whisper` folder is left out of backups (it can be fetched again), and a restored backup can't put anything in it, since it holds a program the server runs.
 
 Admin → **Integrations** → *Subtitles made from the sound* shows what was found (or why not) and who may ask: everyone, only the admin, or nobody.
 
@@ -80,7 +108,7 @@ Admin → **Integrations** → *Subtitles made from the sound* shows what was fo
 - While the sound is read from a provider, the job uses one of that provider's connections. It is listed with the people watching as *Making subtitles*, waits for a free connection instead of taking one, and reads the whole file once.
 - One title at a time; up to five wait in a queue. It runs at low priority, and it is slow work: expect a good part of the running time on a small server, depending on the model.
 - Machine-made: names and fast speech come out wrong, and the timing is by the sentence.
-- **Docker:** the image doesn't include a speech-to-text program. Add one in an image of your own on top of it (the base is Alpine, so whisper.cpp has to be built for Alpine), put a model file in the data folder, and set the two variables. This path hasn't been tried on a real install; the feature was tested with a stand-in for the program that takes whisper.cpp's options.
+- How sure this is: the app's side is tested with a stand-in for the program that takes whisper.cpp's options, and those options and the lines it prints were checked against whisper.cpp 1.9.5's source. The build in `tools/whisper` is the usual way to build whisper.cpp as one file on Alpine, but it isn't run by this project's tests: if it fails on your computer, the script says so and changes nothing.
 
 ## Home rows from TMDB lists
 

@@ -3161,7 +3161,8 @@ function makeBackup() {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name)) walk(full, r); } else if (!/\.(bak|tmp|tmp-bg)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full) && full !== SNAP_FILE) files[r] = fs.readFileSync(full).toString('base64');
+      // (whisper: a speech-to-text program and its model, hundreds of megabytes that can be fetched again — lib/subgen.js.)
+      if (e.isDirectory()) { if (!['tmp', 'cache', 'epg', 'thumbs', 'xt', 'backups', 'meta', 'recordings'].includes(e.name) && !(rel === '' && e.name === 'whisper')) walk(full, r); } else if (!/\.(bak|tmp|tmp-bg)$/.test(e.name) && !/^corrupt/.test(e.name) && !redownload.has(full) && full !== SNAP_FILE) files[r] = fs.readFileSync(full).toString('base64');
     }
   };
   walk(D, '');
@@ -3221,6 +3222,8 @@ function restoreFiles(data) {
   try { fs.unlinkSync(SNAP_FILE); } catch {}
   for (const [rel, b64] of Object.entries(data.files)) {
     if (rel.includes('..') || path.isAbsolute(rel)) continue;
+    // (Never a program for this server to run: what is in <data>/whisper is put there by whoever runs the server.)
+    if (/^[\\/]*whisper[\\/]/i.test(rel)) continue;
     const f = path.join(D, rel);
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, Buffer.from(b64, 'base64'));

@@ -67,6 +67,9 @@ test('a backup put back into an empty server brings everything back', { timeout:
     assert.strictEqual(before.me.prefs.audioLang, 'es');
     assert.strictEqual(before.me.progress[film.k].p, 1234, 'where the film was left');
 
+    // (A speech-to-text program and its model in the data folder — lib/subgen.js: hundreds of megabytes, never in a backup.)
+    fs.mkdirSync(path.join(data, 'whisper'), { recursive: true });
+    fs.writeFileSync(path.join(data, 'whisper', 'ggml-small.bin'), Buffer.alloc(3 * 1024 * 1024));
     // The backup.
     const r = await a.raw('GET', '/api/admin/backup');
     assert.strictEqual(r.status, 200);
@@ -74,6 +77,7 @@ test('a backup put back into an empty server brings everything back', { timeout:
     const inside = JSON.parse(zlib.gunzipSync(backup).toString('utf8'));
     assert.strictEqual(inside.app, 'superstation-iptv');
     assert.ok(Object.keys(inside.files).some((f) => /accounts\.json$/.test(f)) && Object.keys(inside.files).some((f) => /settings\.json$/.test(f)));
+    assert.ok(!Object.keys(inside.files).some((f) => /whisper/.test(f)) && backup.length < 2 * 1024 * 1024);
     a.stop(); await a.exited();
 
     // Everything gone; a new, empty server; its own first admin puts the backup back.
@@ -93,11 +97,13 @@ test('a backup put back into an empty server brings everything back', { timeout:
     assert.strictEqual((await b.req('GET', '/api/boot')).json.profiles.length, 1, 'nothing changed');
     // (The one put back says it's from "browser-iptv-player", as every backup made before the project was renamed does:
     // those are still taken. One from some other program isn't.)
-    const fromBefore = zlib.gzipSync(Buffer.from(JSON.stringify({ ...inside, app: 'browser-iptv-player' })));
+    // (…and a backup can't put a program where this server would run it.)
+    const fromBefore = zlib.gzipSync(Buffer.from(JSON.stringify({ ...inside, app: 'browser-iptv-player', files: { ...inside.files, 'whisper/whisper-cli': Buffer.from('#!/bin/sh\n').toString('base64'), 'kept.txt': Buffer.from('kept').toString('base64') } })));
     assert.strictEqual((await b.raw('POST', '/api/admin/restore', zlib.gzipSync(Buffer.from(JSON.stringify({ ...inside, app: 'something-else' }))), { 'X-Admin-Pin': '0000' })).status, 400);
     const put = await b.raw('POST', '/api/admin/restore', fromBefore, { 'Content-Type': 'application/gzip', 'X-Admin-Pin': '0000' });
     assert.strictEqual(put.status, 200, await put.text());
     assert.strictEqual(await b.exited(), 0, 'it restarts itself after a restore');
+    assert.ok(fs.existsSync(path.join(data, 'kept.txt')) && !fs.existsSync(path.join(data, 'whisper', 'whisper-cli')));
 
     // Started again: the household is back.
     b = await server(data, await freePort());

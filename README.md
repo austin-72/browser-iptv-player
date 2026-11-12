@@ -114,7 +114,7 @@ Open `http://<this computer's IP>:8080`. Everything the app saves is kept in `./
 docker run -d --name iptv -p 8080:8080 -v "$PWD/data:/data" --restart unless-stopped ghcr.io/austin-72/superstation-iptv:latest
 ```
 
-Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.5.0` stays on that version.
+Built for amd64 and arm64 (a Raspberry Pi 4 or 5, an ARM NAS) each time the version number changes. A tag like `:2.5.1` stays on that version.
 </details>
 
 <details>
@@ -446,7 +446,7 @@ Almost everything is set in the **Admin** screen and saved in `data/`. These are
 | `SITE_PASSWORD` | `changeme` | The site password used the very first time. After that, change it in Admin → Security |
 | `ALLOWED_HOSTS` | — | Extra host names to answer to while the default password is still in use (see [Security](#security)) |
 | `CSP` | on | Set to `off` to stop sending the Content-Security-Policy and frame-protection headers (or `"csp": false` in `defaults.json`). Only if a device or a proxy in front ever needs it (see [Security](#security)) |
-| `WHISPER_BIN`, `WHISPER_MODEL` | — | A speech-to-text program and its model, for [subtitles made from the sound](docs/integrations.md#subtitles-made-from-the-sound). Without one that part is simply off. |
+| `WHISPER_BIN`, `WHISPER_MODEL` | — | A speech-to-text program and its model, for [subtitles made from the sound](docs/integrations.md#subtitles-made-from-the-sound). Not needed when they are in the data folder's `whisper` folder ([one script puts them there for Docker](docs/integrations.md#setting-it-up-with-docker)). Without a program that part is simply off. |
 | `TRUST_PROXY` | off | Set to `1` behind a reverse proxy, so the real client IP and https are used (the last address in X-Forwarded-For that isn’t local or Cloudflare’s) |
 | `HTTPS_CERT`, `HTTPS_KEY` | — | Paths to a certificate and key, so the server speaks https itself |
 | `HWACCEL` | — | `vaapi`, `qsv`, `nvenc` or `videotoolbox` for hardware transcoding. Tested when the server starts; falls back to software if it fails. Docker Desktop on Windows or Mac can't pass Intel or AMD graphics through |
