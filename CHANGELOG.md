@@ -3,6 +3,15 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.1
+
+- **Genres tidied:** a provider's "Comedy." or "Talk-Show", "Mystère", "Krimi", "Familie", "Dokumentarfilm" and
+  "Action &amp; Adventure" now count as Comedy, Talk, Mystery, Crime, Family, Documentary and Action + Adventure —
+  they were genres of their own with one or two titles each. Catalogues saved before are tidied when the server starts.
+- **One meaning of a genre:** with smarter categories on, the Genre filter on Movies and Series offers the same genre
+  categories as the list down the side (with how many of the titles shown are in each), and a genre on a title's page
+  opens that category.
+
 ## 2.8.0
 
 - **Setting up a new install:** no shared `changeme` password any more. The first visit opens one screen to choose the

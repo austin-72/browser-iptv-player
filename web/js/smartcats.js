@@ -181,6 +181,17 @@
     }).join('') + '</div>';
   };
 
+  // A title's genre name (TMDB's, or a provider's as the server tidied it) → its smarter genre category, so a genre on
+  // a title's page opens the same list as Genres → that genre (lib/smartcats.js GENRE_OF).
+  var GENRE_ID = { action: 'action', adventure: 'adventure', animation: 'animation', anime: 'anime', comedy: 'comedy', crime: 'crime', documentary: 'documentary',
+    drama: 'drama', family: 'kids', kids: 'kids', fantasy: 'fantasy', history: 'history', horror: 'horror', music: 'music', mystery: 'mystery', romance: 'romance',
+    'science fiction': 'scifi', thriller: 'thriller', war: 'war', western: 'western', reality: 'reality', news: 'news', talk: 'talk', sport: 'sports', biography: 'history', soap: 'drama' };
+  V.smart.genreIdOf = function (name) {
+    if (!V.smart.on()) return '';
+    var id = GENRE_ID[String(name || '').toLowerCase()];
+    return id && defs()['g:' + id] ? 'g:' + id : '';
+  };
+
   /** Names a search can find a category's titles by (its name, other names: "xmas"). */
   V.smart.searchNames = function (id) {
     var d = defs()[id];

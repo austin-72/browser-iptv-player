@@ -99,7 +99,7 @@ V.route('title', function (view, r) {
 
   var meta = function (d) {
     var bits = [d.y, d.c ? '<span class="cert">' + V.esc(d.c) + '</span>' : '', d.r ? '★ ' + d.r : '', !isShow && d.d ? V.fmtLen(d.d) : '', isShow && d.ne ? V.plural(d.ne, 'episode') : '', (d.lg || []).map(V.langName).join(', '), d.nt || it.nt ? '<span class="note">' + V.esc(d.nt || it.nt) + '</span>' : ''].filter(Boolean);
-    V.$('.tp-meta', view).innerHTML = bits.join('<span class="dot-sep"></span>') + (d.gn && d.gn.length ? '<div class="tp-genres">' + d.gn.map(function (g) { return '<a class="chip sm" href="#/' + (isShow ? 'series' : 'movies') + '?genre=' + encodeURIComponent(g) + '">' + V.esc(g) + '</a>'; }).join('') + '</div>' : '');
+    V.$('.tp-meta', view).innerHTML = bits.join('<span class="dot-sep"></span>') + (d.gn && d.gn.length ? '<div class="tp-genres">' + d.gn.map(function (g) { var sid = V.smart && V.smart.genreIdOf ? V.smart.genreIdOf(g) : ''; return '<a class="chip sm" href="#/' + (isShow ? 'series' : 'movies') + (sid ? '?g=' + encodeURIComponent(sid) : '?genre=' + encodeURIComponent(g)) + '">' + V.esc(g) + '</a>'; }).join('') + '</div>' : '');
   };
   meta(it);
 

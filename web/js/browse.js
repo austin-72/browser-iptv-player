@@ -83,6 +83,11 @@ function vodPage(view, r, type, title) {
   var noun = type === 'movie' ? 'movies' : 'series', noun1 = type === 'movie' ? 'movie' : 'series';
   var g = r.q.get('g') || '';
   var genre = r.q.get('genre') || '';
+  // (With smarter categories a genre is one of their genre categories — "g:comedy" — so a filter, the Genres list and a
+  // title's genre all mean the same titles. A plain name from an older link becomes its category.)
+  if (genre && genre.indexOf('g:') !== 0 && V.smart && V.smart.genreIdOf && V.smart.genreIdOf(genre)) genre = V.smart.genreIdOf(genre);
+  var sGenre = genre.indexOf('g:') === 0;
+  var genreOk = function (x) { return !genre || (sGenre ? V.inGroup(x, genre) : (x.gn || []).indexOf(genre) >= 0); };
   var sort = r.q.get('sort') || (V.ls.get('sort.' + type) || 'default');
   var smart = V.smart && V.smart.on();
   var groups = V.groupList(type);
@@ -103,10 +108,10 @@ function vodPage(view, r, type, title) {
   // (Sorted once, then filtered: the same order as filtering first, as the sorts keep ties in catalogue order.)
   // (Suggested: a chart's own order, and For you's; with smarter categories, what's popular worldwide first; otherwise A–Z.)
   var sortBy = sort === 'default' ? (chart || mineCur ? 'rank' : g || genre ? (smart ? 'pop' : 'az') : 'new') : sort;
-  var base = mineCur ? mineCur.items() : g ? V.groupItems(type, g) : genre ? (S.genres.get(genre) || []).filter(function (x) { return x.t === type; }) : all;
+  var base = mineCur ? mineCur.items() : g ? V.groupItems(type, g) : genre ? (sGenre ? V.groupItems(type, genre) : (S.genres.get(genre) || []).filter(function (x) { return x.t === type; })) : all;
   var sorted = mineCur ? (sortBy === 'rank' ? base : V.sortItems(base, sortBy)) : V.browseMemo('sort|' + type + '|' + g + '|' + genre + '|' + sortBy + (chart ? '|' + V.smart.trendAt() : ''), function () { return sortBy === 'rank' ? base : V.sortItems(base, sortBy); });
   var inCat = sorted.filter(function (x) { return !hidden.has(x.k) && (!g || mineCur || V.inGroup(x, g)); });
-  var items = inCat.filter(function (x) { return (!genre || (x.gn || []).indexOf(genre) >= 0) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
+  var items = inCat.filter(function (x) { return genreOk(x) && decOk(x) && (!minR || (x.r || 0) >= minR) && lenOk(x); });
   if (chart && V.smart) V.smart.loadTrend();
   if (g === '__recs' && !S.recs && V.loadRecs) V.loadRecs().then(function () { if (S.recs && document.body.dataset.page === r.name && new URLSearchParams(location.hash.split('?')[1] || '').get('g') === '__recs') V.router.refresh(); });
   var setQ = function (k, v) { var q = new URLSearchParams(r.q); if (v) q.set(k, v); else q.delete(k); V.router.go('#/' + r.name + (q.toString() ? '?' + q : ''), true); };
@@ -138,19 +143,28 @@ function vodPage(view, r, type, title) {
     kinds.map(kindHtml).join('');
 
   // ---- what's chosen, and the filters on it
-  var label = mineCur ? mineCur.l : curGroup ? curGroup.label : g ? (V.smart && V.smart.isId(g) ? V.smart.label(g, type) : g) : genre ? genre : 'All ' + noun;
+  var genreLabel = sGenre ? V.smart.label(genre, type) : genre;
+  var label = mineCur ? mineCur.l : curGroup ? curGroup.label : g ? (V.smart && V.smart.isId(g) ? V.smart.label(g, type) : g) : genre ? genreLabel : 'All ' + noun;
   var crumb = mineCur ? 'For you' : curGroup ? kindName(curGroup.kind || 'prov') : genre ? 'Genre' : '';
-  var genres = V.browseMemo('genres|' + type + '|' + g, function () {
+  // The genres to filter by, with how many of this category's titles are in each: the smarter genre categories when
+  // they're on, otherwise the genre names the titles carry.
+  var genres = V.browseMemo('genres|' + type + '|' + g + '|' + smart + '|' + inCat.length, function () {
     var out = [];
-    S.genres.forEach(function (list, name) { var n = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || g.indexOf('__') === 0 || V.inGroup(list[i], g))) n++; if (n >= 1) out.push({ name: name, n: n }); });
-    return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (smart) {
+      var n = {};
+      for (var i = 0; i < inCat.length; i++) { var sc = inCat[i].sc || []; for (var j = 0; j < sc.length; j++) if (sc[j].indexOf('g:') === 0) n[sc[j]] = (n[sc[j]] || 0) + 1; }
+      groups.forEach(function (x) { if (x.kind === 'genre' && n[x.name] && x.name !== g) out.push({ name: x.name, label: x.label, n: n[x.name] }); });
+    } else {
+      S.genres.forEach(function (list, name) { var c = 0; for (var i = 0; i < list.length; i++) if (list[i].t === type && (!g || g.indexOf('__') === 0 || V.inGroup(list[i], g))) c++; if (c >= 1) out.push({ name: name, label: name, n: c }); });
+    }
+    return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
   });
   var DEC = [['', 'Any year'], ['new', 'Last 2 years'], ['2020', '2020s'], ['2010', '2010s'], ['2000', '2000s'], ['1990', '1990s'], ['1980', '1980s'], ['1970', '1970s'], ['old', 'Before 1970']];
   var RAT = [['', 'Any rating'], ['6', '★ 6+'], ['7', '★ 7+'], ['8', '★ 8+']];
   var LEN = [['', 'Any length'], ['90', 'Under 1½ hours'], ['100', 'Under 1 h 40'], ['120', 'Under 2 hours'], ['-150', 'Long (2½ h+)']];
   var nameOf = function (list, v) { var o = list.filter(function (x) { return x[0] === String(v || ''); })[0]; return o ? o[1] : v; };
   var chips = [];
-  if (genre) chips.push(['genre', 'Genre: ' + genre]);
+  if (genre) chips.push(['genre', 'Genre: ' + genreLabel]);
   if (dec) chips.push(['dec', nameOf(DEC, dec)]);
   if (minR) chips.push(['rmin', nameOf(RAT, minR)]);
   if (maxLen && type === 'movie') chips.push(['len', nameOf(LEN, maxLen)]);
@@ -234,7 +248,7 @@ function vodPage(view, r, type, title) {
   V.$('[data-addf]', view).onclick = function () {
     var sel = function (k, lbl, opts, cur) { return '<label class="field"><span>' + lbl + '</span><select class="input" data-ff="' + k + '">' + opts.map(function (o) { return '<option value="' + V.esc(o[0]) + '"' + (String(o[0]) === String(cur || '') ? ' selected' : '') + '>' + V.esc(o[1]) + '</option>'; }).join('') + '</select></label>'; };
     V.dialog({ title: 'Filter ' + label, body: '<div class="lib-ff">' +
-      (genres.length ? sel('genre', 'Genre', [['', 'Any genre']].concat(genres.map(function (x) { return [x.name, x.name + ' (' + x.n + ')']; })), genre) : '') +
+      (genres.length ? sel('genre', 'Genre', [['', 'Any genre']].concat(genres.map(function (x) { return [x.name, x.label + ' (' + x.n.toLocaleString() + ')']; })), genre) : '') +
       sel('dec', 'Years', DEC, dec) + sel('rmin', 'Rating', RAT, minR || '') + (type === 'movie' ? sel('len', 'Length', LEN, maxLen || '') : '') + '</div>',
       actions: [{ label: 'Cancel' }, { label: 'Show them', primary: true, fn: function (d) {
         var q = new URLSearchParams(r.q);
