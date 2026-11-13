@@ -1,16 +1,4 @@
-/* Search suggestions (autocomplete) under the search boxes, and the search box in the top bar on wide screens. */
-.ac-host { position: relative; }
-.ac-list { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 80; max-height: min(28rem, 62vh); overflow-y: auto; overscroll-behavior: contain; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 6px; animation: pop .1s ease-out; }
-.ac-o { display: flex; align-items: center; gap: .7rem; min-height: 2.75rem; padding: .4rem .6rem; border-radius: 8px; color: var(--text); cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
-.ac-o.on { background: var(--card2); }
-.ac-ic { width: 2rem; height: 2rem; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: var(--card); color: var(--dim); }
-.ac-ic .i { width: 1.05rem; height: 1.05rem; }
-.ac-o.on .ac-ic { color: var(--text); }
-.ac-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 1rem; }
-.ac-t b { color: var(--text); font-weight: 700; }
-.ac-m { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: .8rem; font-variant-numeric: tabular-nums; }
-.search-box .ac-list { top: calc(100% + 4px); }
-
+/* The search box in the top bar on wide screens. */
 /* The top bar's box: wide screens only (phones and tablets have the Search button; on the Search page, its own box). */
 .hdr-search { display: none; }
 @media (min-width: 1180px) {

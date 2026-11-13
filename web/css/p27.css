@@ -702,3 +702,30 @@ html.tv .vp-center .pbtn:focus { background: #fff; color: #000; }
 .ple-strip .ple-c.ttl b { font-size: 11px; line-height: 1.2; }
 .ple-strip .ple-c.ttl small { font-size: 9px; line-height: 1.2; }
 .ple-strip .ple-c.tm, .ple-strip .ple-c.lv { min-height: 22px; font-size: 10px; }
+
+/* ---- Search: chips to narrow the results by kind and by category (searchpage.js) */
+.sr-filters { display: flex; flex-direction: column; gap: .5rem; margin: .2rem 0 1rem; }
+.sr-filters .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.sr-filters .chips::-webkit-scrollbar { display: none; }
+.sr-filters .chip { flex: none; }
+.sr-filters .chip .dim { font-weight: 500; margin-left: .2rem; }
+.sr-filters .chip.on .dim { color: inherit; opacity: .75; }
+.sr-cats-h { flex: none; align-self: center; font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); margin-right: .2rem; }
+.sr-catlink { margin: 0 0 1rem; }
+.sr-filters .chips { margin: 0; }
+
+/* ---- Search: the on-screen keyboard beside the box, for a TV remote with no keys (searchpage.js) */
+.search-box [data-osk].on { color: var(--accent); }
+.sr-osk { margin: -.6rem 0 1.4rem; padding: .8rem; border: 1px solid var(--line); border-radius: 14px; background: var(--card); display: flex; flex-direction: column; gap: .5rem; }
+.sr-osk[hidden] { display: none; }
+.osk-acts { display: flex; flex-wrap: wrap; gap: .4rem; }
+.osk-keys { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: .4rem; }
+.osk-k { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.8rem; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card2); color: var(--text); font: inherit; font-weight: 700; font-size: 1.05rem; cursor: pointer; }
+.osk-k .i { width: 1.2rem; height: 1.2rem; }
+.osk-k:hover { border-color: var(--accent); }
+.osk-k:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.osk-k.wide { padding: 0 1rem; }
+.osk-k.go { background: var(--accent); border-color: var(--accent); color: var(--on); }
+html.tv .osk-k { min-height: 3.6rem; font-size: 1.45rem; }
+html.tv .osk-k:focus { background: #fff; color: #000; border-color: #fff; outline: none; transform: scale(1.06); }
+@media (max-width: 600px) { .osk-keys { grid-template-columns: repeat(8, minmax(0, 1fr)); } }

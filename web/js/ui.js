@@ -90,8 +90,8 @@ V.renderShell = function () {
   document.title = b.name || '';
 };
 
-/** A search box in the top bar on wide screens (not TVs: there the Search page is a press away), with suggestions as
- *  you type. Enter without one picked shows every result on the Search page. */
+/** A search box in the top bar on wide screens (not TVs: there the Search page is a press away). The first letter typed
+ *  goes to the Search page — the results there follow what's typed, in its own box — and Enter does too. */
 V.headerSearch = function () {
   if (V.$('#hdr-search')) return;
   var link = V.$('#topbar [data-nav=search]');
@@ -104,7 +104,20 @@ V.headerSearch = function () {
   link.parentNode.insertBefore(f, link);
   var inp = V.$('input', f);
   var go = function (q) { inp.value = ''; inp.blur(); V.router.go('#/search' + (q ? '?q=' + encodeURIComponent(q) : '')); };
-  V.autocomplete(inp, { onSearch: go, onPick: function () { inp.value = ''; } });
+  // (Keys pressed while the page changes are kept, and the Search page's box takes them: nothing typed is lost.)
+  inp.addEventListener('input', function () {
+    var buf = inp.value;
+    if (!buf.trim() || /^#\/search/.test(location.hash)) return;
+    inp.value = '';
+    var grab = function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key && e.key.length === 1) { buf += e.key; e.preventDefault(); } else if (e.key === 'Backspace') { buf = buf.slice(0, -1); e.preventDefault(); }
+    };
+    document.addEventListener('keydown', grab, true);
+    var ta = V.searchTypeAhead = { take: function () { document.removeEventListener('keydown', grab, true); if (V.searchTypeAhead === ta) V.searchTypeAhead = null; return buf; } };
+    setTimeout(function () { if (V.searchTypeAhead === ta) ta.take(); }, 4000);
+    V.router.go('#/search?q=' + encodeURIComponent(buf.trim()));
+  });
   f.onsubmit = function (e) { e.preventDefault(); go(inp.value.trim()); };
   // Escape with nothing to close: out of the box.
   inp.addEventListener('keydown', function (e) { if ((e.key === 'Escape' || e.key === 'Esc') && !e.defaultPrevented) { inp.value = ''; inp.blur(); } });

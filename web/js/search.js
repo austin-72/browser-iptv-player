@@ -1,5 +1,5 @@
 /* Instant search over the catalogue: a word index built a little at a time in the background (so the page never
-   stalls), prefix and substring matches first, then typo-tolerant matches. Also the suggestions under a search box. */
+   stalls), prefix and substring matches first, then typo-tolerant matches. */
 'use strict';
 V.search = (function () {
   var TYPE_W = { show: 4, movie: 3, live: 3, radio: 1, episode: 0 };
@@ -113,19 +113,55 @@ V.search = (function () {
 
   /** How well a name (plain letters) matches: the whole query exactly, at the start, at a word, inside a word; or
    *  every word typed somewhere in it. 0: not at all. */
+  var ART = /^(the|a|an) /;
+  // Small words a name may leave out ("fast and furious" is Fast & Furious), and numbers written either way.
+  var STOP = { and: 1, the: 1, of: 1, a: 1, an: 1, n: 1, to: 1, in: 1 };
+  var ALT = { 1: 'i', 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v', 6: 'vi', 7: 'vii', 8: 'viii', 9: 'ix', 10: 'x', i: '1', ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9', x: '10', one: '1', two: '2', three: '3', four: '4', five: '5' };
   function scoreName(n, Q) {
     if (n === Q.nq) return 120;
     var p = n.indexOf(Q.nq);
     if (p === 0) return 90;
+    // ("The" left off: "dark knight" is The Dark Knight.)
+    if (!Q.art && n.length > 3 && ART.test(n)) { var n2 = n.replace(ART, ''); if (n2 === Q.nq) return 118; if (n2.lastIndexOf(Q.nq, 0) === 0) return 88; }
     if (p > 0) return n.indexOf(Q.spq) >= 0 ? 75 : 50;
-    var part = 0;
+    var part = 0, miss = 0;
     for (var t = 0; t < Q.toks.length; t++) {
-      var tk = Q.toks[t];
+      var tk = Q.toks[t], al = Q.alt[t];
       if (n.lastIndexOf(tk, 0) === 0 || n.indexOf(Q.sp[t]) >= 0) part += 2;
+      else if (al && (' ' + n + ' ').indexOf(' ' + al + ' ') >= 0) part += 2;
       else if (n.indexOf(tk) >= 0) part += 1;
+      else if (Q.opt[t]) miss++;
       else return 0;
     }
-    return 30 + part * 4;
+    if (miss === Q.toks.length) return 0;
+    return 30 + part * 4 - miss * 3;
+  }
+
+  /** A name against what's typed, a typo or two allowed: each word typed starts a word of the name, or is one with a
+   *  letter or two wrong. 0: not that either. */
+  function fuzzy(n, Q) {
+    var ws = n.split(' '), part = 0, typos = 0, miss = 0;
+    for (var t = 0; t < Q.toks.length; t++) {
+      var tk = Q.toks[t], al = Q.alt[t];
+      if (n.lastIndexOf(tk, 0) === 0 || n.indexOf(Q.sp[t]) >= 0) { part += 2; continue; }
+      if (al && (' ' + n + ' ').indexOf(' ' + al + ' ') >= 0) { part += 2; continue; }
+      var d = 9;
+      if (tk.length >= 4) {
+        var max = tk.length >= 8 ? 2 : 1;
+        for (var w = 0; w < ws.length && d > 0; w++) {
+          var wd = ws[w];
+          if (Math.abs(wd.length - tk.length) <= max) d = Math.min(d, dist(tk, wd, max));
+          // (Still typing it: the start of a longer word.)
+          if (wd.length > tk.length) d = Math.min(d, dist(tk, wd.slice(0, tk.length), max));
+        }
+        if (d > max) d = 9;
+      }
+      if (d < 9) { part += 1; typos += d; }
+      else if (Q.opt[t]) miss++;
+      else return 0;
+    }
+    if (miss === Q.toks.length) return 0;
+    return 30 + part * 4 - typos * 5 - miss * 3 + (ws.length <= Q.toks.length ? 6 : 0);
   }
 
   /** Words of the index starting with tk. */
@@ -167,7 +203,11 @@ V.search = (function () {
   function run(nq, opts, lim) {
     var x = idx;
     var toks = nq.split(' ').filter(Boolean);
-    var Q = { nq: nq, spq: ' ' + nq, toks: toks, sp: toks.map(function (t) { return ' ' + t; }) };
+    // A year with other words ("dune 2021"): that year's first, and not a word the name must have.
+    var yr = 0;
+    var Q = { nq: nq, spq: ' ' + nq, toks: toks, sp: toks.map(function (t) { return ' ' + t; }), art: ART.test(nq),
+      alt: toks.map(function (t) { return ALT[t] || ''; }),
+      opt: toks.map(function (t) { if (toks.length > 1 && /^(19|20)\d\d$/.test(t)) { yr = +t; return 1; } return toks.length > 1 && STOP[t] ? 1 : 0; }) };
     var types = opts.types ? new Set(opts.types) : null;
     var names = x.names, items = x.items, mark = x.mark, qid = ++x.qid;
     var sc = new Map();
@@ -187,6 +227,7 @@ V.search = (function () {
     // Candidates: everything with a word starting like the most telling word typed (the one with fewest titles).
     var best = null, bestCost = Infinity;
     for (var t = 0; t < toks.length && !enough; t++) {
+      if ((Q.opt[t] || Q.alt[t]) && toks.length > 1 && toks.some(function (o, i) { return !Q.opt[i] && !Q.alt[i]; })) continue;
       var ws = wordsFrom(x, toks[t]), cost = 0;
       for (var w = 0; w < ws.length && cost < bestCost; w++) cost += x.words.get(ws[w]).length;
       if (cost < bestCost || (cost === bestCost && best && toks[t].length > best.tk.length)) { bestCost = cost; best = { tk: toks[t], ws: ws }; }
@@ -199,8 +240,19 @@ V.search = (function () {
         if (wd.length > best.tk.length && wd.indexOf(best.tk, 1) > 0) { var l2 = x.words.get(wd); for (var j2 = 0; j2 < l2.length; j2++) consider(l2[j2]); }
       }
     }
+    // Spelled together or apart ("spiderman" is Spider-Man, "super man" Superman): names without their spaces.
+    var sq = nq.replace(/ /g, '');
+    if (sc.size < 20 && sq.length >= 5 && x.done) {
+      if (!x.sq || x.sq.length !== names.length) x.sq = names.map(function (n) { return n.replace(/ /g, ''); });
+      for (var u = 0; u < x.sq.length; u++) {
+        if (x.sq[u].indexOf(sq) < 0 || sc.has(u)) continue;
+        var itu = items[u];
+        if (types && !types.has(itu.t)) continue;
+        sc.set(u, (x.sq[u] === sq ? 100 : x.sq[u].lastIndexOf(sq, 0) === 0 ? 80 : 52) + tw(itu) - Math.min(8, names[u].length / 12));
+      }
+    }
     // A channel number.
-    if (/^\d{1,5}$/.test(nq)) (x.byNo.get(+nq) || []).forEach(function (id) { var it = items[id]; if (types && !types.has(it.t)) return; sc.set(id, 200 + tw(it) - Math.min(8, names[id].length / 12)); });
+    if (/^\d{1,5}$/.test(nq)) (x.byNo.get(+nq) || []).forEach(function (id) { var it = items[id]; if (types && !types.has(it.t)) return; sc.set(id, Math.max(sc.get(id) || 0, 119 + tw(it) - Math.min(8, names[id].length / 12))); });
     // A category's name.
     if (opts.groups !== false && !enough && sc.size < lim * 3) {
       x.groups.forEach(function (ids, g) {
@@ -244,22 +296,30 @@ V.search = (function () {
         });
       }
     }
-    // Few hits: allow typos (one per 4 letters, at most two).
-    if (out.length < 12 && nq.length >= 4) {
-      toks.forEach(function (tk) {
-        if (tk.length < 4) return;
-        var max = tk.length >= 8 ? 2 : 1;
+    // Few good hits: allow typos — one per four letters of a word, at most two — every word typed still in the name
+    // ("the last huose", "how to train your dargon"), scored on the whole name like the rest.
+    var bestS = 0;
+    for (var bs = 0; bs < out.length; bs++) if (out[bs].s > bestS) bestS = out[bs].s;
+    if (nq.length >= 4 && (out.length < 12 || bestS < 70)) {
+      var fz = toks.map(function (tk, ti) { return { tk: tk, ti: ti }; }).filter(function (o) { return o.tk.length >= 4 && !Q.opt[o.ti] && !Q.alt[o.ti]; })
+        .sort(function (a, b) { return b.tk.length - a.tk.length; }).slice(0, 2);
+      var tried = {};
+      fz.forEach(function (o) {
+        var tk = o.tk, max = tk.length >= 8 ? 2 : 1;
         var pool = max < 2 ? x.pre.get(tk[0]) || [] : x.list;
         for (var i = 0; i < pool.length; i++) {
           var wd2 = pool[i];
-          if (Math.abs(wd2.length - tk.length) > max) continue;
-          var d = dist(tk, wd2, max);
-          if (d > max) continue;
+          if (Math.abs(wd2.length - tk.length) > max || dist(tk, wd2, max) > max) continue;
           var list = x.words.get(wd2);
           for (var k = 0; k < list.length; k++) {
-            var id2 = list[k], it2 = items[id2];
+            var id2 = list[k];
+            if (tried[id2]) continue;
+            tried[id2] = 1;
+            var it2 = items[id2];
             if (types && !types.has(it2.t)) continue;
-            var ts = 22 - d * 6 + tw(it2), cur = entry.get(id2);
+            var fs = fuzzy(names[id2], Q);
+            if (!fs) continue;
+            var ts = fs + tw(it2) - Math.min(8, names[id2].length / 12), cur = entry.get(id2);
             if (!cur) { cur = { s: ts, n: names[id2], it: it2 }; entry.set(id2, cur); out.push(cur); } else if (ts > cur.s) cur.s = ts;
           }
         }
@@ -268,7 +328,14 @@ V.search = (function () {
     // Things you've watched rank a little higher; things you've hidden lower.
     var prog = (S.data && S.data.progress) || {};
     var hidden = S.data && S.data.hidden && S.data.hidden.length ? new Set(S.data.hidden) : null;
-    for (var h = 0; h < out.length; h++) { var e2 = out[h]; if (hidden && hidden.has(e2.it.k)) e2.s -= 30; if (prog[e2.it.k]) e2.s += 3; }
+    // Popular ones first among those that match as well (TMDB's popularity), and the year typed.
+    for (var h = 0; h < out.length; h++) {
+      var e2 = out[h], it4 = e2.it;
+      if (hidden && hidden.has(it4.k)) e2.s -= 30;
+      if (prog[it4.k]) e2.s += 3;
+      if (it4.pp) e2.s += Math.min(7, Math.log(1 + it4.pp));
+      if (yr && it4.y) e2.s += it4.y === yr ? 25 : -4;
+    }
     // Lots of matches: only the best few hundred need sorting properly.
     if (out.length > lim * 3 && typeof Float64Array !== 'undefined' && Float64Array.prototype.sort) {
       var fa = new Float64Array(out.length);
@@ -308,156 +375,3 @@ V.search = (function () {
   V.on('episodes-warm', function () { ver++; cache = {}; });
   return { find: find, suggest: suggest, reset: reset, changed: function () { ver++; cache = {}; }, ready: function () { return !!idx && idx.done; }, buildNow: buildNow, dist: dist };
 })();
-
-/**
- * Suggestions under a search box as you type: up to 8 titles, channels and people. Up/Down (and a TV remote's) move
- * through them, Enter opens one (or, with none picked, runs the search), Escape closes the list.
- * o: { onSearch(q): Enter with nothing picked, onPick(it), people: true }
- */
-V.autocomplete = function (input, o) {
-  o = o || {};
-  var host = input.closest('form') || input.parentNode;
-  host.classList.add('ac-host');
-  var box = document.createElement('div');
-  var id = 'ac-' + V.uid();
-  box.className = 'ac-list';
-  box.id = id;
-  box.setAttribute('role', 'listbox');
-  box.setAttribute('aria-label', 'Suggestions');
-  box.hidden = true;
-  host.appendChild(box);
-  input.setAttribute('role', 'combobox');
-  input.setAttribute('aria-autocomplete', 'list');
-  input.setAttribute('aria-expanded', 'false');
-  input.setAttribute('aria-controls', id);
-  input.setAttribute('autocomplete', 'off');
-  var opts = [], active = -1, shownQ = null, people = [], peopleQ = '', peopleSeq = 0, timer = null, peopleT = null, closed = false;
-  var LABEL = { movie: 'Film', show: 'Series', live: 'Channel', radio: 'Radio', person: 'Person' };
-  var ICON = { movie: 'film', show: 'stack', live: 'tv', radio: 'radio', person: 'users' };
-
-  // The letters typed, in bold where a word of the name starts with them.
-  var mark = function (name, q) {
-    var toks = q.toLowerCase().split(/\s+/).filter(Boolean).sort(function (a, b) { return b.length - a.length; });
-    var low = name.toLowerCase(), on = [];
-    toks.forEach(function (tk) {
-      var p = -1;
-      while ((p = low.indexOf(tk, p + 1)) >= 0) { if (p === 0 || !/[a-z0-9À-￿]/i.test(low[p - 1])) { for (var i = p; i < p + tk.length; i++) on[i] = 1; break; } }
-    });
-    var html = '', b = false;
-    for (var i = 0; i < name.length; i++) {
-      if (!!on[i] !== b) { html += b ? '</b>' : '<b>'; b = !b; }
-      html += V.esc(name[i]);
-    }
-    return html + (b ? '</b>' : '');
-  };
-  var meta = function (it) {
-    if (it.t === 'person') return it.role === 'dir' ? 'Director' : 'Actor';
-    var bits = [LABEL[it.t] || V.TYPE_NAMES[it.t] || ''];
-    if ((it.t === 'movie' || it.t === 'show') && it.y) bits.push(it.y);
-    if ((it.t === 'live' || it.t === 'radio') && it.no) bits.push(it.no);
-    return bits.join(' · ');
-  };
-  var render = function (q) {
-    var list = opts;
-    if (!list.length || closed) { hide(); return; }
-    box.innerHTML = list.map(function (it, i) {
-      return '<div class="ac-o' + (i === active ? ' on' : '') + '" role="option" id="' + id + '-' + i + '" data-i="' + i + '" aria-selected="' + (i === active) + '">' +
-        '<span class="ac-ic">' + V.icon(ICON[it.t] || 'search') + '</span><span class="ac-t">' + mark(it.n, q) + '</span><span class="ac-m">' + V.esc(meta(it)) + '</span></div>';
-    }).join('');
-    box.hidden = false;
-    input.setAttribute('aria-expanded', 'true');
-    if (active >= 0) input.setAttribute('aria-activedescendant', id + '-' + active); else input.removeAttribute('aria-activedescendant');
-  };
-  var hide = function () {
-    box.hidden = true;
-    input.setAttribute('aria-expanded', 'false');
-    input.removeAttribute('aria-activedescendant');
-    active = -1;
-  };
-  var setActive = function (i) {
-    active = i;
-    var els = box.children;
-    for (var k = 0; k < els.length; k++) { var on = k === i; els[k].classList.toggle('on', on); els[k].setAttribute('aria-selected', String(on)); }
-    if (i >= 0 && els[i]) { input.setAttribute('aria-activedescendant', id + '-' + i); if (els[i].scrollIntoView && box.scrollHeight > box.clientHeight) els[i].scrollIntoView({ block: 'nearest' }); } else input.removeAttribute('aria-activedescendant');
-  };
-  var compute = function () {
-    timer = null;
-    if (!document.contains(input)) return;
-    var q = input.value.trim();
-    if (q === shownQ && !box.hidden) return;
-    shownQ = q;
-    active = -1;
-    if (!q || !S.items) { opts = []; hide(); return; }
-    var list = V.search.suggest(q, 8);
-    // People (from the server, which knows the cast of everything), after a pause; kept while their name still fits
-    // what's typed. At most two, after the titles.
-    var toks = V.norm(q).split(' ');
-    var ppl = people.filter(function (p) { var ws = V.norm(p.n).split(' '); return toks.every(function (tk) { return ws.some(function (w) { return w.lastIndexOf(tk, 0) === 0; }); }); });
-    opts = list.slice(0, 8 - ppl.length).concat(ppl);
-    render(q);
-    if (o.people !== false && q.length >= 3 && V.norm(q) !== V.norm(peopleQ)) {
-      clearTimeout(peopleT);
-      var my = ++peopleSeq;
-      peopleT = setTimeout(function () {
-        V.api('/api/search/people?q=' + encodeURIComponent(q)).then(function (pp) {
-          if (my !== peopleSeq || input.value.trim() !== q) return;
-          peopleQ = q;
-          people = (pp || []).slice(0, 2).map(function (x) { return { t: 'person', n: x.name, role: x.role, k: 'person:' + x.name }; });
-          if (people.length) { shownQ = null; compute(); }
-        }).catch(function () {});
-      }, 300);
-    }
-  };
-  var schedule = function () { if (closed) closed = false; clearTimeout(timer); timer = setTimeout(compute, 40); };
-  var pick = function (i) {
-    var it = opts[i];
-    if (!it) return;
-    var q = input.value.trim();
-    hide();
-    shownQ = null;
-    if (q.length > 1 && V.addSearch) V.addSearch(q);
-    if (o.onPick && o.onPick(it) === false) return;
-    if (it.t === 'person') { V.router.go('#/search?q=' + encodeURIComponent(it.n)); return; }
-    input.blur();
-    if (it.t === 'live' || it.t === 'radio') V.play(it);
-    else V.router.go(V.hrefOf(it));
-  };
-
-  input.addEventListener('input', schedule);
-  input.addEventListener('focus', function () { if (input.value.trim()) { closed = false; shownQ = null; schedule(); } });
-  input.addEventListener('blur', function () { setTimeout(function () { if (document.activeElement !== input) hide(); }, 150); });
-  input.addEventListener('keydown', function (e) {
-    var open = !box.hidden && opts.length;
-    var k = e.key;
-    if (k === 'ArrowDown' || k === 'Down') {
-      if (!open) { if (opts.length && input.value.trim()) { closed = false; render(input.value.trim()); setActive(0); e.preventDefault(); e.stopPropagation(); } return; }
-      e.preventDefault(); e.stopPropagation();
-      // At the end of the list, a TV remote moves on down the page.
-      if (active >= opts.length - 1 && V.tvMode) { hide(); closed = true; if (V.tvMove) V.tvMove('down', input); return; }
-      setActive(Math.min(opts.length - 1, active + 1));
-    } else if (k === 'ArrowUp' || k === 'Up') {
-      if (!open) return;
-      if (active < 0) { hide(); closed = true; return; } // (and on a TV, Up leaves the box as usual)
-      e.preventDefault(); e.stopPropagation();
-      setActive(active - 1);
-    } else if (k === 'Enter') {
-      if (open && active >= 0) { e.preventDefault(); e.stopPropagation(); pick(active); return; }
-      // The full search instead.
-      clearTimeout(timer); hide(); closed = true;
-      if (o.onSearch) { e.preventDefault(); o.onSearch(input.value.trim()); }
-    } else if (k === 'Escape' || k === 'Esc') {
-      if (open) { e.preventDefault(); e.stopPropagation(); hide(); closed = true; }
-    } else if (k === 'Tab') hide();
-  });
-  // Mouse and touch: the box keeps focus (so the list stays), a tap or click opens the one picked.
-  box.addEventListener('mousedown', function (e) { e.preventDefault(); });
-  box.addEventListener('click', function (e) { var el = e.target.closest('[data-i]'); if (el) pick(+el.dataset.i); });
-  box.addEventListener('mousemove', function (e) { var el = e.target.closest('[data-i]'); if (el && +el.dataset.i !== active) setActive(+el.dataset.i); });
-  // The index finished after the first letters were typed: the suggestions again, complete.
-  var off = V.on('search-ready', function () { if (!document.contains(input)) { off(); return; } if (!box.hidden) { shownQ = null; compute(); } });
-  return {
-    close: function () { clearTimeout(timer); hide(); closed = true; },
-    refresh: function () { shownQ = null; compute(); },
-    destroy: function () { off(); clearTimeout(timer); clearTimeout(peopleT); if (box.parentNode) box.parentNode.removeChild(box); },
-  };
-};

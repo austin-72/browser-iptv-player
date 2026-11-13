@@ -295,6 +295,15 @@ test('through the server: a title’s extras, a person, episode orders, a row by
     assert.strictEqual((await a.req('PUT', '/api/admin/settings', { off: { people: false, logos: false, reviews: true } })).status, 200);
     assert.strictEqual((await more(a, film.k)).reviews.length, 0);
     assert.strictEqual((await a.req('PUT', '/api/admin/settings', { off: { reviews: false } })).status, 200);
+    // Search beyond the names: its actors and directors (TMDB's), the other names it goes by, people asked for by role.
+    const ex = async (q, more = '') => (await a.req('GET', '/api/search/extra?q=' + encodeURIComponent(q) + more)).json;
+    const keanu = (await ex('keanu')).people.find((x) => x.name === 'Keanu Reeves');
+    assert.ok(keanu && keanu.cast.includes(film.k), 'an actor from TMDB');
+    const lilly = (await ex('lilly wachowski')).people[0];
+    assert.ok(lilly && lilly.dir.includes(film.k) && lilly.role === 'dir', 'a director');
+    assert.deepStrictEqual((await ex('keanu', '&people=only&role=dir')).people, [], 'not a director');
+    assert.ok((await ex('матрица')).aka.includes(film.k), 'its name elsewhere');
+    assert.deepStrictEqual(await ex('ke'), { people: [], aka: [], akaMore: [], about: [] }, 'two letters: nothing yet');
     assert.strictEqual((await a.req('GET', `/api/title/${encodeURIComponent(film.k)}/more`)).json.reviews.length, 2);
     // More of them, a page at a time: how many in all, then each page (the short one left out), and none past the last.
     const rv = (d, n) => d.req('GET', `/api/title/${encodeURIComponent(film.k)}/reviews?page=${n}`);

@@ -1051,69 +1051,128 @@ route('GET', '/api/recs', async (req, res, p, q, ctx) => {
   return r || { top: [], rows: [], household: [] };
 });
 
-// ---- people: search by actor or director
-let peopleIdx = null; // { version, people: Map(norm name → { name, words, cast: Set, dir: Set }), byPre: Map(3 letters → [entries]) }
+// ---- search, beyond the names (the names themselves: web/js/search.js, in the browser)
+// People — actors, directors and creators, from the provider's details and TMDB's (both) — the other names titles go by
+// (TMDB's title, its original one, what it's called elsewhere: "La casa de papel" finds Money Heist), and what they're
+// about (TMDB's keywords: "heist", "time travel"). Built in slices when the catalogue changes.
+let peopleIdx = null; // { version, people: Map(key → entry), byPre: Map(3 letters → [entries]), aka: Map(norm name → Set(keys)), akaPre, kw: Map(norm keyword → Set(keys)), kwPre }
 let peopleBuilding = null;
-/** Cast and directors → their titles, built in slices (a big catalogue has a few hundred thousand names). */
+/** Plain letters, as the browser's search has them (web/js/core.js V.norm). */
+const snorm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9Ѐ-ӿ؀-ۿ぀-ヿ一-鿿가-힯]+/g, ' ').trim();
 function peopleIndex() {
   if (peopleIdx && peopleIdx.version === catalog.version) return Promise.resolve(peopleIdx);
   if (!peopleBuilding || peopleBuilding.version !== catalog.version) {
     const version = catalog.version;
     const steps = function* () {
-      const people = new Map();
-      const byPre = new Map();
+      const people = new Map(), byPre = new Map(), aka = new Map(), akaPre = new Map(), kw = new Map(), kwPre = new Map();
+      const pre = (map, words, e) => { for (const w of new Set(words.map((x) => x.slice(0, 3)))) { if (!w) continue; const l = map.get(w); if (l) l.push(e); else map.set(w, [e]); } };
       const add = (name, k, role) => {
         const n = String(name || '').trim();
         if (n.length < 3) return;
-        const key = n.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+        const key = n.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
         let e = people.get(key);
-        if (!e) {
-          people.set(key, (e = { key, name: n, words: key.split(/[\s.-]+/).filter(Boolean), cast: new Set(), dir: new Set() }));
-          for (const w of new Set(e.words.map((x) => x.slice(0, 3)))) { const l = byPre.get(w); if (l) l.push(e); else byPre.set(w, [e]); }
-        }
+        if (!e) { people.set(key, (e = { key, name: n, words: key.split(/[\s.-]+/).filter(Boolean), cast: new Set(), dir: new Set() })); pre(byPre, e.words, e); }
         e[role].add(k);
+      };
+      const toSet = (map, preMap, name, k) => {
+        if (!name || name.length < 2) return;
+        let set = map.get(name);
+        if (!set) { map.set(name, (set = new Set())); pre(preMap, name.split(' '), name); }
+        set.add(k);
       };
       const items = catalog.items;
       for (let i = 0; i < items.length; i++) {
-        if ((i & 8191) === 0) yield;
+        if ((i & 4095) === 0) yield;
         const it = items[i];
         if (it.t !== 'movie' && it.t !== 'show') continue;
-        if (it.cast) for (const c of String(it.cast).split(',').slice(0, 8)) add(c, it.k, 'cast');
-        if (it.dir) for (const d of String(it.dir).split(',').slice(0, 3)) add(d, it.k, 'dir');
+        const m = tmdb.meta.data.m[it.k];
+        const cast = new Set(String(it.cast || '').split(',').slice(0, 8).map((x) => x.trim()));
+        const dir = new Set(String(it.dir || '').split(',').slice(0, 3).map((x) => x.trim()));
+        if (m) { for (const c of String(m.cast || '').split(',').slice(0, 8)) cast.add(c.trim()); for (const d of String(m.dir || '').split(',').slice(0, 3)) dir.add(d.trim()); }
+        for (const c of cast) add(c, it.k, 'cast');
+        for (const d of dir) add(d, it.k, 'dir');
+        if (!m) continue;
+        const own = snorm(it.n);
+        for (const t of [m.title, m.ot, ...(m.aka || [])]) { const n = snorm(t); if (n && n !== own) toSet(aka, akaPre, n, it.k); }
+        for (const w of m.kw || []) toSet(kw, kwPre, snorm(w), it.k);
       }
-      return { version, people, byPre };
+      return { version, people, byPre, aka, akaPre, kw, kwPre };
     };
     const job = { version };
     job.promise = Catalog.runSliced(steps()).then((idx) => { peopleIdx = idx; return idx; }).finally(() => { if (peopleBuilding === job) peopleBuilding = null; });
     peopleBuilding = job;
   }
-  // While a new one is made (the catalogue changes every few minutes while TMDB fills in details), the last one does.
+  // (While a new one is made — the catalogue changes every few minutes while TMDB fills in details — the last one does.)
   return peopleIdx ? Promise.resolve(peopleIdx) : peopleBuilding.promise;
 }
-route('GET', '/api/search/people', async (req, res, p, q, ctx) => {
-  const prof = requireProfile(ctx);
-  const raw = String(q.get('q') || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+/** Every word typed starts a word of the name ("tom han", "nolan", "j lawrence"). */
+const wordsStart = (toks, words) => toks.every((t) => words.some((w) => w.startsWith(t)));
+/** People whose name fits what's typed, with their titles this profile may see, newest first. role: only actors ('cast') or directors and creators ('dir'). */
+function peopleHits(idx, prof, raw, role, max = 4) {
   const toks = raw.split(/[\s.-]+/).filter(Boolean);
   if (!toks.length || raw.length < 3) return [];
-  const idx = await peopleIndex();
   const f = catalog.filterFor(prof);
   const hits = [];
   // Only names with a word starting like the longest word typed need checking.
   const longest = toks.slice().sort((a, b) => b.length - a.length)[0];
   const cands = longest.length >= 3 ? idx.byPre.get(longest.slice(0, 3)) || [] : idx.people.values();
   for (const e of cands) {
-    const words = e.words;
-    // Every word typed starts a word of the name ("tom han", "nolan", "j lawrence").
-    if (!toks.every((t) => words.some((w) => w.startsWith(t)))) continue;
-    if (toks.length === 1 && toks[0].length < 4 && !words.includes(toks[0])) continue;
-    const keys = (role) => [...e[role]].map((k) => catalog.get(k)).filter((it) => it && f.test(it)).sort((a, b) => (b.y || 0) - (a.y || 0)).map((it) => it.k);
+    if (!wordsStart(toks, e.words)) continue;
+    if (toks.length === 1 && toks[0].length < 4 && !e.words.includes(toks[0])) continue;
+    const keys = (r) => (role && role !== r ? [] : [...e[r]].map((k) => catalog.get(k)).filter((it) => it && f.test(it)).sort((a, b) => (b.y || 0) - (a.y || 0)).map((it) => it.k));
     const cast = keys('cast'), dir = keys('dir');
     if (!cast.length && !dir.length) continue;
-    const exact = e.key === raw ? 50 : 0;
-    hits.push({ name: e.name, role: dir.length > cast.length ? 'dir' : 'cast', cast: cast.slice(0, 60), dir: dir.slice(0, 60), score: exact + cast.length + dir.length * 1.5 });
+    // (The whole name typed first; then a word typed that's a whole word of the name — "paul" is Adrian Paul before Rob Paulsen.)
+    const exact = (e.key === raw ? 50 : 0) + 40 * toks.filter((t) => e.words.includes(t)).length;
+    // (A creator is a series' director: told apart for the label.)
+    const shows = dir.filter((k) => (catalog.get(k) || {}).t === 'show').length;
+    hits.push({ name: e.name, role: dir.length > cast.length ? (shows > dir.length / 2 ? 'creator' : 'dir') : 'cast', cast: cast.slice(0, 60), dir: dir.slice(0, 60), score: exact + cast.length + dir.length * 1.5 });
   }
   hits.sort((a, b) => b.score - a.score);
-  return hits.slice(0, 4);
+  return hits.slice(0, max);
+}
+const qnorm = (q) => String(q || '').trim().toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
+route('GET', '/api/search/people', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const raw = qnorm(q.get('q'));
+  if (raw.length < 3) return [];
+  return peopleHits(await peopleIndex(), prof, raw, q.get('role') === 'cast' || q.get('role') === 'dir' ? q.get('role') : '');
+});
+/** People, other names and what titles are about, for the search page: { people, aka: [keys], about: [{ name, keys }] }. */
+route('GET', '/api/search/extra', async (req, res, p, q, ctx) => {
+  const prof = requireProfile(ctx);
+  const raw = qnorm(q.get('q')), nq = snorm(raw), role = q.get('role') === 'cast' || q.get('role') === 'dir' ? q.get('role') : '';
+  const out = { people: [], aka: [], akaMore: [], about: [] };
+  if (nq.length < 3) return out;
+  const idx = await peopleIndex();
+  out.people = peopleHits(idx, prof, raw, role, 6);
+  if (q.get('people') === 'only') return out;
+  const f = catalog.filterFor(prof);
+  const toks = nq.split(' ');
+  const longest = toks.slice().sort((a, b) => b.length - a.length)[0];
+  const best = (keys, n) => [...keys].map((k) => catalog.get(k)).filter((it) => it && f.test(it)).sort((a, b) => (b.pop || 0) - (a.pop || 0) || (b.r || 0) - (a.r || 0)).slice(0, n).map((it) => it.k);
+  // Other names: close (the name, or how it starts) and loose (a word of it) — the close ones go with the best matches.
+  const akaKeys = new Set(), akaClose = new Set();
+  for (const name of new Set(idx.akaPre.get(longest.slice(0, 3)) || [])) {
+    // (Whole words, but the last word typed may be the start of one — from three letters.)
+    const ws = name.split(' ');
+    const fits = toks.every((t, i) => ws.some((w) => w === t || (i === toks.length - 1 && t.length >= 3 && w.startsWith(t))));
+    const close = name === nq || (name.startsWith(nq + ' ') && (toks.length > 1 || nq.length >= 6));
+    if (close || fits) for (const k of idx.aka.get(name)) { akaKeys.add(k); if (close) akaClose.add(k); }
+    if (akaKeys.size > 400) break;
+  }
+  out.aka = best(akaClose, 30);
+  out.akaMore = best([...akaKeys].filter((k) => !akaClose.has(k)), 30);
+  // What it's about: keywords that are what's typed (or start with it, from 4 letters), with a few titles at least.
+  const kws = [];
+  for (const name of new Set(idx.kwPre.get(longest.slice(0, 3)) || [])) {
+    if (!(name === nq || (nq.length >= 4 && (name.startsWith(nq) || (toks.length > 1 && wordsStart(toks, name.split(' '))))))) continue;
+    const keys = best(idx.kw.get(name), 40);
+    if (keys.length >= 3) kws.push({ name, keys, n: idx.kw.get(name).size, exact: name === nq });
+  }
+  kws.sort((a, b) => b.exact - a.exact || b.n - a.n);
+  out.about = kws.slice(0, 3).map((x) => ({ name: x.name, keys: x.keys }));
+  return out;
 });
 
 // ---- film series (TMDB collections)

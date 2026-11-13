@@ -3,6 +3,28 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.8
+
+- **Better matches:** "dark knight" finds The Dark Knight, "fast and furious" Fast & Furious, "rocky 2" Rocky II,
+  "spiderman" Spider-Man; a year typed with a name puts that one first ("dune 1984"); of titles that match as well,
+  the more popular comes first; a title of exactly the name typed comes before a channel of that number. Typos are
+  forgiven on the whole name ("the last huose", "how to train your dargon"), with every word typed still in it — not
+  everything that shares one word. A year on its own ("2012") gives that year's films and series. Tried on a real
+  catalogue of 107,000 titles: the exact name first 350 times out of 350, near misses found 1,027 times out of 1,039.
+- **Other names and what titles are about:** a title's original name and what it's called elsewhere find it ("La casa
+  de papel"), and TMDB's keywords give an "About" row ("heist", "time travel").
+- **People:** actors, directors and creators from TMDB's details as well as the provider's. "with Tom Hanks",
+  "starring …", "directed by Nolan", "created by …" put people first (titles called that still show); "Tom Hanks
+  comedy" or "Nolan 2000s" narrows their titles by genre or years; a surname typed whole ranks those with it first.
+- **Chips under the search box:** All, People, Films, Series, Channels, Episodes and Radio, with how many of each (Films
+  or Series alone show them all as a grid); the categories the results fall into, most first — one narrows every
+  row to it, with a link to everything in it; and the decades they're from. A channel shows once in the top results.
+- **No suggestions dropping down under the search boxes any more:** the results follow what's typed instead. Typing in
+  the top bar's box goes straight to the Search page, every letter carried over.
+- **An on-screen keyboard** beside the search box, for a TV remote with no keys to type with (and anyone with a mouse
+  who'd rather): letters, numbers, Space, Delete, Clear and Search, moved through with the arrows. On a TV it's open
+  when the Search page opens with nothing typed; Back closes it. Not on phones and tablets, which have their own.
+
 ## 2.8.7
 
 - **A new player layout, from the household's own choice in the layout sampler:** Settings moves up to the top bar
