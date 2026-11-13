@@ -563,7 +563,9 @@ V.castButton = function () {
   var v = V.player.video;
   var can = !!(window.cast && window.cast.framework) || !!(v.remote && v.remote.watchAvailability) || !!window.WebKitPlaybackTargetAvailabilityEvent;
   b.hidden = !can && !(S.devices && S.devices.length);
-  if (!V._castInit && window.isSecureContext && /Chrome/.test(navigator.userAgent) && !/Edg|OPR|SamsungBrowser/.test(navigator.userAgent) && !V.device.tv) {
+  // (Google's Cast script only on an https address: casting needs one, and a Chromecast can't reach "localhost" — on
+  // http://localhost, which browsers count as secure, it only failed to load its other half.)
+  if (!V._castInit && window.isSecureContext && location.protocol === 'https:' && /Chrome/.test(navigator.userAgent) && !/Edg|OPR|SamsungBrowser/.test(navigator.userAgent) && !V.device.tv) {
     V._castInit = true;
     window.__onGCastApiAvailable = function (ok) {
       if (!ok) return;
@@ -584,7 +586,7 @@ V.cast = function (btn) {
     var others = devs.filter(function (d) { return d.conn !== S.conn && d.ok !== false; });
     if (others.length) { items.push({ sep: true }); items.push({ header: 'Play on another device' }); }
     others.forEach(function (d) { items.push({ label: d.name, icon: 'devices', hint: d.playing ? 'Playing ' + d.playing.n : 'Idle', fn: function () { V.api('/api/devices/' + d.conn + '/command', { body: { cmd: 'play', k: it.t === 'catchup' ? it.catchupOf : it.k, pos: p.vod ? p.position : 0 } }).then(function () { p.video.pause(); V.toast('Playing on ' + d.name); }).catch(V.fail); } }); });
-    if (!items.length) items.push({ label: window.isSecureContext ? 'No cast devices found' : 'Casting needs a secure (https) address', fn: function () {} });
+    if (!items.length) items.push({ label: location.protocol === 'https:' ? 'No cast devices found' : 'Casting needs the https address', fn: function () {} });
     V.menu(btn, items);
   }).catch(function () { V.menu(btn, items.length ? items : [{ label: 'No cast devices found' }]); });
 };

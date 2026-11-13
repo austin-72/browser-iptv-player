@@ -3,6 +3,14 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.5
+
+- **Error reports, gone through again:** Google's Cast script is loaded only on an https address — casting needs one,
+  and a Chromecast can't reach "localhost"; on http://localhost (which browsers count as secure) it only failed to find
+  its other half, and each place it looked was filed as a report. Its looking about (browser extensions most people
+  don't have, Google's site) is no longer reported anywhere, while a script of the app's own that doesn't load still is.
+  The cast menu says casting needs the https address when there's nothing else to offer.
+
 ## 2.8.4
 
 - **More reviews on a title's page:** the Reviews tab counts all of a title's reviews on TMDB, and "More reviews"

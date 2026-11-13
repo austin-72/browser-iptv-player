@@ -231,13 +231,19 @@
   }, 8000);
 
   // ------------------------------------------------------------ catching them
+  /** One of the places Google's Cast script (watch.js, V.castButton) looks for the rest of itself. */
+  var castProbe = function (u) { return /^(chrome|moz|safari-web|ms-browser)-extension(:|$)/i.test(u) || /\/\/www\.gstatic\.com\/(eureka|cv\/js\/sender)\//i.test(u); };
   window.addEventListener('error', function (e) {
     var t = e.target;
     // A script or stylesheet that didn't load (not pictures: posters are often missing at the provider).
     if (t && t !== window && t.tagName) {
       // (Not a script the proxy in front added to the page — Cloudflare's analytics, its bot check: the page's
       // security policy stops those, see below.)
-      if (/^(SCRIPT|LINK)$/.test(t.tagName) && !/cloudflareinsights\.com|\/cdn-cgi\//i.test(t.src || t.href || '')) report('resource', { message: t.tagName.toLowerCase() + ' didn’t load: ' + scrub(t.src || t.href || '') });
+      // (Nor Google's Cast script looking for its other half: it tries a few places in turn — browser extensions most
+      // people don't have, then Google's site — and a miss is how it moves on to the next. Noted, not reported.)
+      var src = String(t.src || t.href || '');
+      if (/^SCRIPT$/.test(t.tagName) && castProbe(src)) { crumb('log', 'Cast script: not at ' + src.split(/[?#]/)[0].slice(0, 60)); return; }
+      if (/^(SCRIPT|LINK)$/.test(t.tagName) && !/cloudflareinsights\.com|\/cdn-cgi\//i.test(src)) report('resource', { message: t.tagName.toLowerCase() + ' didn’t load: ' + scrub(src) });
       return;
     }
     var err = e.error;
@@ -254,6 +260,9 @@
   document.addEventListener('securitypolicyviolation', function (e) {
     var from = String(e.sourceFile || '');
     if (/^(chrome|moz|safari-web|ms-browser)-extension:/i.test(from) || cspSeen >= 5) return;
+    // (Nor Google's Cast script asking for its other half in a way the policy doesn't allow — over http, say: it then
+    // looks elsewhere, and casting says so if it can't be had.)
+    if (/cast_sender\.js$/i.test(from.split(/[?#]/)[0]) || castProbe(String(e.blockedURI || ''))) { crumb('log', 'security policy: the Cast script looked for itself at ' + String(e.blockedURI || '').split(/[?#]/)[0].slice(0, 60)); return; }
     var what = String(e.blockedURI || '');
     // (Nor a proxy in front adding scripts of its own to the page — Cloudflare's analytics and bot checks do: those
     // are stopped too, which the app doesn't mind. Noted, not reported.)
