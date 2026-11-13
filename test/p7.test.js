@@ -165,6 +165,13 @@ test('the real server: the queue syncs between devices, sound settings are kept,
     assert.strictEqual(pr.json.nightMode, true);
     assert.strictEqual((await req('GET', '/api/me')).json.data.prefs.nightMode, true);
 
+    // A phone held upright (the video on top, its page below): the admin's choice for everyone, each profile's own over it.
+    assert.strictEqual((await req('GET', '/api/me')).json.data.prefs.phoneDock, null, 'as the admin set it');
+    assert.strictEqual((await req('GET', '/api/boot')).json.phoneDock, true, 'on to begin with');
+    assert.strictEqual((await req('PUT', '/api/admin/settings', { phoneDock: false })).status, 200);
+    assert.strictEqual((await req('GET', '/api/boot')).json.phoneDock, false);
+    assert.strictEqual((await req('PUT', '/api/me/prefs', { phoneDock: true })).json.phoneDock, true);
+
     // A viewer's report goes in even with automatic reports off, and twice is twice.
     await req('PUT', '/api/admin/errors-settings', { on: false });
     const rep = { kind: 'user', v: 'x', message: 'No sound — Film A', ctx: {}, crumbs: [], extra: { choice: 'sound', choiceLabel: 'No sound', note: 'Silent from the start' } };

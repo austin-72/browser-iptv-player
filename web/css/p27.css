@@ -563,3 +563,27 @@ button.rn-row:hover, a.rn-row:hover { background: rgba(255,255,255,.08); }
 .rv-more { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; border-top: 1px solid var(--line); padding-top: .9rem; }
 .rv-more .btn .spinner { margin-right: .3rem; }
 @media (max-width: 600px) { .rv-bar .sp { display: none; } .rv-sort { width: 100%; } .rv-sort select { flex: 1; } }
+
+/* ---- A phone held upright: the video in a strip on top, its page scrolling below, as on YouTube (web/js/watch.js) */
+body.docked { --dockh: calc(56.25vw + env(safe-area-inset-top)); --top: var(--dockh); }
+body.docked #topbar, body.docked #tabbar { display: none; }
+#player-layer.dock { bottom: auto; height: var(--dockh); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+#player-layer.dock #player-host { top: env(safe-area-inset-top); }
+#player-layer.dock .vp-top { padding: 4px 6px 26px; }
+#player-layer.dock .vp-title { font-size: .95rem; }
+#player-layer.dock .vp-sub { font-size: .78rem; }
+#player-layer.dock .vp-ctrl { padding: 20px 6px 2px; }
+#player-layer.dock .vp-row .pbtn { width: 2.4rem; height: 2.4rem; }
+/* (The page below has the episodes and what is on the channel; Back makes it small; nothing to hide the controls from.) */
+#player-layer.dock [data-a=mini], #player-layer.dock [data-a=episodes], #player-layer.dock [data-a=hidectl], #player-layer.dock .vp-ttl, #player-layer.dock .vp-live { display: none; }
+#player-layer.dock .vp-msg { padding: .5rem 1rem; }
+#player-layer.dock .vp-msg .t { font-size: 1rem; margin-bottom: .2rem; }
+#player-layer.dock .vp-msg .s { font-size: .85rem; margin-bottom: .5rem; }
+/* Menus and side panels open as a sheet below the video instead of squeezed into it. */
+#player-layer.dock .vp-menu, #player-layer.dock .vp-menu.big { position: fixed; top: var(--dockh); left: 0; right: 0; bottom: 0; width: auto; min-width: 0; max-width: none; max-height: none; transform: none; border-radius: 0; border-width: 1px 0 0; }
+#player-layer.dock .vp-side { position: fixed; top: var(--dockh); left: 0; right: 0; bottom: 0; width: auto; border-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+/* The page: no big picture behind the title (the video is the picture), and the tabs stop under the video. */
+body.docked .view-title .tp-hero { padding-top: calc(var(--top) + 1rem); }
+body.docked .tp-a .tp-hero { min-height: 0; padding-bottom: .4rem; }
+body.docked .tp-a .tp-hero .tp-poster { display: none; }
+body.docked .tp-a .tp-bg { opacity: .35; }

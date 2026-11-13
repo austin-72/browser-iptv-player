@@ -117,7 +117,9 @@ V.closePlayer = function () {
   if (V.party && V.party.current) V.party.leave();
   V.player.stop();
   V.$('#player-layer').hidden = true;
-  document.body.classList.remove('watching', 'mini-playing');
+  document.body.classList.remove('watching', 'mini-playing', 'docked');
+  V.$('#player-layer').classList.remove('dock');
+  V.watch.dock = false;
   V.watch.it = null;
   V.rt.presence(null);
   V.leaveFullscreen();
@@ -129,12 +131,65 @@ V.closePlayer = function () {
 V.setMini = function (on) {
   V.watch.mini = !!on;
   var layer = V.$('#player-layer');
+  // (Not small, on a phone held upright: the video at the top and its page below it, as on YouTube — see V.dockable.)
+  var dock = !on && !layer.hidden && V.dockable(V.watch.it);
+  var was = !!V.watch.dock;
+  V.watch.dock = dock;
   layer.classList.toggle('mini', !!on);
+  layer.classList.toggle('dock', dock);
   document.body.classList.toggle('mini-playing', !!on && !layer.hidden);
-  document.body.classList.toggle('watching', !on && !layer.hidden);
+  document.body.classList.toggle('docked', dock);
+  document.body.classList.toggle('watching', !on && !dock && !layer.hidden);
   if (on) V.leaveFullscreen();
-  if (!on) setTimeout(function () { V.player.el.focus(); }, 30);
+  if (dock) {
+    var page = V.dockPageOf(V.watch.it);
+    if (!V.onDockPage(V.router.parse())) V.router.go(page);
+    else if (!was) window.scrollTo(0, 0);
+  }
+  if (!on && !dock) setTimeout(function () { V.player.el.focus(); }, 30);
+  if (dock !== was) V.emit('dock', dock);
 };
+
+// ---------------------------------------------------------------- a phone held upright: the video on top, its page below
+// Films, episodes and channels on a phone (or a tablet) held upright play in a strip across the top, with the title's
+// page — or the channel's — scrolling below it, as on YouTube. Turned sideways, or with Full screen, the player fills
+// the screen; held upright again, it's back on top. Going to another page makes it the small floating player. On
+// unless the admin (Admin → Playback) or the profile (Settings → Playback) turned it off.
+var DOCK_MQ = window.matchMedia ? window.matchMedia('(orientation: portrait) and (max-width: 900px)') : null;
+V.dockWanted = function () {
+  var p = V.pref('phoneDock');
+  return p === true || p === false ? p : !(S.settings && S.settings.phoneDock === false);
+};
+V.dockable = function (it) {
+  if (!it || !/^(movie|episode|live|radio)$/.test(it.t) || V.tvMode || !V.device || !V.device.touch || !DOCK_MQ || !DOCK_MQ.matches) return false;
+  if (document.fullscreenElement || document.webkitFullscreenElement) return false;
+  return V.dockWanted();
+};
+/** The page that goes below the video: the film's or series' page, or the channel's. */
+V.dockPageOf = function (it) {
+  if (it.t === 'live' || it.t === 'radio') return '#/channel/' + encodeURIComponent(it.k);
+  var sh = it.t === 'episode' ? V.showOf(it) : null;
+  return '#/title/' + encodeURIComponent(sh ? sh.k : it.k);
+};
+/** Is r (a route) the page of what's playing? (A series' page for any of its episodes.) */
+V.onDockPage = function (r) {
+  var it = V.watch.it;
+  if (!it || !r) return false;
+  if (it.t === 'live' || it.t === 'radio') return r.name === 'channel' && r.args[0] === it.k;
+  if (r.name !== 'title') return false;
+  if (r.args[0] === it.k) return true;
+  var sh = it.t === 'episode' ? V.showOf(it) : null, e = V.entry(r.args[0]);
+  return !!(sh && e && (e === sh || (e.t === 'episode' && V.showOf(e) === sh)));
+};
+var redock = function () {
+  var l = V.$('#player-layer');
+  if (!l || l.hidden || V.watch.mini || !V.watch.it) return;
+  if (V.dockable(V.watch.it) !== !!V.watch.dock) V.setMini(false);
+};
+if (DOCK_MQ) { if (DOCK_MQ.addEventListener) DOCK_MQ.addEventListener('change', redock); else if (DOCK_MQ.addListener) DOCK_MQ.addListener(redock); }
+document.addEventListener('fullscreenchange', redock);
+document.addEventListener('webkitfullscreenchange', redock);
+V.on('prefs', function (k) { if (k === 'phoneDock') redock(); });
 
 // ---------------------------------------------------------------- live info card & zapping
 V.showLiveCard = function (auto) {
@@ -330,7 +385,9 @@ V.initWatch = function () {
   p.onPlaying = function () { if (V.watch.it && V.watch.it.t !== 'live') V.$('.vp-live', p.host).hidden = true; V.castButton(); };
   p.onButton = function (a, b) {
     var it = V.watch.it;
-    if (a === 'back') { if (V.watch.mini) V.closePlayer(); else if (V.party && V.party.current) V.party.leaveConfirm(); else V.closePlayer(); }
+    // (On top of its page: Back makes it the small player, as YouTube's arrow does. Closed from there.)
+    if (a === 'back' && V.watch.dock) V.setMini(true);
+    else if (a === 'back') { if (V.watch.mini) V.closePlayer(); else if (V.party && V.party.current) V.party.leaveConfirm(); else V.closePlayer(); }
     else if (a === 'mini') V.setMini(!V.watch.mini);
     else if (a === 'next') p.onNext();
     else if (a === 'episodes') V.openSide('episodes');
@@ -352,6 +409,7 @@ V.initWatch = function () {
   document.addEventListener('keydown', function (e) {
     var layer = V.$('#player-layer');
     if (layer.hidden || V.watch.mini) return;
+    if (V.watch.dock && !layer.contains(e.target)) return; // (on top of its page: keys typed on the page are the page's)
     if (!e.target || typeof e.target.closest !== 'function') return; // (a key sent to the document itself)
     if (e.target.closest('input, textarea, select, [contenteditable], dialog')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;

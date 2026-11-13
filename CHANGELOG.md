@@ -3,6 +3,16 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.6
+
+- **Phones held upright play as on YouTube:** a film, episode or channel plays in a strip across the top of a phone or
+  tablet held upright, with its page scrolling below — the film's or series' page (episodes, details, cast, reviews,
+  more like this) or the channel's schedule. The player's settings and side panels open as a sheet below the video.
+  Turned sideways, or with Full screen, it fills the screen; held upright again, it's back on top. Back, or going to
+  another page, makes it the small floating player; tapping that brings it back on top of its page. Computers and TVs
+  are unchanged. On for everyone unless the admin turns it off (Admin → Playback); each profile can change it in
+  Settings → Playback.
+
 ## 2.8.5
 
 - **Error reports, gone through again:** Google's Cast script is loaded only on an https address — casting needs one,

@@ -710,6 +710,7 @@ function publicSettings() {
     directAddress: s.directAddress || '', directSwitch: s.directSwitch || 'ask',
     features: ['browserRoute', 'copyCodecs'],
     smartFailover: s.smartFailover !== false, // (see /api/play/race)
+    phoneDock: s.phoneDock !== false, // (a phone held upright: the video on top, its page below — web/js/watch.js)
     smart: Smart.publicView(s), // smarter categories (lib/smartcats.js)
     epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
     // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
@@ -2664,7 +2665,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (['everyone', 'admin', 'off'].includes(b.subGen)) s.subGen = b.subGen; // (who may have subtitles made from a film's sound: lib/routes-p13.js)
   if (b.off && typeof b.off === 'object' && !Array.isArray(b.off)) s.off = Object.fromEntries(AREAS.filter((a) => b.off[a] === true).map((a) => [a, true]));
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'phoneDock', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.

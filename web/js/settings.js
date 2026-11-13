@@ -27,6 +27,7 @@ V.route('settings', function (view) {
     sw('reduceMotion', 'Reduce motion', 'Fewer animations') + '</section>' +
 
     '<section class="card-sec"><h2>Playback</h2>' + sw('autoplayNext', 'Play the next episode automatically') + sw('autoSkipIntro', 'Skip intros automatically') + sw('autoSkipCredits', 'Skip end credits automatically') +
+      (V.device.touch && !V.tvMode ? '<label class="switch"><input type="checkbox" data-pref="phoneDock"' + (V.dockWanted() ? ' checked' : '') + '><span class="sw"></span><span><b>Held upright: the video on top, its page below</b><small>As on YouTube: on a phone or tablet held upright, what’s playing sits in a strip at the top with its page below. Turn it sideways, or use Full screen, for the whole screen. Off: the player always fills the screen.</small></span></label>' : '') +
     '<div class="grid2"><label class="field"><span>Quality</span><select class="input" data-pref-sel="quality">' + [['auto', 'Automatic (best for the connection)'], ['1080', 'Up to 1080p'], ['720', 'Up to 720p'], ['480', 'Up to 480p'], ['360', 'Up to 360p']].map(function (o) { return '<option value="' + o[0] + '"' + (String(pf.quality) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
     '<label class="field"><span>Preferred audio language</span><select class="input" data-pref-sel="audioLang">' + langOpts(pf.audioLang) + '</select></label>' +
     '<label class="field"><span>Subtitle language</span><select class="input" data-pref-sel="subLang">' + langOpts(pf.subLang) + '</select></label></div>' +

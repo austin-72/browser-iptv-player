@@ -32,7 +32,8 @@ V.router = {
     if (V.router.stack[V.router.stack.length - 2] === r.hash) V.router.stack.pop(); else if (prevHash !== r.hash) V.router.stack.push(r.hash);
     if (V.router.stack.length > 50) V.router.stack.shift();
     V.closeMenus();
-    if (V.watch && V.watch.it && !V.watch.mini && !keepScroll) V.setMini(true);
+    // (Playing on top of its page — a phone held upright — and still on it: it stays there.)
+    if (V.watch && V.watch.it && !V.watch.mini && !keepScroll && !(V.watch.dock && V.onDockPage(r))) V.setMini(true);
     V.$$('[data-nav]').forEach(function (a) { var on = a.dataset.nav === r.name || (a.dataset.nav === 'home' && !V.routes[r.name]) || (!!a.dataset.also && a.dataset.also.split(',').indexOf(r.name) >= 0); a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     document.body.dataset.page = r.name;
     if (V.pageCleanup) { try { V.pageCleanup(); } catch (e) {} V.pageCleanup = null; }
