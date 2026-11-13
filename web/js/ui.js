@@ -90,7 +90,7 @@ V.renderShell = function () {
   document.title = b.name || '';
 };
 
-/** A search box in the top bar on wide screens (not TVs: there the Search page is a press away). The first letter typed
+/** A search box in the top bar on wide screens and TVs, with voice and on-screen keyboard buttons. The first letter typed
  *  goes to the Search page — the results there follow what's typed, in its own box — and Enter does too. */
 V.headerSearch = function () {
   if (V.$('#hdr-search')) return;
@@ -100,9 +100,21 @@ V.headerSearch = function () {
   f.id = 'hdr-search';
   f.className = 'hdr-search';
   f.setAttribute('role', 'search');
-  f.innerHTML = '<span class="hs-i">' + V.icon('search') + '</span><input type="search" class="hs-in" placeholder="Search" aria-label="Search films, series, channels and people" enterkeyhint="search" spellcheck="false">';
+  // (Voice and the on-screen keyboard from here too: each opens the Search page with that one going — the keyboard on a
+  // screen with no touch, as there; voice where the browser can listen.)
+  var voice = window.SpeechRecognition || window.webkitSpeechRecognition, osk = V.tvMode || !(V.device && V.device.touch);
+  f.innerHTML = '<span class="hs-i">' + V.icon('search') + '</span><input type="search" class="hs-in" placeholder="Search" aria-label="Search films, series, channels and people" enterkeyhint="search" spellcheck="false">' +
+    (voice || osk ? '<span class="hs-acts">' +
+      (voice ? '<button type="button" class="icon-btn hs-b" data-hs="voice" aria-label="Search by voice" title="Search by voice">' + V.icon('mic') + '</button>' : '') +
+      (osk ? '<button type="button" class="icon-btn hs-b" data-hs="osk" aria-label="Search with the on-screen keyboard" title="On-screen keyboard">' + V.icon('keyboard') + '</button>' : '') +
+      '</span>' : '');
+  f.classList.toggle('has-acts', !!(voice || osk));
+  f.style.setProperty('--hs-acts', String((voice ? 1 : 0) + (osk ? 1 : 0)));
   link.parentNode.insertBefore(f, link);
   var inp = V.$('input', f);
+  V.$$('[data-hs]', f).forEach(function (b) {
+    b.onclick = function () { var q = inp.value.trim(); V.searchStart = b.getAttribute('data-hs'); go(q); };
+  });
   var go = function (q) { inp.value = ''; inp.blur(); V.router.go('#/search' + (q ? '?q=' + encodeURIComponent(q) : '')); };
   // (Keys pressed while the page changes are kept, and the Search page's box takes them: nothing typed is lost.)
   inp.addEventListener('input', function () {

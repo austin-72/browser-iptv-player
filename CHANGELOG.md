@@ -3,6 +3,12 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.9
+
+- **Voice and keyboard buttons on the top bar's search box**, on every page: each opens Search with that one going.
+  TVs now get the box too, the two buttons beside it (a remote's Left and Right step out of a text box at its ends);
+  where the bar's narrow, the two buttons sit next to the Search button.
+
 ## 2.8.8
 
 - **Better matches:** "dark knight" finds The Dark Knight, "fast and furious" Fast & Furious, "rocky 2" Rocky II,

@@ -317,10 +317,14 @@ V.route('search', function (view, r) {
   run(q0);
   // On a TV, the keyboard is open to start with when there's nothing to search for yet (or it was left open); elsewhere
   // the box has the focus, the cursor after what's there (typing started in the top bar's box carries on here).
+  // (Or the top bar's voice or keyboard button brought you here: that one goes.)
+  var start = V.searchStart; V.searchStart = null;
   var oskWas = 0; try { oskWas = +V.ls.get('osk', 0); } catch (e) {}
-  if (osk && V.tvMode && (!q0 || oskWas)) oskOpen(true);
+  if (osk && start === 'osk') { oskOpen(true, false); setTimeout(function () { var k = V.$('.osk-keys .osk-k', osk); if (k && !osk.hidden) k.focus(); }, 50); }
+  else if (osk && V.tvMode && (!q0 || oskWas)) oskOpen(true);
   else if (osk && oskWas && !V.tvMode) oskOpen(true, false);
-  if (!V.device.tv && !V.tvMode) setTimeout(function () {
+  if (start === 'voice' && vb) vb.click();
+  if (!V.device.tv && !V.tvMode && start !== 'osk') setTimeout(function () {
     var ta = V.searchTypeAhead && V.searchTypeAhead.take();
     if (ta && ta !== input.value) { input.value = ta; lastRun = ta; run(ta); }
     input.focus();

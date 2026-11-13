@@ -160,7 +160,12 @@
       // them while there's another line to go to.
       var vert = (dir === 'up' || dir === 'down') && V.tvMode;
       var ta = t.tagName === 'TEXTAREA' && vert && (dir === 'up' ? t.value.lastIndexOf('\n', t.selectionStart - 1) < 0 : t.value.indexOf('\n', t.selectionEnd) < 0);
-      if (!(t.tagName === 'SELECT' && V.tvMode) && !(t.tagName === 'INPUT' && vert) && !(vert && t.closest('.vp-seek')) && !ta) return;
+      // And Left/Right leave a text box from its ends (to the buttons beside it — voice, the keyboard).
+      var edge = false;
+      if (V.tvMode && (dir === 'left' || dir === 'right') && t.tagName === 'INPUT' && t.type !== 'range') {
+        try { edge = dir === 'right' ? t.selectionEnd >= t.value.length : t.selectionStart <= 0 && t.selectionEnd <= 0; } catch (e2) { edge = true; }
+      }
+      if (!(t.tagName === 'SELECT' && V.tvMode) && !(t.tagName === 'INPUT' && vert) && !(vert && t.closest('.vp-seek')) && !ta && !edge) return;
     }
     var pl2 = V.$('#player-layer');
     if (pl2 && !pl2.hidden && !pl2.classList.contains('mini') && !(t && t.closest('.vp-menu, .vp-side, .vp-ctrl, .vp-top, .vp-center, .vp-msg, .vp-upnext, .vp-end, .vp-live, .vp-skip, dialog'))) return;

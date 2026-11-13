@@ -1,39 +1,43 @@
-/* The search box in the top bar on wide screens. */
-/* The top bar's box: wide screens only (phones and tablets have the Search button; on the Search page, its own box). */
+/* The top bar's box: wide screens and TVs (on the Search page, its own box). Narrower — tablets, small TVs — the
+   Search button with voice and the on-screen keyboard beside it; phones, the Search button. */
 .hdr-search { display: none; }
+@media (min-width: 761px) {
+  body:not([data-page=search]) .hdr-search.has-acts { display: flex; align-items: center; margin-right: .1rem; flex: none; }
+  body:not([data-page=search]) .hdr-search.has-acts > .hs-i, body:not([data-page=search]) .hdr-search.has-acts > .hs-in { display: none; }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-acts { position: static; transform: none; gap: .1rem; }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-b { width: 2.5rem; height: 2.5rem; color: var(--text); }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-b .i { width: 1.25rem; height: 1.25rem; }
+}
 @media (min-width: 1180px) {
-  html:not(.tv) body:not([data-page=search]) .hdr-search { display: flex; align-items: center; position: relative; width: clamp(13rem, 17vw, 19rem); min-width: 9rem; margin-right: .35rem; flex: 0 1 auto; }
-  html:not(.tv) body:not([data-page=search]) #topbar .hdr-search + [data-nav=search] { display: none; }
+  body:not([data-page=search]) .hdr-search, body:not([data-page=search]) .hdr-search.has-acts { display: flex; align-items: center; position: relative; width: clamp(13rem, 17vw, 19rem); min-width: 9rem; margin-right: .35rem; flex: 0 1 auto; }
+  body:not([data-page=search]) .hdr-search.has-acts { width: clamp(15rem, 20vw, 22rem); }
+  body:not([data-page=search]) .hdr-search.has-acts > .hs-i { display: flex; }
+  body:not([data-page=search]) .hdr-search.has-acts > .hs-in { display: block; }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-acts { position: absolute; transform: translateY(-50%); gap: 0; }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-b { width: 2rem; height: 2rem; color: var(--dim); }
+  body:not([data-page=search]) .hdr-search.has-acts .hs-b .i { width: 1.1rem; height: 1.1rem; }
+  body:not([data-page=search]) #topbar .hdr-search + [data-nav=search] { display: none; }
+  /* (On a TV, beside the box rather than in it: a remote steps box → voice → keyboard, one at a time.) */
+  html.tv body:not([data-page=search]) .hdr-search.has-acts { width: clamp(19rem, 24vw, 28rem); gap: .2rem; }
+  html.tv body:not([data-page=search]) .hdr-search.has-acts > .hs-in { flex: 1; min-width: 0; padding-right: .8rem; }
+  html.tv body:not([data-page=search]) .hdr-search.has-acts .hs-acts { position: static; transform: none; gap: .1rem; }
+  html.tv body:not([data-page=search]) .hdr-search.has-acts .hs-b { width: 2.5rem; height: 2.5rem; color: var(--text); }
+  html.tv body:not([data-page=search]) .hdr-search.has-acts .hs-b .i { width: 1.25rem; height: 1.25rem; }
 }
 .hdr-search .hs-i { position: absolute; left: .7rem; top: 50%; transform: translateY(-50%); color: var(--dim); display: flex; pointer-events: none; }
 .hdr-search .hs-i .i { width: 1.1rem; height: 1.1rem; }
 .hs-in { width: 100%; height: 2.4rem; padding: 0 .8rem 0 2.3rem; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--bg2) 88%, transparent); color: var(--text); font-size: .95rem; }
 .hs-in::placeholder { color: var(--faint); }
 .hs-in:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); background: var(--bg2); }
-.hdr-search .ac-list { left: auto; right: 0; width: min(28rem, calc(100vw - 2 * var(--gutter))); }
-
-/* Phones: a little more room to tap. */
-@media (max-width: 760px) {
-  .ac-o { min-height: 3rem; }
-  .ac-list { max-height: 55vh; }
-}
-
-/* TVs: bigger, and the picked one stands out from across the room. */
-html.tv .ac-list { padding: 8px; max-height: 70vh; }
-html.tv .ac-o { min-height: 3.6rem; font-size: 1.2rem; gap: 1rem; padding: .5rem .9rem; }
-html.tv .ac-t { font-size: 1.2rem; }
-html.tv .ac-m { font-size: .95rem; }
-html.tv .ac-ic { width: 2.5rem; height: 2.5rem; }
-html.tv .ac-o.on { background: var(--card2); box-shadow: inset 0 0 0 3px #fff; }
+/* Voice and the on-screen keyboard: inside the box at its right end (beside it where there's no box to put them in). */
+.hdr-search.has-acts .hs-in { padding-right: calc(.4rem + var(--hs-acts, 2) * 2rem); }
+.hdr-search .hs-acts { position: absolute; right: .25rem; top: 50%; transform: translateY(-50%); display: flex; gap: 0; }
+.hdr-search .hs-b { width: 2rem; height: 2rem; color: var(--dim); }
+.hdr-search .hs-b .i { width: 1.1rem; height: 1.1rem; }
+.hdr-search .hs-b:hover, .hdr-search .hs-b:focus-visible { color: var(--text); }
 
 /* Home with no big picture at the top (nothing with artwork to show): the first row starts below the top bar, not
    under it. */
 .view-home > h1.sr-only + .moods { margin-top: var(--top); }
 .view-home > h1.sr-only + .rows { margin-top: var(--top); }
 
-/* See-through suggestions: what's behind shows through, blurred so the words stay easy to read. (Browsers without
-   color-mix keep the solid background above.) */
-.ac-list { background: color-mix(in srgb, var(--bg2) 62%, transparent); -webkit-backdrop-filter: blur(5px) saturate(1.2); backdrop-filter: blur(5px) saturate(1.2); }
-.ac-list .ac-o { text-shadow: 0 1px 3px color-mix(in srgb, var(--bg2) 85%, transparent); }
-.ac-o.on { background: color-mix(in srgb, var(--card2) 80%, transparent); }
-.ac-ic { background: color-mix(in srgb, var(--card) 75%, transparent); }
