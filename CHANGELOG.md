@@ -3,6 +3,20 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.7
+
+- **A new player layout, from the household's own choice in the layout sampler:** Settings moves up to the top bar
+  (Small player, Watch together, Cast, Settings); on phones Play — with Back 10 and Forward 30 on films and episodes —
+  sits big in the middle of the picture; Hide the controls and Sound only leave the bar (Sound only is still in
+  Settings); the small player has Stop in its top-left corner, and Mute and Back to full screen in its top-right.
+- **Admin → Player layout:** the admin arranges the player for every way it's shown — computer, phone upright (video
+  on top of its page, or full screen), sideways and the small player, each for films and episodes or live TV — by
+  dragging controls between the top bar, the middle of the picture, either side of the seek bar and the control bar,
+  or leaving them out. Changes reach every screen at once; "Back to the built-in layout" undoes them. Catch-up uses the
+  live layout plus the film controls it leaves out. Back, Play and Settings can't be left out.
+- **Only the pause button pauses:** a tap on the picture shows the controls, or hides them when they're showing; a
+  click shows them. The small player works as before. Admin → Player layout has a switch to make the picture pause again.
+
 ## 2.8.6
 
 - **Phones held upright play as on YouTube:** a film, episode or channel plays in a strip across the top of a phone or

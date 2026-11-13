@@ -574,8 +574,8 @@ body.docked #topbar, body.docked #tabbar { display: none; }
 #player-layer.dock .vp-sub { font-size: .78rem; }
 #player-layer.dock .vp-ctrl { padding: 20px 6px 2px; }
 #player-layer.dock .vp-row .pbtn { width: 2.4rem; height: 2.4rem; }
-/* (The page below has the episodes and what is on the channel; Back makes it small; nothing to hide the controls from.) */
-#player-layer.dock [data-a=mini], #player-layer.dock [data-a=episodes], #player-layer.dock [data-a=hidectl], #player-layer.dock .vp-ttl, #player-layer.dock .vp-live { display: none; }
+/* (The page below has what is on the channel. Which buttons show: the layout — playerlayout.js.) */
+#player-layer.dock .vp-ttl, #player-layer.dock .vp-live { display: none; }
 #player-layer.dock .vp-msg { padding: .5rem 1rem; }
 #player-layer.dock .vp-msg .t { font-size: 1rem; margin-bottom: .2rem; }
 #player-layer.dock .vp-msg .s { font-size: .85rem; margin-bottom: .5rem; }
@@ -587,3 +587,118 @@ body.docked .view-title .tp-hero { padding-top: calc(var(--top) + 1rem); }
 body.docked .tp-a .tp-hero { min-height: 0; padding-bottom: .4rem; }
 body.docked .tp-a .tp-hero .tp-poster { display: none; }
 body.docked .tp-a .tp-bg { opacity: .35; }
+
+/* ---- The player's layout (2.8.7): each control in a zone, as Admin → Player layout arranges it (playerlayout.js) */
+.vz { display: flex; align-items: center; gap: .2rem; min-width: 0; flex: 0 1 auto; }
+.vz:empty { display: none; }
+.vz-off { display: none !important; }
+.vp-seekrow .vz { flex: none; }
+.vp:not(.has-media) .vp-titles { visibility: hidden; }
+.vp.is-live .vp-t2 { display: none; }
+/* The middle of the picture: bigger round buttons, gone with the other controls. */
+.vp-center { position: absolute; left: 50%; top: 50%; z-index: 4; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; gap: clamp(1.2rem, 6vw, 3.5rem); transition: opacity .3s; }
+.vp-center:empty { display: none; }
+.vp.idle .vp-center { opacity: 0; pointer-events: none; }
+.vp:not(.has-media) .vp-center, .vp-msg:not([hidden]) ~ .vp-center { visibility: hidden; }
+.vp-center .pbtn { width: 3.6rem; height: 3.6rem; background: rgba(0,0,0,.42); }
+.vp-center .pbtn:hover { background: rgba(0,0,0,.62); }
+.vp-center .pbtn .i { width: 1.8rem; height: 1.8rem; }
+.vp-center .pbtn[data-a=play] { width: 4.6rem; height: 4.6rem; }
+.vp-center .pbtn[data-a=play] .i { width: 2.5rem; height: 2.5rem; }
+.vp-center .live-badge { background: rgba(0,0,0,.42); }
+#player-layer.mini .vp-center { display: none; }
+#player-layer.dock .vp-center { gap: 2.2rem; }
+#player-layer.dock .vp-center .pbtn { width: 2.8rem; height: 2.8rem; }
+#player-layer.dock .vp-center .pbtn .i { width: 1.5rem; height: 1.5rem; }
+#player-layer.dock .vp-center .pbtn[data-a=play] { width: 3.4rem; height: 3.4rem; }
+#player-layer.dock .vp-center .pbtn[data-a=play] .i { width: 1.9rem; height: 1.9rem; }
+html.tv .vp-center .pbtn:focus { background: #fff; color: #000; }
+/* The small player's buttons, in both top corners. */
+#player-layer.mini .mini-bar.ml { right: auto; left: 6px; }
+.mini-bar:empty { display: none !important; }
+
+/* ---- Admin → Player layout: the player drawn small, its controls dragged between zones (playerlayout.js) */
+.ple-groups { display: flex; flex-direction: column; gap: .5rem; margin: .8rem 0 1rem; }
+.ple-g { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.ple-gh { font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); color: color-mix(in srgb, var(--accent) 64%, var(--text)); min-width: 5.5rem; }
+.ple-dot { color: var(--warn); font-weight: 900; }
+.ple-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .8rem; margin-bottom: .6rem; }
+.ple-head h3 { margin: 0; font-size: 1.05rem; }
+.ple-stage { overflow-x: auto; padding-bottom: .3rem; }
+.ple-dev { position: relative; margin: 0 auto; background: #000; color: #fff; border: 5px solid #262b36; border-radius: 12px; overflow: hidden; }
+.ple-dev.desk { width: 100%; min-width: 600px; max-width: 900px; aspect-ratio: 16 / 9; }
+.ple-dev.side { width: 640px; height: 300px; border-radius: 28px; border-width: 8px; }
+.ple-dev.upfull { width: 330px; height: 620px; border-radius: 28px; border-width: 8px; }
+.ple-dev.dock { width: 330px; height: 560px; border-radius: 28px; border-width: 8px; background: #0f1218; }
+.ple-dev.mini-page { width: 100%; max-width: 760px; min-width: 300px; aspect-ratio: 16 / 9; background: #141821; }
+.ple-dev.mini-page.ph { width: 330px; aspect-ratio: auto; height: 560px; border-radius: 28px; border-width: 8px; }
+.ple-pic { position: absolute; inset: 0; background: radial-gradient(ellipse 30% 22% at 70% 30%, rgba(255,214,150,.7), transparent 70%), linear-gradient(180deg, #2d4a63 0%, #6b7f8c 46%, #2a3a2c 47%, #1b261d 100%); }
+.ple-pic.lv { background: radial-gradient(ellipse 18% 26% at 50% 42%, rgba(255,226,170,.8), transparent 70%), linear-gradient(180deg, #5b2d1a 0%, #b3622c 45%, #3d1e12 46%, #160b08 100%); }
+.ple-pic::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.65) 0%, transparent 28%, transparent 58%, rgba(0,0,0,.8) 100%); }
+.ple-dev.upfull .ple-pic { top: 33%; bottom: 33%; }
+.ple-ui { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 6px; }
+.ple-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ple-row .grow { flex: 1; }
+.ple-mid { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.ple-track { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.3); position: relative; }
+.ple-track i { position: absolute; left: 0; top: 0; bottom: 0; width: 38%; background: var(--accent); border-radius: 2px; }
+.ple-track.lv i { width: 100%; }
+.ple-strip { position: absolute; left: 0; right: 0; top: 0; height: calc(314px * 9 / 16); }
+.ple-strip .ple-ui { padding: 3px 5px 2px; gap: 1px; }
+.ple-page { position: absolute; left: 0; right: 0; bottom: 0; top: calc(314px * 9 / 16); padding: 14px; display: flex; flex-direction: column; gap: 6px; color: #a7afbd; font-size: .8rem; background: repeating-linear-gradient(180deg, transparent 0 46px, rgba(255,255,255,.05) 46px 47px); }
+.ple-page b { color: #fff; font-size: 1.15rem; }
+.ple-under { position: absolute; inset: 0; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; align-content: start; }
+.ple-under i { aspect-ratio: 2 / 3; border-radius: 6px; background: linear-gradient(160deg, #2b3446, #1a1f2a); }
+.ple-mini { position: absolute; right: 12px; bottom: 12px; width: 48%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; box-shadow: 0 14px 40px rgba(0,0,0,.6); }
+.ph .ple-mini { width: 66%; bottom: 20px; }
+.ple-mini .ple-pic::after { background: none; }
+.ple-mini .ple-z.ml { position: absolute; top: 4px; left: 4px; }
+.ple-mini .ple-z.mr { position: absolute; top: 4px; right: 4px; }
+
+.ple-z { display: flex; align-items: center; flex-wrap: nowrap; gap: 3px; min-height: 38px; min-width: 14px; border-radius: 8px; padding: 2px; }
+.ple-z.grow { flex: 1 1 auto; min-width: 0; }
+.ple-z.empty { min-width: 30px; }
+.ple .ple-z.empty, .ple-dragging .ple-z { box-shadow: inset 0 0 0 1.5px rgba(160,180,255,.45); background: rgba(125,155,255,.1); }
+.ple-z.hot { box-shadow: inset 0 0 0 2px #9fb4ff !important; background: rgba(125,155,255,.3) !important; }
+.ple-ph { width: 3px; align-self: stretch; background: #9fb4ff; border-radius: 2px; }
+.ple-tray { margin-top: .8rem; display: flex; flex-direction: column; gap: .3rem; }
+.ple-z.tray { flex-wrap: wrap; background: #0f1218; border-radius: 10px; padding: 5px; min-height: 48px; }
+.ple-z.tray.empty::before { content: 'Drag a control here to leave it out of this layout'; color: #a7afbd; font-size: .8rem; padding: 0 .5rem; }
+
+.ple-c { position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 34px; height: 34px; padding: 0 3px; border-radius: 50%; border: 1px solid transparent; background: transparent; color: #fff; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; flex: none; }
+.ple-c .i { width: 20px; height: 20px; }
+.ple-c.big .i { width: 26px; height: 26px; }
+.ple-c:hover { background: rgba(255,255,255,.14); }
+.ple-c:focus-visible { outline: 2px solid #9fb4ff; outline-offset: 1px; }
+.ple-c.some { border: 1px dashed rgba(220,226,238,.55); }
+.ple-c.on { outline: 2px solid #9fb4ff; outline-offset: 1px; background: rgba(125,155,255,.28); }
+.ple-c .ple-n { display: none; }
+.ple-c.tx { border-radius: 6px; height: auto; min-height: 26px; padding: 2px 6px; }
+.ple-c.ttl { align-items: flex-start; text-align: left; min-width: 0; max-width: 200px; flex: 0 1 auto; }
+.ple-c.ttl b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ple-c.ttl small { font-size: 10px; color: #a7afbd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ple-c.tm { font-size: 11px; font-variant-numeric: tabular-nums; color: #c9d0dc; }
+.ple-c.lv { flex-direction: row; gap: 4px; font-size: 11px; font-weight: 800; }
+.ple-c.lv::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
+.ple-c.ghost { position: fixed; z-index: 1000; pointer-events: none; background: #2b3346; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.ple-c.src { opacity: .3; }
+.ple-strip .ple-c { min-width: 28px; height: 28px; }
+.ple-strip .ple-c .i { width: 17px; height: 17px; }
+.ple-strip .ple-z { min-height: 30px; gap: 1px; }
+.ple-dev.upfull .ple-c.ic { min-width: 28px; }
+.ple-dev.upfull .ple-z, .ple-dev.upfull .ple-row { gap: 1px; }
+.ple-mini .ple-c { min-width: 28px; height: 28px; background: rgba(0,0,0,.6); }
+.ple-mini .ple-c .i { width: 15px; height: 15px; }
+.ple-mid .ple-c.ic { width: 44px; height: 44px; background: rgba(0,0,0,.4); }
+.ple-mid .ple-c.big { width: 54px; height: 54px; }
+.ple-strip .ple-mid .ple-c.ic { width: 34px; height: 34px; }
+.ple-strip .ple-mid .ple-c.big { width: 40px; height: 40px; }
+.ple-insp { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; margin: .9rem 0; padding: .7rem .9rem; border: 1px solid var(--line); border-radius: 10px; min-height: 3.2rem; }
+.ple-insp .grow { flex: 1 1 16rem; min-width: 0; }
+.ple-acts { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.ple-acts select { width: auto; }
+.ple-saved { margin-left: .4rem; }
+.ple-strip .ple-c.ttl { min-height: 0; padding: 1px 4px; max-width: 150px; }
+.ple-strip .ple-c.ttl b { font-size: 11px; line-height: 1.2; }
+.ple-strip .ple-c.ttl small { font-size: 9px; line-height: 1.2; }
+.ple-strip .ple-c.tm, .ple-strip .ple-c.lv { min-height: 22px; font-size: 10px; }

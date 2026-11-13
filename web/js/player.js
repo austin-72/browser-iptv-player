@@ -202,38 +202,47 @@ V.Player = function (host) {
     '<div class="vp-osd" aria-live="polite"></div>' +
     '<div class="vp-stats" hidden></div>' +
     '<div class="vp-react" aria-hidden="true"></div>' +
+    // (Each control goes in a zone — .vz — as the player's layout for this screen says: playerlayout.js.)
     '<div class="vp-top">' +
+    '  <div class="vz vz-l" data-z="top-left">' +
     '  <button class="pbtn" data-a="back" aria-label="Back">' + V.icon('back') + '</button>' +
-    '  <div class="vp-titles"><div class="vp-title"></div><div class="vp-sub"></div></div>' +
+    '  <div class="vp-titles"><div class="vp-title"></div><div class="vp-sub"></div></div></div>' +
     '  <span class="sp"></span>' +
+    '  <div class="vz" data-z="top-right">' +
+    '  <button class="pbtn" data-a="mini" aria-label="Minimise" title="Keep watching while you browse">' + V.icon('mini') + '</button>' +
     '  <button class="pbtn" data-a="party" aria-label="Watch together" title="Watch together">' + V.icon('party') + '</button>' +
     '  <button class="pbtn" data-a="cast" aria-label="Cast" title="Cast to a TV" hidden>' + V.icon('cast') + '</button>' +
-    '  <button class="pbtn" data-a="mini" aria-label="Minimise" title="Keep watching while you browse">' + V.icon('mini') + '</button>' +
+    '  <button class="pbtn" data-a="gear" aria-label="Playback settings" title="Settings">' + V.icon('gear') + '</button></div>' +
     '</div>' +
+    '<div class="vp-center vz" data-z="center"></div>' +
     '<div class="vp-live" hidden></div>' +
     '<button class="vp-skip" hidden></button>' +
     '<div class="vp-upnext" hidden></div>' +
     '<div class="vp-ctrl">' +
-    '  <div class="vp-seekrow"><span class="vp-t1 num"></span><div class="vp-seek" role="slider" tabindex="0" aria-label="Seek"><div class="track"><div class="buf"></div><div class="fill"></div><div class="marks"></div></div><div class="knob"></div><div class="tip"><img alt="" hidden><span></span></div></div><button class="vp-t2 num" data-a="timeends" title="Time left, or when it ends" aria-label="Time left, or when it ends"></button></div>' +
+    '  <div class="vp-seekrow"><div class="vz" data-z="seek-left"><span class="vp-t1 num"></span></div><div class="vp-seek" role="slider" tabindex="0" aria-label="Seek"><div class="track"><div class="buf"></div><div class="fill"></div><div class="marks"></div></div><div class="knob"></div><div class="tip"><img alt="" hidden><span></span></div></div><div class="vz" data-z="seek-right"><button class="vp-t2 num" data-a="timeends" title="Time left, or when it ends" aria-label="Time left, or when it ends"></button></div></div>' +
     '  <div class="vp-row">' +
+    '    <div class="vz" data-z="row-left">' +
     '    <button class="pbtn big" data-a="play" aria-label="Play">' + V.icon('play') + '</button>' +
     '    <button class="pbtn" data-a="rw" aria-label="Back 10 seconds">' + V.icon('rw') + '</button>' +
     '    <button class="pbtn" data-a="ff" aria-label="Forward 30 seconds">' + V.icon('ff') + '</button>' +
     '    <span class="vol-wrap"><button class="pbtn" data-a="mute" aria-label="Mute">' + V.icon('vol') + '</button><input class="vol" type="range" min="0" max="1" step="0.05" aria-label="Volume"></span>' +
-    '    <button class="live-badge" data-a="golive" hidden>Live</button>' +
+    '    <button class="live-badge" data-a="golive" hidden>Live</button></div>' +
     '    <span class="vp-ttl truncate"></span>' +
     '    <span class="sp"></span>' +
+    '    <div class="vz" data-z="row-right">' +
     '    <button class="pbtn" data-a="next" aria-label="Next episode" title="Next episode" hidden>' + V.icon('skipnext') + '</button>' +
     '    <button class="pbtn" data-a="episodes" aria-label="Episodes" title="Episodes" hidden>' + V.icon('stack') + '</button>' +
     '    <button class="pbtn" data-a="channels" aria-label="Channels" title="Channels" hidden>' + V.icon('list') + '</button>' +
-    '    <button class="pbtn" data-a="audioonly" aria-label="Sound only" title="Sound only (picture off, less data)" hidden>' + V.icon('headphones') + '</button>' +
     '    <button class="pbtn" data-a="cc" aria-label="Subtitles and audio" title="Subtitles and audio">' + V.icon('cc') + '</button>' +
     '    <button class="pbtn" data-a="bookmark" aria-label="Bookmark this moment" title="Bookmark">' + V.icon('bookmark') + '</button>' +
-    '    <button class="pbtn" data-a="gear" aria-label="Playback settings" title="Settings">' + V.icon('gear') + '</button>' +
-    '    <button class="pbtn" data-a="hidectl" aria-label="Hide the controls" title="Hide the controls (U) · move the mouse to bring them back">' + V.icon('eyeoff') + '</button>' +
     '    <button class="pbtn" data-a="pip" aria-label="Picture in picture" title="Picture in picture">' + V.icon('pip') + '</button>' +
-    '    <button class="pbtn" data-a="fs" aria-label="Full screen" title="Full screen">' + V.icon('fs') + '</button>' +
+    '    <button class="pbtn" data-a="fs" aria-label="Full screen" title="Full screen">' + V.icon('fs') + '</button></div>' +
     '  </div>' +
+    '</div>' +
+    // (Controls this layout leaves out.)
+    '<div class="vz vz-off" data-z="hidden" hidden>' +
+    '  <button class="pbtn" data-a="audioonly" aria-label="Sound only" title="Sound only (picture off, less data)" hidden>' + V.icon('headphones') + '</button>' +
+    '  <button class="pbtn" data-a="hidectl" aria-label="Hide the controls" title="Hide the controls (U) · move the mouse to bring them back">' + V.icon('eyeoff') + '</button>' +
     '</div>' +
     '<div class="vp-menu" role="menu" hidden></div>' +
     '<aside class="vp-side" hidden></aside>' +
@@ -2699,8 +2708,20 @@ PP._bind = function () {
     if (!menu.hidden && !(b && (b.dataset.a === 'gear' || b.dataset.a === 'cc'))) { self._closeMenu(); if (!b) return; }
     if (!b) {
       if ((e.target === self.video || e.target.closest('.vp-art') || e.target === self.el) && self.started && !self._swiped) {
-        if (V.device.touch && !self._recentWake) { self._wake(); return; }
-        if (self.vod) self.togglePlay(); else if (self.onTap) self.onTap();
+        // Pausing is the pause button's job: a tap on the picture shows the controls, or hides them when they're
+        // showing; a click shows them. Unless the admin wants the picture to pause (Admin → Player layout), and the
+        // small player works as it did. (Live TV: the channel card, as before.)
+        var tapPause = !!(S.settings && S.settings.tapToPause) || !!(V.watch && V.watch.mini);
+        if (tapPause) {
+          if (V.device.touch && !self._recentWake) { self._wake(); return; }
+          if (self.vod) self.togglePlay(); else if (self.onTap) self.onTap();
+        } else if (self._touchAt && Date.now() - self._touchAt < 800) {
+          if (self._idleAtTouch) self._wake();
+          else if (!self.vod && self.onTap) self.onTap();
+          else if (!self.video.paused) self.hideControls();
+          else self._wake(true);
+        } else if (!self.vod && self.onTap) self.onTap();
+        else self._wake(true);
       }
       self._swiped = false;
       return;
@@ -2834,7 +2855,7 @@ PP._bind = function () {
   // Touch: double-tap sides to skip, swipe up/down on live TV to change channel.
   var sw = null, lastTap = 0;
   this.el.addEventListener('pointerdown', function (e) {
-    if (e.pointerType !== 'touch' || e.target.closest('.vp-ctrl, .vp-menu, .vp-top, .vp-msg button, .vp-side, .vp-skip, .vp-upnext, .vp-end')) return;
+    if (e.pointerType !== 'touch' || e.target.closest('.vp-ctrl, .vp-menu, .vp-top, .vp-center, .vp-msg button, .vp-side, .vp-skip, .vp-upnext, .vp-end')) return;
     sw = { x: e.clientX, y: e.clientY, t: Date.now() };
   });
   this.el.addEventListener('pointerup', function (e) {
@@ -2859,6 +2880,12 @@ PP._bind = function () {
     mx = e.clientX; my = e.clientY;
     self._wake();
   });
+  // (Whether the controls were hidden when the finger came down — before this wakes them: the tap's click decides.)
+  this.el.addEventListener('touchstart', function () {
+    self._touchAt = Date.now(); self._idleAtTouch = self.el.classList.contains('idle');
+    // (A new touch after a tap hid them brings them back, however soon: the wait is for a mouse's stray moves.)
+    if (self._hiddenAt && Date.now() - self._hiddenAt > 250) self._hiddenAt = 0;
+  }, { passive: true, capture: true });
   this.el.addEventListener('touchstart', wake, { passive: true });
   this.el.addEventListener('focusin', wake);
   this.el.addEventListener('mouseleave', function () { if (!self.video.paused && V.$('.vp-menu', h).hidden && !V.$('.vp-seek.drag', h)) self.el.classList.add('idle'); });

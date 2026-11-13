@@ -156,7 +156,6 @@ body.in-party [data-a=party] { color: var(--accent); }
   .vp-row [data-a=bookmark], .vp-row [data-a=pip], .vp-row [data-a=gear]:not(:focus) + * { }
   .vp-row { gap: 0; }
   .pbtn { width: 2.5rem; height: 2.5rem; }
-  .vp-row [data-a=rw], .vp-row [data-a=ff] { display: none; }
   .vp-live, .vp-skip, .vp-upnext { bottom: 6.5rem; }
   .un-art { display: none; }
 }

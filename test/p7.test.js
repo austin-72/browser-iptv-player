@@ -172,6 +172,16 @@ test('the real server: the queue syncs between devices, sound settings are kept,
     assert.strictEqual((await req('GET', '/api/boot')).json.phoneDock, false);
     assert.strictEqual((await req('PUT', '/api/me/prefs', { phoneDock: true })).json.phoneDock, true);
 
+    // The admin's player layout: kept to its shape (names only, each control once), sent to every screen; null puts it back.
+    const lay = { 'desk-episode': { 'top-right': ['mini', 'gear', 'gear', '<b>'], 'row-left': ['play'], 'Bad Zone': ['x'] }, 'not ok!': {} };
+    assert.strictEqual((await req('PUT', '/api/admin/settings', { playerLayout: lay, tapToPause: true })).status, 200);
+    let boot = (await req('GET', '/api/boot')).json;
+    assert.deepStrictEqual(boot.playerLayout, { 'desk-episode': { 'top-right': ['mini', 'gear'], 'row-left': ['play'] } });
+    assert.strictEqual(boot.tapToPause, true);
+    assert.strictEqual((await req('PUT', '/api/admin/settings', { playerLayout: null, tapToPause: false })).status, 200);
+    boot = (await req('GET', '/api/boot')).json;
+    assert.deepStrictEqual([boot.playerLayout, boot.tapToPause], [null, false]);
+
     // A viewer's report goes in even with automatic reports off, and twice is twice.
     await req('PUT', '/api/admin/errors-settings', { on: false });
     const rep = { kind: 'user', v: 'x', message: 'No sound — Film A', ctx: {}, crumbs: [], extra: { choice: 'sound', choiceLabel: 'No sound', note: 'Silent from the start' } };

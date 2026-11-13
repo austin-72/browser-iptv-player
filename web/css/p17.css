@@ -25,13 +25,12 @@
 /* ---- the player on narrow phones: "Sound only" lives in the settings (there's no room for every button), and the
    channel card puts "Start over" on a line of its own instead of squeezing the programme's name */
 @media (max-width: 480px) {
-  .vp-ctrl [data-a=audioonly] { display: none; }
   .vp-live .lc-body { flex: 1 1 calc(100% - 6rem); }
   .vp-live > .btn { margin-left: 5.5rem; }
 }
 
 /* ---- the player: the gear (or subtitles button) shows its panel is open */
-.vp-ctrl .pbtn[aria-expanded=true] { color: var(--accent); }
+.vz .pbtn[aria-expanded=true] { color: var(--accent); }
 
 /* ---- Admin → Overview: the counts on one line where they fit (not one left over on a row of its own) */
 .stats { grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .6rem; }
@@ -44,7 +43,7 @@ button.vp-t2:hover, button.vp-t2:focus-visible { color: #fff; background: rgba(2
 @media (hover: none) and (min-width: 601px) { .tp-icons { gap: 1.3rem; } }
 .tv .tp-icons { gap: 1.5rem; }
 /* (A remote has no pointer to move: "Hide the controls" is for mice.) */
-.tv .vp-ctrl [data-a=hidectl] { display: none; }
+.tv .vz [data-a=hidectl] { display: none; }
 
 /* ---- the settings panel in a narrower window: two sections side by side instead of four squeezed ones */
 @media (max-width: 1050px) and (min-width: 701px) and (min-height: 521px) {

@@ -109,6 +109,22 @@ const presetPassword = process.env.SITE_PASSWORD || preset.sitePassword || '';
 const defaultPassword = presetPassword || 'changeme';
 // The time zone: TZ in the environment (docker-compose, the system's) wins; otherwise the one in the settings.
 const TZ_FROM_ENV = process.env.TZ || '';
+/** An admin's player layout, kept to its shape: { layout: { zone: [control, …] } }, names only, each control once per layout. */
+function cleanPlayerLayout(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const out = {};
+  for (const k of Object.keys(o).slice(0, 24)) {
+    const z = o[k];
+    if (!/^[a-z][a-z-]{1,30}$/.test(k) || !z || typeof z !== 'object' || Array.isArray(z)) continue;
+    const seen = new Set(), zz = {};
+    for (const zn of Object.keys(z).slice(0, 16)) {
+      if (!/^[a-z][a-z-]{1,20}$/.test(zn) || !Array.isArray(z[zn])) continue;
+      zz[zn] = z[zn].filter((c) => typeof c === 'string' && /^[a-z]{2,20}$/.test(c) && !seen.has(c) && seen.add(c)).slice(0, 40);
+    }
+    if (Object.keys(zz).length) out[k] = zz;
+  }
+  return Object.keys(out).length ? out : null;
+}
 const validTz = (tz) => { try { return !!tz && !!new Intl.DateTimeFormat('en-US', { timeZone: tz }).resolvedOptions().timeZone; } catch { return false; } };
 const applyTz = () => { if (TZ_FROM_ENV) return; const tz = settings().timeZone; if (validTz(tz)) process.env.TZ = tz; else delete process.env.TZ; };
 applyTz();
@@ -711,6 +727,8 @@ function publicSettings() {
     features: ['browserRoute', 'copyCodecs'],
     smartFailover: s.smartFailover !== false, // (see /api/play/race)
     phoneDock: s.phoneDock !== false, // (a phone held upright: the video on top, its page below — web/js/watch.js)
+    tapToPause: !!s.tapToPause, // (a tap or click on the picture pauses — off: only the pause button does)
+    playerLayout: s.playerLayout || null, // (the admin's arrangement of the player's controls — web/js/playerlayout.js)
     smart: Smart.publicView(s), // smarter categories (lib/smartcats.js)
     epgPlaceholders: overrides.placeholders, parentalPin: overrides.hasPin,
     // Lists whose direct streams go through the stream relay (so devices never go straight to those providers).
@@ -2665,7 +2683,7 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
   if (['everyone', 'admin', 'off'].includes(b.subGen)) s.subGen = b.subGen; // (who may have subtitles made from a film's sound: lib/routes-p13.js)
   if (b.off && typeof b.off === 'object' && !Array.isArray(b.off)) s.off = Object.fromEntries(AREAS.filter((a) => b.off[a] === true).map((a) => [a, true]));
   if (Array.isArray(b.defaultLangs)) s.defaultLangs = b.defaultLangs.map(String);
-  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'phoneDock', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
+  for (const k of ['showUnknownLang', 'adminOnlyProfiles', 'allowDownloads', 'allowParties', 'introDetection', 'tmdbAuto', 'tmdbTitles', 'smartFailover', 'phoneDock', 'tapToPause', 'quickStart', 'warmStart', 'tmdbLangs', 'guestProfile', 'guestKids', 'guestAdult', 'noAdult']) if (k in b) s[k] = !!b[k];
   if (['', '0', '1', '2', '3'].includes(String(b.guestMaxCert === undefined ? 'x' : b.guestMaxCert))) s.guestMaxCert = String(b.guestMaxCert);
   if (b.guestProfile === false) for (const id of [...accounts.guests.keys()]) accounts.endGuest(id); // (guests turned off: those in now leave)
   // TMDB: each episode's details when a series is opened ('open') or only when fetched here ('off'); its language.
@@ -2686,6 +2704,11 @@ route('PUT', '/api/admin/settings', async (req, res, p, q, ctx) => {
     applyTz();
   }
   if ('setupDone' in b) s.setupDone = !!b.setupDone;
+  // Where each control sits in the player, per layout (Admin → Player layout; web/js/playerlayout.js). null: as built in.
+  if ('playerLayout' in b) {
+    const pl = cleanPlayerLayout(b.playerLayout);
+    if (pl) s.playerLayout = pl; else delete s.playerLayout;
+  }
   if (b.brand && typeof b.brand === 'object') {
     s.brand = {
       name: String(b.brand.name || '').trim().slice(0, 60) || s.brand.name,

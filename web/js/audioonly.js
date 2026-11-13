@@ -25,7 +25,7 @@
   };
   // The player's own button (not the card's "Show the picture" link, which comes first in the page).
   var setBtn = function (p) {
-    var b = V.$('.vp-ctrl [data-a=audioonly]', p.host);
+    var b = V.$('.vz [data-a=audioonly]', p.host);
     if (!b) return;
     b.hidden = !(p.it && p.it.t === 'live');
     b.setAttribute('aria-pressed', String(!!p._aoActive));
@@ -68,7 +68,7 @@
       p._aoMode = !p._aoActive;
       if (p._aoActive) { leave(p); p.osd('Picture on', 1000); } else { enter(p); p.osd('Sound only', 1000); }
       // "Show the picture" goes away with the card: the remote's focus moves to the player's own button.
-      if (fromCard) { var b = V.$('.vp-ctrl [data-a=audioonly]', p.host); (b && !b.hidden && b.offsetParent ? b : p.el).focus({ preventScroll: true }); }
+      if (fromCard) { var b = V.$('.vz [data-a=audioonly]', p.host); (b && !b.hidden && b.offsetParent ? b : p.el).focus({ preventScroll: true }); }
       if (p.onUserAction) p.onUserAction('audioonly');
     },
     /** Called as an item starts loading. */

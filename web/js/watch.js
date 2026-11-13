@@ -96,6 +96,7 @@ V.play = function (it, opts) {
   V.$('[data-a=channels]', V.player.host).hidden = !(it.t === 'live' || it.t === 'radio' || it.t === 'catchup');
   V.$('[data-a=bookmark]', V.player.host).hidden = !(it.t === 'movie' || it.t === 'episode');
   V.$('[data-a=party]', V.player.host).hidden = !S.settings.allowParties || it.t === 'catchup';
+  V.relayout(); // (where each control sits, for this kind of title on this screen: playerlayout.js)
   V.closeSide();
   if (it.t === 'live' || it.t === 'radio') V.showLiveCard(true);
   V.rt.presence({ k: it.t === 'catchup' ? it.catchupOf : it.k, n: it.n, pos: startAt });
@@ -146,6 +147,8 @@ V.setMini = function (on) {
     if (!V.onDockPage(V.router.parse())) V.router.go(page);
     else if (!was) window.scrollTo(0, 0);
   }
+  V.relayout();
+  if (on) V.drawMiniBar();
   if (!on && !dock) setTimeout(function () { V.player.el.focus(); }, 30);
   if (dock !== was) V.emit('dock', dock);
 };
@@ -312,7 +315,7 @@ V.onEnded = function () {
 // ---------------------------------------------------------------- side panels (episodes, channels, party)
 V.closeSide = function () {
   var s = V.$('.vp-side', V.player.host);
-  var had = s.contains(document.activeElement), b = V.watch.side && V.$('.vp-ctrl [data-a="' + V.watch.side + '"], .vp-top [data-a="' + V.watch.side + '"]', V.player.host);
+  var had = s.contains(document.activeElement), b = V.watch.side && V.$('.vz [data-a="' + V.watch.side + '"]', V.player.host);
   s.hidden = true; s.innerHTML = ''; V.watch.side = null;
   // Closed from inside (a remote's Back, its ×): back to the button that opened it, as the settings menu does.
   if (had && b && !b.hidden) { V.player._wake(); b.focus(); }
@@ -401,8 +404,17 @@ V.initWatch = function () {
   };
   V.$('#player-layer').addEventListener('click', function (e) {
     var b = e.target.closest('[data-mini]');
-    if (b) { e.stopPropagation(); if (b.dataset.mini === 'open') V.setMini(false); else if (b.dataset.mini === 'close') V.closePlayer(); else p.togglePlay(); return; }
-    if (V.watch.mini && !e.target.closest('.vp-ctrl, .vp-top, .vp-menu')) V.setMini(false);
+    if (b) {
+      e.stopPropagation();
+      var m = b.dataset.mini, own = function (a) { var x = V.$('.vz [data-a=' + a + ']', p.host); if (x) x.click(); };
+      if (m === 'open') V.setMini(false); else if (m === 'close') V.closePlayer();
+      else if (m === 'mute') own('mute'); else if (m === 'next') own('next');
+      else if (m === 'rw') p.skip(-V.skipLen('back')); else if (m === 'ff') p.skip(V.skipLen('fwd'));
+      else p.togglePlay();
+      V.drawMiniBar();
+      return;
+    }
+    if (V.watch.mini && !e.target.closest('.vp-ctrl, .vp-top, .vp-center, .vp-menu')) V.setMini(false);
   });
 
   var numBuf = '', numT = null;
@@ -418,19 +430,19 @@ V.initWatch = function () {
     var k = e.key;
     // On a TV, Up/Down on the seek bar move to the buttons above/below it (not the volume).
     if (V.tvMode && (k === 'ArrowUp' || k === 'ArrowDown') && e.target.closest('.vp-seek')) return;
-    var inMenu = e.target.closest('.vp-menu, .vp-side, .vp-msg, .vp-upnext, .vp-end, .vp-ctrl button, .vp-top button, .vp-live button, .vp-skip');
+    var inMenu = e.target.closest('.vp-menu, .vp-side, .vp-msg, .vp-upnext, .vp-end, .vp-ctrl button, .vp-top button, .vp-center button, .vp-live button, .vp-skip');
     var handled = true;
     // TV remotes: from the picture, OK (while the buttons are hidden) or Down (films) brings up the buttons with Play
     // focused, so the subtitle and settings menus can be reached with the arrows; Menu opens the settings menu;
     // Back from the buttons hides them again (a second Back leaves the player as before).
     if (V.tvMode) {
-      var onPic = !e.target.closest('.vp-ctrl, .vp-top, .vp-live, .vp-skip, .vp-upnext, .vp-msg, .vp-menu, .vp-side, .vp-end');
-      var focusPlay = function () { p._wake(true); var pb = V.$('.vp-ctrl [data-a=play]', p.host); if (pb) pb.focus(); };
+      var onPic = !e.target.closest('.vp-ctrl, .vp-top, .vp-center, .vp-live, .vp-skip, .vp-upnext, .vp-msg, .vp-menu, .vp-side, .vp-end');
+      var focusPlay = function () { p._wake(true); var pb = V.$('.vz [data-a=play]', p.host); if (pb) pb.focus(); };
       var back = k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461;
       if (onPic && k === 'Enter' && p.el.classList.contains('idle')) { e.preventDefault(); focusPlay(); return; }
       if (onPic && k === 'ArrowDown' && !live) { e.preventDefault(); focusPlay(); return; }
       if (k === 'ContextMenu' || e.keyCode === 93) { e.preventDefault(); var g = V.$('[data-a=gear]', p.host); if (g) { p._wake(true); g.click(); var first = V.$('.vp-menu .mi', p.host); if (first) first.focus(); } return; }
-      if (back && e.target.closest('.vp-ctrl, .vp-top, .vp-live') && V.$('.vp-menu', p.host).hidden && !V.watch.side) { e.preventDefault(); var vp = V.$('.vp', p.host) || p.el; try { vp.focus(); } catch (x) {} p.el.classList.add('idle'); return; }
+      if (back && e.target.closest('.vp-ctrl, .vp-top, .vp-center, .vp-live') && V.$('.vp-menu', p.host).hidden && !V.watch.side) { e.preventDefault(); var vp = V.$('.vp', p.host) || p.el; try { vp.focus(); } catch (x) {} p.el.classList.add('idle'); return; }
     }
     if (k === 'Info' || e.keyCode === 457) k = 'i';
     if (k === 'Escape' || k === 'Backspace' || k === 'BrowserBack' || e.keyCode === 10009 || e.keyCode === 461) {
@@ -545,7 +557,7 @@ V.remoteKey = function (key) {
   // (Not when the key already moved it somewhere — inside the full-screen player, say — nor to a page behind it.)
   var pl = V.$('#player-layer'), behind = pl && !pl.hidden && !pl.classList.contains('mini');
   var moved = document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement;
-  if (!inView && !moved && key.indexOf('Arrow') === 0) { var f = behind ? V.$('.vp-ctrl [data-a=play]', pl) : V.$('#view .card, #view button, #view a[href]'); if (f) { if (behind && V.player) V.player._wake(true); f.focus(); } }
+  if (!inView && !moved && key.indexOf('Arrow') === 0) { var f = behind ? V.$('.vz [data-a=play]', pl) : V.$('#view .card, #view button, #view a[href]'); if (f) { if (behind && V.player) V.player._wake(true); f.focus(); } }
 };
 
 V.playCatchup = function (it, prog, offset) {
