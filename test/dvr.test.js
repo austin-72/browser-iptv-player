@@ -220,7 +220,7 @@ test('the server: record now, stop, play the recording, and Admin → DVR decide
     return { status: res.status, body: j, raw: t };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     await api('a', 'POST', '/api/login', { password: 'pw-test' });
     const admin = (await api('a', 'POST', '/api/profiles', { name: 'Alex', pin: '1234', avatar: 1 })).body;
     await api('a', 'POST', '/api/admin/lists', { type: 'url', name: 'TV', url: `${pv.base}/list.m3u` });

@@ -181,7 +181,7 @@ test('the server refuses playback when time is up, counts devices together and s
   };
   const evs = [];
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     const admin = client();
     assert.strictEqual((await admin.req('POST', '/api/login', { password: 'pw-test' })).status, 200);

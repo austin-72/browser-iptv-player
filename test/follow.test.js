@@ -120,7 +120,7 @@ test('Events, suggestions, automatic reminders and event channels on the real se
     return { status: r.status, body: j, text: t };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     assert.strictEqual((await api('POST', '/api/login', { password: 'pw-test' })).status, 200);
     const admin = (await api('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' })).body;

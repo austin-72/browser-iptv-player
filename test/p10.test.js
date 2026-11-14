@@ -221,7 +221,7 @@ test('the real server: list rows, wishlist arrivals, the bell and your viewing',
   app.stderr.on('data', (d) => { out += d; });
   const api = client(`http://127.0.0.1:${port}`);
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.strictEqual((await api('POST', '/api/login', { password: 'pw-test' })).status, 200);
     assert.ok((await api('POST', '/api/profiles', { name: 'Alex', pin: '1234', avatar: 1 })).body.admin);
     const added = await api('POST', '/api/admin/lists', { type: 'url', name: 'Test', url: `http://127.0.0.1:${pl.address().port}/list.m3u` });

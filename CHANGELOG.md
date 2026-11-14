@@ -3,6 +3,30 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.11
+
+- **The admin can remove someone who's watching, and keep them off for as long as they choose.** Admin → Overview →
+  Providers and watching now: each viewer has a **Remove** button. Choose how long (10 minutes up to 30 days, any
+  other length in minutes, hours, days or weeks, or until you let them back in), a reason they'll see if you like, and
+  whether to sign the device out too. What they're watching stops at once (and anything the server was converting for
+  them), and their address is turned away — every page, the app, signing in — showing "You've been removed", when
+  they can come back, and the reason. Every device at that address goes with it: the dialog shows the address and who
+  else is there right now, warns when it's a home-network or Docker address several devices may share, and won't
+  remove a device at your own address. Who's removed is listed under the providers, with when they're back and a
+  **Let back in** button. (The address is the one the server sees: behind a reverse proxy or tunnel that needs
+  TRUST_PROXY, which this server already has.)
+- **Signing in no longer sometimes needs a refresh to reach "Who's watching?".** With a page already in the address
+  (/#/home — what the app leaves there, so after signing out, a session running out, or opening a saved address), the
+  right password sent the browser to that same address, which it only scrolls to rather than loading: the sign-in page
+  stayed (its button greyed out) until a refresh. It now loads the app, at the page that was asked for. The same for
+  signing in with a phone's code.
+- **Tests: a server started for a test gets 30 s to say it's ready, not 10.** The first server a test run starts, on
+  a machine that hasn't run it before (like GitHub's), could take longer than 10 s to load, and the sign-in test
+  ("sessions, PINs and live connections") failed before it had begun. Nothing changes in the app. Sign-in checked
+  again: the site password (a wrong one turned away), a profile's PIN (a wrong one turned away), staying signed in
+  after a reload, and signing out, on a computer and a phone.
+- The test of TMDB's request line (2.8.10) allows a slower machine more leeway.
+
 ## 2.8.10
 
 - **People's pages open in a second or two, not half a minute.** Everything the server asks TMDB goes through one line,

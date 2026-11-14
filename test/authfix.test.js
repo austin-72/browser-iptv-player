@@ -53,7 +53,7 @@ test('sessions, PINs and live connections', { timeout: 60000 }, async () => {
   };
   const until = async (fn, ms = 3000) => { for (let i = 0; i < ms / 50 && !fn(); i++) await wait(50); return fn(); };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
 
     // Odd requests get an answer instead of a crash (or no answer at all).

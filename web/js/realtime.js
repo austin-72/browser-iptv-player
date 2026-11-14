@@ -46,6 +46,9 @@ V.rt = (function () {
     on('subgen', function (d) { V.emit('subgen', d); }); // (subtitles made from a film's sound: integrations.js)
     on('subsync', function (d) { V.emit('subsync', d); }); // (fetched subtitles checked against the sound: integrations.js)
     on('trending', function () { V.emit('trending-push'); }); // (TMDB's charts fetched again: smartcats.js)
+    // The admin removed this device (Admin → Overview → Remove): what plays stops, and the page shows why (server.js
+    // sendBanned) — any request from here is turned away until the time is up.
+    on('kicked', function () { V.emit('banned'); });
     on('restarting', function () { V.toast('The server is restarting for an update — back in a moment.', { ms: 8000 }); });
     es.onerror = function () {
       V.net.down();

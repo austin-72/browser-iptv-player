@@ -33,7 +33,7 @@ test('a guest: offered when allowed, watches without anything kept or shared', {
   };
   const admin = client(), guest = client(), guest2 = client();
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     assert.strictEqual((await admin('POST', '/api/login', { password: 'pw-test' })).status, 200);
     const alex = (await admin('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' })).body;

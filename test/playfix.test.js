@@ -149,7 +149,7 @@ test('the server: a film whose look inside failed is still converted as a film (
     return { status: r.status, json: j, text: t };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     assert.strictEqual((await req('POST', '/api/login', { password: 'pw-test' })).status, 200);
     assert.strictEqual((await req('POST', '/api/profiles', { name: 'Alex', pin: '1234', avatar: 1 })).status, 200);

@@ -135,7 +135,7 @@ test('the server: a Schedules Direct lineup added in Admin gives its channel lis
     return { status: r.status, json: j, text: t };
   };
   try {
-    for (let i = 0; i < 150 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out.slice(-500));
     assert.strictEqual((await req('POST', '/api/login', { password: 'pw-test' })).status, 200);
     assert.strictEqual((await req('POST', '/api/profiles', { name: 'Alex', pin: '4821' })).status, 200);

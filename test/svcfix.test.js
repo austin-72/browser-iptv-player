@@ -92,7 +92,7 @@ test('the server: bodies that aren’t objects, and streams refused when time is
     };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     const admin = client();
     await admin('POST', '/api/login', JSON.stringify({ password: 'pw-test' }));

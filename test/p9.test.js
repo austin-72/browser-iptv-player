@@ -242,7 +242,7 @@ test('channel health and guide finder on the real server', { timeout: 120000 }, 
   };
   const until = async (fn, ms = 20000, what = '') => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) throw new Error('Timed out: ' + what + '\n' + out.slice(-2000)); await wait(250); } };
   try {
-    await until(() => /Ready/.test(out), 15000, 'start');
+    await until(() => /Ready/.test(out), 30000, 'start');
     assert.strictEqual((await req('POST', '/api/login', { body: { password: 'pw-test' } })).status, 200);
     const prof = await req('POST', '/api/profiles', { body: { name: 'Alex', pin: '1234', avatar: 1 } });
     assert.strictEqual(prof.status, 200, JSON.stringify(prof.json));

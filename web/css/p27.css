@@ -769,3 +769,10 @@ dialog.dlg[open]::backdrop { animation: artFade .2s ease-out; }
 /* (On a phone the banner is as tall as what's in it: room kept for its lettering and story from the start, so the
    rows under it aren't pushed down when they arrive.) */
 @media (max-width: 600px) { .hero { min-height: max(min(58vh, 56vw + 120px), 26rem); } }
+
+/* Admin → Overview: removing a viewer, and the addresses kept off now (integrations.js kickDialog / bansBlock). */
+.pv-row .pv-who { flex: 1; }
+.pv-kick { flex: none; margin-left: auto; align-self: center; }
+.pv-dot.ban { background: var(--danger, #e5484d); }
+.pv-bans { margin-top: .75rem; }
+.kick-other:not([hidden]) { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }

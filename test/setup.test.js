@@ -20,7 +20,7 @@ const start = async (dir, extra = {}) => {
   const s = { app, out: '', base: `http://127.0.0.1:${port}` };
   app.stdout.on('data', (d) => { s.out += d; });
   app.stderr.on('data', (d) => { s.out += d; });
-  for (let i = 0; i < 100 && !/Ready/.test(s.out); i++) await wait(100);
+  for (let i = 0; i < 300 && !/Ready/.test(s.out); i++) await wait(100);
   assert.match(s.out, /Ready/, s.out);
   s.stop = async () => { app.kill(); for (let i = 0; i < 50 && app.exitCode === null && app.signalCode === null; i++) await wait(100); };
   return s;

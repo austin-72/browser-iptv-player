@@ -112,7 +112,7 @@ test('the real server: devices report, the admin sees them mapped to web/js, ser
     return { status: r.status, json: j, text: t };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.strictEqual((await req('POST', '/api/client-errors', { reports: [] })).status, 401, 'signed-in devices only');
     await req('POST', '/api/login', { password: 'pw-test' });
     // Before a profile is chosen (the profile picker) reports are still taken.

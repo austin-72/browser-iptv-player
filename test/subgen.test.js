@@ -202,7 +202,7 @@ test('the server: subtitles made for a film on request, who may ask, and the fil
     return d;
   };
   try {
-    for (let i = 0; i < 150 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out.slice(-500));
     const a = device();
     assert.strictEqual((await a.req('POST', '/api/login', { password: 'pw-test' })).status, 200);

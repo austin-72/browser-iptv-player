@@ -509,7 +509,54 @@
       s.stalls ? V.plural(s.stalls, 'pause') + ' to load (' + s.stallSecs + ' s) in ' + V.plural(s.minutes, 'min') : '', s.droppedPct ? s.droppedPct + '% frames dropped' : ''].filter(Boolean) : [];
     return '<li class="pv-row"><span class="pv-dot ' + (s ? r.health : 'wait') + '" title="' + (s ? (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') : 'Waiting for the first report') + '"></span>' +
       '<div class="pv-who"><div><b>' + V.esc(r.profile) + '</b> · ' + (r.hidden ? '<span class="dim">(private)</span>' : V.esc(r.n)) + ' <span class="dim">on ' + V.esc(r.device) + ' · ' + V.fmtAgo(r.at) + '</span></div>' +
-      (s ? '<div class="aw-stats small"><span class="aw-h ' + r.health + '">' + (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') + '</span>' + chips.map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</div></li>';
+      (s ? '<div class="aw-stats small"><span class="aw-h ' + r.health + '">' + (r.health === 'good' ? 'Smooth' : r.health === 'fair' ? 'Some trouble' : 'Struggling') + '</span>' + chips.map(function (x) { return '<span>' + V.esc(x) + '</span>'; }).join('') + '</div>' : '<div class="dim small">Waiting for the first report…</div>') + '</div>' +
+      // (Removing someone: not a device at your own address — that would shut you out too.)
+      (r.ip && !r.you ? '<button class="btn sm pv-kick" data-kick="' + V.esc(r.conn) + '" aria-label="Remove ' + V.esc(r.profile + ' on ' + r.device) + '">' + V.icon('shield') + ' Remove</button>' : '') + '</li>';
+  };
+  // How long someone's kept off (Remove): minutes; 0 = until let back in.
+  var KICK_FOR = [[10, '10 minutes'], [60, '1 hour'], [360, '6 hours'], [1440, '1 day'], [10080, '1 week'], [43200, '30 days'], [0, 'Until I let them back in'], [-1, 'Another length…']];
+  var UNITS = [[1, 'minutes'], [60, 'hours'], [1440, 'days'], [10080, 'weeks']];
+  /** Remove a viewer: the length, a reason they'll see, signing the device out too. → a promise, settled when done. */
+  var kickDialog = function (r) {
+    var body = '<p>What <b>' + V.esc(r.profile) + '</b> is watching on <b>' + V.esc(r.device) + '</b> stops, and their address (<code>' + V.esc(r.ip) + '</code>) is turned away — any page, any device there — for as long as you choose.</p>' +
+      // (A home-network or Docker address: often every device at home, or everyone through a proxy, shares it.)
+      (r.local ? '<p class="note warn">' + V.icon('info') + ' <span>This is a local address (your home network, or Docker’s). Devices at home — or everyone who comes in through a proxy or tunnel — may all share it, and would all be turned away.</span></p>' : '') +
+      (r.shared && r.shared.length ? '<p class="note warn">' + V.icon('info') + ' <span>Also at that address right now, and turned away with them: ' + V.esc(r.shared.join(', ')) + '.</span></p>' : '') +
+      '<label class="field"><span>For</span><select class="input" data-kfor>' + KICK_FOR.map(function (o, i) { return '<option value="' + o[0] + '"' + (i === 1 ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></label>' +
+      '<div class="kick-other" hidden><label class="field"><span>How many</span><input class="input" type="number" min="1" max="9999" value="2" data-kn inputmode="numeric"></label>' +
+      '<label class="field"><span>Of</span><select class="input" data-ku>' + UNITS.map(function (u, i) { return '<option value="' + u[0] + '"' + (i === 1 ? ' selected' : '') + '>' + u[1] + '</option>'; }).join('') + '</select></label></div>' +
+      '<label class="field"><span>Reason <small class="dim">(optional — they’ll see it)</small></span><input class="input" data-kwhy maxlength="200" placeholder="e.g. Sharing the password"></label>' +
+      '<label class="switch"><input type="checkbox" data-kout><span class="sw"></span><span><b>Sign this device out too</b><small>When the time’s up, it needs the site password to come back.</small></span></label>';
+    return V.dialog({
+      title: 'Remove ' + r.profile, body: body,
+      onOpen: function (d) {
+        var sel = V.$('[data-kfor]', d), other = V.$('.kick-other', d);
+        sel.onchange = function () { other.hidden = sel.value !== '-1'; if (!other.hidden) V.$('[data-kn]', d).focus(); };
+      },
+      actions: [{ label: 'Cancel', value: null }, { label: 'Remove', danger: true, fn: function (d) {
+        var v = +V.$('[data-kfor]', d).value;
+        if (v === -1) {
+          var n = Math.floor(+V.$('[data-kn]', d).value);
+          if (!(n > 0)) { V.toast('Enter how long.', { error: true }); return false; }
+          v = n * +V.$('[data-ku]', d).value;
+        }
+        return V.api('/api/admin/kick', { body: { conn: r.conn, minutes: v, reason: V.$('[data-kwhy]', d).value, signOut: V.$('[data-kout]', d).checked } }).then(function (res) {
+          var b = res.ban;
+          V.toast(r.profile + ' was removed' + (b.until ? ' until ' + new Date(b.until).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : ' until you let them back in') + (res.devices > 1 ? ' (' + V.plural(res.devices, 'device') + ')' : '') + '.');
+          return true;
+        });
+      } }],
+    });
+  };
+  /** The addresses kept off now, each with when it ends and a button to let it back in. */
+  var bansBlock = function (list) {
+    if (!list || !list.length) return '';
+    return '<article class="pv pv-bans"><header class="pv-h"><b class="pv-name">Removed</b><span class="sp"></span><span class="pv-conn">' + V.plural(list.length, 'address', 'addresses') + '</span></header><ul class="pv-list">' +
+      list.map(function (b) {
+        return '<li class="pv-row"><span class="pv-dot ban" aria-hidden="true"></span><div class="pv-who"><div><b>' + V.esc(b.who || 'Someone') + '</b>' + (b.device ? ' <span class="dim">on ' + V.esc(b.device) + '</span>' : '') + ' · <code>' + V.esc(b.ip) + '</code></div>' +
+          '<div class="dim small">' + (b.until ? 'Back ' + V.esc(b.when) : 'Until you let them back in') + ' · removed ' + V.fmtAgo(b.at) + (b.reason ? ' · “' + V.esc(b.reason) + '”' : '') + '</div></div>' +
+          '<button class="btn sm pv-kick" data-unban="' + V.esc(b.id) + '">Let back in</button></li>';
+      }).join('') + '</ul></article>';
   };
   /** Admin → Overview: each provider with its account and connections, and who's watching from it — live. */
   V.adminWatching = function (sec) {
@@ -537,10 +584,12 @@
         var html = '<div class="sec-h"><h2>Providers and watching now</h2><span class="sp"></span><div class="btn-row"><button class="btn sm" data-acct>' + V.icon('refresh') + ' Check accounts</button><button class="btn sm" data-a="speedtest">' + V.icon('pulse') + ' Test the connection</button></div></div>' +
           (w.rows.length ? '' : '<p class="dim small pv-quiet">Nobody is watching right now.</p>') +
           (cards.length ? '<div class="pv-grid">' + cards.join('') + '</div>' : '<p class="dim">No provider lists.</p>') +
-          (loose.length ? '<article class="pv pv-loose"><header class="pv-h"><b class="pv-name">Not from a provider</b></header><ul class="pv-list">' + loose.map(viewerRow).join('') + '</ul></article>' : '');
+          (loose.length ? '<article class="pv pv-loose"><header class="pv-h"><b class="pv-name">Not from a provider</b></header><ul class="pv-list">' + loose.map(viewerRow).join('') + '</ul></article>' : '') +
+          bansBlock(w.bans);
+        sec._rows = w.rows;
         // (Every 5 seconds: redraw only when something changed, and keep focus on the button — a TV remote is often on it.)
         if (html !== sec._html) {
-          var fa = document.activeElement, had = fa && sec.contains(fa) ? (fa.hasAttribute('data-acct') ? '[data-acct]' : '[data-a=speedtest]') : '';
+          var fa = document.activeElement, had = fa && sec.contains(fa) ? (fa.hasAttribute('data-acct') ? '[data-acct]' : fa.hasAttribute('data-kick') ? '[data-kick="' + fa.getAttribute('data-kick') + '"]' : fa.hasAttribute('data-unban') ? '[data-unban="' + fa.getAttribute('data-unban') + '"]' : '[data-a=speedtest]') : '';
           sec._html = html;
           sec.innerHTML = html;
           if (had) try { V.$(had, sec).focus({ preventScroll: true }); } catch (e) {}
@@ -551,6 +600,16 @@
     };
     sec.onclick = function (e) {
       if (e.target.closest('[data-a=speedtest]')) V.speedTest({ admin: true });
+      var kb = e.target.closest('[data-kick]');
+      if (kb) {
+        var r = (sec._rows || []).filter(function (x) { return x.conn === kb.getAttribute('data-kick'); })[0];
+        if (r) kickDialog(r).then(function (ok) { if (ok) { sec._html = ''; clearTimeout(sec._t); draw(); } });
+      }
+      var ub = e.target.closest('[data-unban]');
+      if (ub && !ub.disabled) {
+        ub.disabled = true;
+        V.api('/api/admin/bans/' + encodeURIComponent(ub.getAttribute('data-unban')), { method: 'DELETE' }).then(function () { V.toast('Let back in.'); sec._html = ''; clearTimeout(sec._t); draw(); }).catch(function (x) { ub.disabled = false; V.fail(x); });
+      }
       var c = e.target.closest('[data-acct]');
       if (c && !c.disabled) {
         c.disabled = true;

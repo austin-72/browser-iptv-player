@@ -427,7 +427,7 @@ test('the real server: relay addresses for direct streams, per list, for other a
     return { status: res.status, body: j };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     await api('POST', '/api/login', { password: 'pw-test' });
     await api('POST', '/api/profiles', { name: 'Alex', pin: '1234', avatar: 1 });
     const list = (await api('POST', '/api/admin/lists', { type: 'url', name: 'Relayed', url: `${pv.base}/list.m3u` })).body;

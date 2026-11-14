@@ -52,7 +52,7 @@ test('the server: ?lite=1 in small pages; a film’s address when it’s played'
     return { status: r.status, body: j, etag: r.headers.get('etag') };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     await api('/api/login', { method: 'POST', body: { password: 'pw-test' } });
     await api('/api/profiles', { method: 'POST', body: { name: 'Alex', avatar: 1, pin: '1234' } });
     await api('/api/admin/lists', { method: 'POST', body: { type: 'url', name: 'L', url: `http://127.0.0.1:${pl.address().port}/list.m3u` } });

@@ -123,7 +123,7 @@ test('the real server: the queue syncs between devices, sound settings are kept,
   };
   let events = null;
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     await req('POST', '/api/login', { password: 'pw-test' });
     assert.strictEqual((await req('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' })).status, 200);

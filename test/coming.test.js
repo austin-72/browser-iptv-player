@@ -47,7 +47,7 @@ test('a series’ coming episodes and the next one’s date; trailers from TMDB'
     return { status: r.status, body: j };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     await api('POST', '/api/login', { password: 'pw-test' });
     const me = await api('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' });

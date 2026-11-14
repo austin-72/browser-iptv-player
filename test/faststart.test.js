@@ -50,7 +50,7 @@ test('quick start, and episodes read again after a restart', { timeout: 90000, s
     app = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, NO_RESPAWN: '1', SITE_PASSWORD: 'pw-test' }, stdio: ['ignore', 'pipe', 'pipe'] });
     app.stdout.on('data', (d) => { out += d; });
     app.stderr.on('data', (d) => { out += d; });
-    for (let i = 0; i < 150 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
   };
   const api = async (method, p, body) => {

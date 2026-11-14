@@ -48,6 +48,7 @@ const { cssFallbacks } = require('./lib/cssfallbacks');
 const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
 const { Hub, Social } = require('./lib/social');
+const { Bans, norm: ipNorm } = require('./lib/bans');
 const { Tmdb, ownYear: tmdbOwnYear } = require('./lib/tmdb');
 const { Recs } = require('./lib/recs');
 const { Markers } = require('./lib/markers');
@@ -146,6 +147,8 @@ function countBytes(res, kind) {
 const accounts = new Accounts(D, { defaultPassword, setupIfNew: !presetPassword });
 const userdata = new UserData(path.join(D, 'users'));
 const hub = new Hub();
+// Addresses the admin has put off the server for a while (Admin → Overview → Remove): lib/bans.js.
+const bans = new Bans(D);
 const social = new Social(D, { hub, accounts });
 // The admin's channel edits, guide offsets and parental locks (Admin → Channels).
 const overrides = new Overrides(D);
@@ -766,6 +769,62 @@ const route = (method, pattern, handler, level = 'profile') => {
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '$');
   routes.push({ method, re, keys, handler, level });
 };
+
+// ---- removing a viewer (Admin → Overview → watching now → Remove): their address is turned away for a while
+/** When a ban ends, in words: "in 45 minutes", "at 9:30 PM", "on Sat, Nov 21 at 9:30 PM" — or never. */
+function banUntil(b) {
+  if (!b.until) return '';
+  const ms = b.until - Date.now(), d = new Date(b.until);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (ms < 90 * 60e3) { const m = Math.max(1, Math.round(ms / 60e3)); return `in ${m} minute${m === 1 ? '' : 's'}`; }
+  if (d.toDateString() === new Date().toDateString()) return `at ${time}`;
+  return `on ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(ms > 300 * 86400e3 ? { year: 'numeric' } : {}) })} at ${time}`;
+}
+/** The answer to everything a banned address asks for: the API says so (and the app shows this page), a page says so. */
+const escH = (x) => String(x || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function sendBanned(req, res, pathname, b) {
+  const when = banUntil(b);
+  const msg = `You’ve been removed from this server by the admin${when ? ` — you can come back ${when}` : ''}.`;
+  res.setHeader('X-Banned', '1');
+  res.setHeader('Cache-Control', 'no-store');
+  const page = req.method === 'GET' && !/^\/(api|c|k|h|vendor)\//.test(pathname) && !/\.(js|css|json|webmanifest|png|svg|ico|jpe?g|webp|woff2?|vtt|m3u8?|ts|mp4)$/i.test(pathname);
+  if (!page) return sendJSON(res, 403, { error: msg + (b.reason ? ` (${b.reason})` : ''), banned: true, until: b.until || 0, reason: b.reason || '' });
+  const brand = escH(((settings().brand || {}).name) || 'This server');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Removed</title>` +
+    `<style>html,body{margin:0;height:100%;background:#0b0d12;color:#e8eaf0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box}h1{font-size:1.6rem;margin:.2rem 0 .6rem}p{max-width:32rem;margin:.3rem 0;color:#b9bdc9}.r{margin-top:1rem;padding:.7rem 1rem;border-radius:10px;background:#1a1d26;color:#e8eaf0}.b{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:#7d8394}</style></head>` +
+    `<body><main><div class="b">${brand}</div><h1>You’ve been removed</h1><p>The admin has taken you off this server${when ? ` — you can come back <b>${escH(when)}</b>` : ' until they let you back in'}.</p>` +
+    (b.reason ? `<p class="r">${escH(b.reason)}</p>` : '') + `</main></body></html>`;
+  return sendText(res, 403, html, 'text/html; charset=utf-8', { 'Cache-Control': 'no-store', 'X-Banned': '1' });
+}
+/**
+ * Removes the device playing on a live connection: what it plays stops, it's banned by its address for `minutes`
+ * (0: until lifted) — so every device at that address is turned away too — and, when asked, it's signed out as well.
+ */
+route('POST', '/api/admin/kick', async (req, res, p, q, ctx) => {
+  const admin = requireAdmin(ctx);
+  const b = await readObj(req);
+  const c = hub.conn(String(b.conn || ''));
+  if (!c) throw new HttpError(404, 'That device isn’t connected any more.');
+  if (!c.ip) throw new HttpError(400, 'There’s no address to ban for this device.');
+  if (ipNorm(c.ip) === ipNorm(clientIp(req))) throw new HttpError(400, 'That device is at the same address as you — banning it would shut you out too (and anyone else there).');
+  const who = (accounts.profile(c.pid) || {}).name || '';
+  const ban = bans.add({ ip: c.ip, minutes: b.minutes, reason: b.reason, who, device: c.deviceName, by: admin.name });
+  const at = [...hub.conns].filter((o) => ipNorm(o.ip) === ban.ip);
+  // Their page is told (it stops playing and shows why), then their live connections end.
+  for (const o of at) hub.send(o, 'kicked', { until: ban.until, reason: ban.reason });
+  setTimeout(() => { for (const o of at) hub.drop(o); }, 300).unref();
+  // What the server was converting for that address stops now rather than when it goes idle.
+  for (const s of [...media.sessions.values()]) if (s.ip && ipNorm(s.ip) === ban.ip) media.stopSession(s.id);
+  if (b.signOut) accounts.endSession(c.sess);
+  log(`Admin: ${who || 'a viewer'} on ${c.deviceName || 'a device'} removed ${ban.until ? 'until ' + new Date(ban.until).toLocaleString('en-US') : 'until let back in'}${ban.reason ? ` (${ban.reason})` : ''}${b.signOut ? ', and signed out' : ''}`);
+  return { ok: true, ban, devices: at.length };
+});
+route('GET', '/api/admin/bans', (req, res, p, q, ctx) => { requireAdmin(ctx); return { bans: bans.list().map((b) => ({ ...b, when: banUntil(b) })) }; });
+route('DELETE', '/api/admin/bans/:id', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  if (!bans.lift(p.id)) throw new HttpError(404, 'That ban has already ended.');
+  return { ok: true };
+});
 
 // ---- sign in (site password)
 route('POST', '/api/login', async (req, res) => {
@@ -2084,7 +2143,7 @@ route('POST', '/api/play/session', async (req, res, p, q, ctx) => {
     };
   };
   const cantConvert = (d) => new HttpError(415, `This video’s format (${d.cant.toUpperCase()}) is one the server’s ffmpeg can’t convert${media.version ? ` (ffmpeg ${media.version})` : ''}. A newer ffmpeg may.`);
-  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height: height || (d.transcode ? (saverH && (!capH || saverH < capH) ? saverH : capH) : 0), label: it.n, owner: prof.id, priority: (pid) => !!(accounts.profile(pid) || {}).priority, fmp4: d.seg === 'fmp4', hdr: d.hdr, interlaced: d.interlaced, noAudio: d.noAudio, vcodec: d.vcodec, keyed: !!(caps && caps.keyed) });
+  const start = (d) => media.startSession({ input: src.input, headers: src.headers, live: d.live, seek: d.seek, video: d.transcode ? 'h264' : 'copy', audioOnly: d.audioOnly, audioTrack: d.audioTrack, height: height || (d.transcode ? (saverH && (!capH || saverH < capH) ? saverH : capH) : 0), label: it.n, owner: prof.id, ip: clientIp(req), priority: (pid) => !!(accounts.profile(pid) || {}).priority, fmp4: d.seg === 'fmp4', hdr: d.hdr, interlaced: d.interlaced, noAudio: d.noAudio, vcodec: d.vcodec, keyed: !!(caps && caps.keyed) });
   // Quicker: when the format is already known (the provider's details for a film or episode; a live channel is almost
   // always H.264) and the account has room for two connections, the conversion starts straight away with the look
   // inside alongside, instead of one after the other — a few seconds sooner. If the look finds it needs something
@@ -2372,7 +2431,7 @@ route('POST', '/api/party/:id/settings', async (req, res, p, q, ctx) => { social
 // ---- live connection, presence, devices
 route('GET', '/api/events', (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
-  hub.open(req, res, { pid: prof.id, sess: ctx.sess.id, deviceId: String(q.get('device') || '').slice(0, 40), deviceName: String(q.get('name') || ctx.sess.name).slice(0, 60) });
+  hub.open(req, res, { pid: prof.id, sess: ctx.sess.id, ip: clientIp(req), deviceId: String(q.get('device') || '').slice(0, 40), deviceName: String(q.get('name') || ctx.sess.name).slice(0, 60) });
 });
 // A device's live connection ended: what it was playing stops counting (webhooks "stopped", the viewing dashboard,
 // the stream relay's share). (Can be called twice — on the request closing and on a write error.)
@@ -3498,6 +3557,7 @@ const p5 = require('./lib/routes-p5')({
   catalog: () => catalog, fetch: fetchAny, defaultLangs: () => settings().defaultLangs, proxyHeaders: (it) => proxy.headers({ h: it.h }), log, overrides,
   // (Checking fetched subtitles against a title's sound: lib/subcheck.js.)
   inputOf, media, dvrHooks, relayExtra: (id) => relayFinished.extra(id),
+  bansList: () => bans.list().map((b) => ({ ...b, when: banUntil(b) })),
 });
 p5Public = p5.publicFlags;
 
@@ -3653,6 +3713,9 @@ async function handle(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     if (cfg.csp) { res.setHeader('Content-Security-Policy', CSP); res.setHeader('X-Frame-Options', 'SAMEORIGIN'); }
+    // Put off the server by the admin (Admin → Overview → Remove): turned away, whatever's asked for, until the time is up.
+    const ban = bans.of(clientIp(req));
+    if (ban) return sendBanned(req, res, pathname, ban);
     // Just started: the page loads straight away; what needs the catalogue waits for it to be ready.
     // (At most 40 s — with the catalogue's own wait, under 100 s in all: a huge catalogue can take longer after a restart than a proxy waits — Cloudflare gives up after
     // 100 s and the page gets its error page. "Starting up" instead, and the page asks again by itself.)

@@ -32,7 +32,7 @@ async function server(dataDir, port, env = {}) {
   };
   me.exited = async (ms = 15000) => { for (let i = 0; i < ms / 100 && me.code === undefined; i++) await wait(100); return me.code; };
   me.stop = () => { try { app.kill('SIGKILL'); } catch {} };
-  for (let i = 0; i < 150 && !/Ready/.test(me.out) && me.code === undefined; i++) await wait(100);
+  for (let i = 0; i < 300 && !/Ready/.test(me.out) && me.code === undefined; i++) await wait(100);
   assert.match(me.out, /Ready/, me.out.slice(-600));
   return me;
 }

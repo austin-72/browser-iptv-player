@@ -170,6 +170,8 @@ V.api = function (path, opts) {
     .then(function (r) {
       if (opts.raw) return r;
       if (r.status === 401 && !opts.allow401) { V.emit('signedout'); }
+      // (Removed by the admin: the page says why, and for how long — realtime.js 'kicked' does the same.)
+      if (r.status === 403 && r.headers && r.headers.get && r.headers.get('X-Banned')) V.emit('banned');
       // (The connection dropping half-way through the answer is the network too, not a bug.)
       return r.text().catch(function (e) { if (e && e.name === 'AbortError') throw e; throw offline(e); }).then(function (t) {
         var j = null;

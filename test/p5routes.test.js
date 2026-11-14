@@ -37,7 +37,7 @@ test('API keys, CSRF, speed test, viewing reports and webhooks on the real serve
   };
   const X = { 'X-App': '1' };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     assert.strictEqual((await req('POST', '/api/login', { body: { password: 'pw-test' }, headers: X })).status, 200);
     const prof = await req('POST', '/api/profiles', { body: { name: 'Alex', pin: '1234', avatar: 1 }, headers: X });

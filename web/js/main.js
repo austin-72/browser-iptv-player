@@ -99,6 +99,13 @@ V.boot = function () {
   V.player.onUserAction = function () { V.party.onUserAction(); };
   V.$('#me-btn').onclick = function (e) { V.profileMenu(e.currentTarget); };
   V.on('signedout', function () { location.replace('/'); });
+  // Removed by the admin: stop what plays, then the server's page saying so (once).
+  V.on('banned', function () {
+    if (V._banned) return;
+    V._banned = true;
+    try { if (V.watch && V.watch.it && V.closePlayer) V.closePlayer(); } catch (e) {}
+    setTimeout(function () { location.replace('/?removed=1'); }, 200);
+  });
   // A new catalogue on the server: loaded again. (The light one — a TV, a console — is loaded whole each time, so not
   // while something's playing, and not more than every 20 minutes: when you're next moving between pages.)
   var staleReload = function () { S.catStale = false; S.catNow = false; S.catLoadedAt = Date.now(); V.loadCatalog().then(function () { V.renderShell(); if (!V.watch.it || V.watch.mini) V.router.refresh(); }).catch(function () {}); };

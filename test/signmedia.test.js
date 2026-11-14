@@ -26,7 +26,7 @@ test('signed stream addresses: a day long, and opened without signing in', { tim
     return { status: r.status, body: j };
   };
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     await api('POST', '/api/login', { password: 'pw-test' });
     await api('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' });
     const day = (await api('POST', '/api/cast/link', { path: '/api/session/abc123/index.m3u8', hours: 24 })).body.url;

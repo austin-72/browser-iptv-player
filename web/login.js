@@ -14,13 +14,20 @@ if (!window.fetch && window.Promise) window.fetch = function (url, o) {
   });
 };
 (function () {
+  // Signed in: into the app, at the page asked for. (A plain location.replace('/#/home') while already at /#/home only
+  // moves to that spot on the page — the browser doesn't load it — so this page stayed until a refresh: then reload.)
+  function into() {
+    var to = '/' + location.hash;
+    if (location.pathname === '/' && !location.search) location.reload();
+    else location.replace(to);
+  }
   var f = document.getElementById('f'), pw = document.getElementById('pw'), go = document.getElementById('go'), err = document.getElementById('err'), eye = document.getElementById('eye');
   eye.onclick = function () { var show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; eye.setAttribute('aria-pressed', show); eye.setAttribute('aria-label', show ? 'Hide password' : 'Show password'); pw.focus(); };
   f.onsubmit = function (e) {
     e.preventDefault();
     go.disabled = true; err.textContent = '';
     fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-App': '1' }, body: JSON.stringify({ password: pw.value }) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || (r.status >= 500 ? 'The server isn’t answering properly right now (' + r.status + '). Try again in a moment.' : 'Sign-in failed')); location.replace('/' + location.hash); }); })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || (r.status >= 500 ? 'The server isn’t answering properly right now (' + r.status + '). Try again in a moment.' : 'Sign-in failed')); into(); }); })
       .catch(function (x) { err.textContent = x instanceof TypeError ? 'Can’t reach the server.' : x.message; go.disabled = false; pw.select(); });
   };
 
@@ -51,7 +58,7 @@ if (!window.fetch && window.Promise) window.fetch = function (url, o) {
     if (!cur) return;
     fetch('/api/pair/' + cur.id + '?s=' + encodeURIComponent(cur.secret), { headers: { 'X-App': '1' } }).then(function (r) {
       if (r.status === 404 || r.status === 410) { start(); return; }
-      return r.json().then(function (j) { if (j.ok) { clearInterval(timer); document.getElementById('pwait').textContent = 'Signed in!'; location.replace('/'); } });
+      return r.json().then(function (j) { if (j.ok) { clearInterval(timer); document.getElementById('pwait').textContent = 'Signed in!'; into(); } });
     }).catch(function () {});
   }
   function show(phone) {

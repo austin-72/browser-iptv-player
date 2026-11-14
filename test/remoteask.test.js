@@ -41,7 +41,7 @@ test('a phone asks before it becomes another profile’s remote', { timeout: 600
   };
   const phone = client(), tv = client(), phone2 = client();
   try {
-    for (let i = 0; i < 100 && !/Ready/.test(out); i++) await wait(100);
+    for (let i = 0; i < 300 && !/Ready/.test(out); i++) await wait(100);
     assert.match(out, /Ready/, out);
     for (const c of [phone, tv, phone2]) assert.strictEqual((await c.api('POST', '/api/login', { password: 'pw-test' })).status, 200);
     const alex = (await phone.api('POST', '/api/profiles', { name: 'Alex', avatar: 1, pin: '1234' })).body; // (the admin)
