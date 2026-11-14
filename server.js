@@ -944,7 +944,10 @@ route('GET', '/api/addresses', (req, res, p, q, ctx) => {
 route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
   const prof = requireProfile(ctx);
   let it = item(ctx, p.k);
-  it = await catalog.details(it.k) || it;
+  // (The provider's own details of a film, the first time it's opened: not waited for long when TMDB's are here
+  // already — a slow provider held the whole page up. What it sends is kept, for next time.)
+  const had = tmdb.meta.data.m[it.k];
+  it = await Promise.race([catalog.details(it.k), new Promise((r) => setTimeout(r, had && had.at ? 1200 : 4000, null).unref())]) || it;
   const have = tmdb.meta.data.m[it.k];
   if (tmdb.enabled() && (it.t === 'movie' || it.t === 'show') && !(have && have.at && have.v === 2)) {
     try { const m = await tmdb.details(it); applyMeta(it, m); } catch {}
@@ -3803,7 +3806,9 @@ async function handle(req, res) {
 }
 
 const tls = cfg.httpsCert && cfg.httpsKey ? { cert: fs.readFileSync(cfg.httpsCert), key: fs.readFileSync(cfg.httpsKey) } : null;
-const server = tls ? https.createServer(tls, handle) : http.createServer(handle);
+// (Each request as a page's: what TMDB is asked for it goes ahead of the background jobs — lib/tmdb.js turn().)
+const handlePage = (req, res) => Tmdb.page(() => handle(req, res));
+const server = tls ? https.createServer(tls, handlePage) : http.createServer(handlePage);
 server.keepAliveTimeout = 65000;
 server.requestTimeout = 0;
 server.headersTimeout = 70000;

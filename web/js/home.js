@@ -125,7 +125,14 @@ V.route('home', function (view) {
     V.$('[data-hero=play]', view) && (V.$('[data-hero=play]', view).onclick = function () { V.play(resumeIt || heroIt); });
     var lb = V.$('[data-hero=list]', view);
     if (lb) lb.onclick = function () { V.toggle('list', heroIt.k).then(function (on) { lb.innerHTML = V.icon(on ? 'check' : 'plus'); V.toast(on ? 'Added to My List' : 'Removed from My List'); }); };
-    V.details(heroIt.k).then(function (d) {
+    // The banner's words fade in once its story and lettering are here — not drawn, then pushed about as they come.
+    // (A moment at most: 0.7 s. Usually they're at hand already.)
+    var hb = V.$('.hero-body', view), hbShown = false;
+    var hbShow = function () { if (hbShown) return; hbShown = true; if (hb) hb.classList.remove('hb-wait'); };
+    if (hb) hb.classList.add('hb-wait');
+    setTimeout(hbShow, 700);
+    var heroWait = [];
+    heroWait.push(V.details(heroIt.k).then(function (d) {
       // (The page may have been drawn again with another title by now.)
       var ht = V.$('.hero-t', view);
       if (!ht || ht.textContent !== heroIt.n) return;
@@ -133,11 +140,12 @@ V.route('home', function (view) {
       if (p && d.plot && !resumeIt) { p.textContent = d.plot; p.hidden = false; }
       // Swap the blurred poster for the backdrop (something else may already have copied the details onto the item).
       if (d.bd) { if (!heroIt.bd) heroIt.bd = d.bd; var img = V.$('.hero-bg img.blur', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } }
-    }).catch(function () {});
+    }).catch(function () {}));
     // The title in its own lettering (TMDB's logo), when there is one: titlemore.js.
     if (S.settings.tmdb && V.titleMoreData && !V.areaOff('logos') && (heroIt.t === 'movie' || heroIt.t === 'show')) {
-      V.titleMoreData(heroIt.k).then(function (m) { if (m && m.logo) V.titleLogo(V.$('.hero-t', view), m.logo, heroIt.n); }).catch(function () {});
+      heroWait.push(V.titleMoreData(heroIt.k).then(function (m) { if (m && m.logo) return V.titleLogo(V.$('.hero-t', view), m.logo, heroIt.n); }).catch(function () {}));
     }
+    Promise.all(heroWait).then(hbShow, hbShow);
   }
   V.$('[data-home=customize]', view).onclick = V.customizeHome;
   // The window grew or shrank past where the banner has room for "Also in progress": drawn again, so those titles are

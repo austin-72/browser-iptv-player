@@ -35,13 +35,15 @@
    sizes of the glow itself (%: a size in vw/vh had the page work out every frame itself, and repaint, instead of the
    graphics chip — what made a PlayStation crawl). Off on slow devices unless turned on (V.movingBg). */
 #ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: strict; }
-#ambient .amb { position: absolute; display: block; width: 70vmax; height: 70vmax; border-radius: 50%; will-change: transform; }
-#ambient .a1 { left: -18vmax; top: -22vmax; background: radial-gradient(closest-side, var(--accent), transparent); opacity: .16; animation: ambA 70s ease-in-out infinite alternate; }
-#ambient .a2 { right: -24vmax; top: 18vh; background: radial-gradient(closest-side, #4b63ff, transparent); opacity: .13; animation: ambB 90s ease-in-out infinite alternate; }
-#ambient .a3 { left: 22vw; bottom: -38vmax; background: radial-gradient(closest-side, #12b5a6, transparent); opacity: .10; animation: ambC 110s ease-in-out infinite alternate; }
-@keyframes ambA { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(40%, 12%) scale(1.15); } 100% { transform: translate(74%, -3%) scale(.95); } }
-@keyframes ambB { 0% { transform: translate(0, 0) scale(1.05); } 50% { transform: translate(-43%, 18%) scale(.9); } 100% { transform: translate(-17%, -13%) scale(1.12); } }
-@keyframes ambC { 0% { transform: translate(0, 0) scale(.95); } 50% { transform: translate(-34%, -15%) scale(1.1); } 100% { transform: translate(26%, -25%) scale(1); } }
+/* (Each drawn at half the size and shown twice as big: a soft glow looks the same, and takes a quarter of the graphics
+   chip's memory — three screen-sized layers were a lot for a TV.) */
+#ambient .amb { position: absolute; display: block; width: 35vmax; height: 35vmax; border-radius: 50%; will-change: transform; transform: scale(2); }
+#ambient .a1 { left: -.5vmax; top: -4.5vmax; background: radial-gradient(closest-side, var(--accent), transparent); opacity: .16; animation: ambA 70s ease-in-out infinite alternate; }
+#ambient .a2 { right: -6.5vmax; top: calc(18vh + 17.5vmax); background: radial-gradient(closest-side, #4b63ff, transparent); opacity: .13; animation: ambB 90s ease-in-out infinite alternate; }
+#ambient .a3 { left: calc(22vw + 17.5vmax); bottom: -20.5vmax; background: radial-gradient(closest-side, #12b5a6, transparent); opacity: .10; animation: ambC 110s ease-in-out infinite alternate; }
+@keyframes ambA { 0% { transform: translate(0, 0) scale(2); } 50% { transform: translate(80%, 24%) scale(2.3); } 100% { transform: translate(148%, -6%) scale(1.9); } }
+@keyframes ambB { 0% { transform: translate(0, 0) scale(2.1); } 50% { transform: translate(-86%, 36%) scale(1.8); } 100% { transform: translate(-34%, -26%) scale(2.24); } }
+@keyframes ambC { 0% { transform: translate(0, 0) scale(1.9); } 50% { transform: translate(-68%, -30%) scale(2.2); } 100% { transform: translate(52%, -50%) scale(2); } }
 .theme-light #ambient .amb { opacity: .07; }
 .theme-light #ambient .a3 { opacity: .05; }
 /* Off: by choice, on the player and the guide; still with Reduce motion. */
@@ -729,3 +731,41 @@ html.tv .vp-center .pbtn:focus { background: #fff; color: #000; }
 html.tv .osk-k { min-height: 3.6rem; font-size: 1.45rem; }
 html.tv .osk-k:focus { background: #fff; color: #000; border-color: #fff; outline: none; transform: scale(1.06); }
 @media (max-width: 600px) { .osk-keys { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+
+/* ---- Calmer loading (2.8.10): things arrive in place instead of pushing what's on screen about */
+/* A title's page: what it is and what to do fade in together, once its story and credits are here (title.js). */
+.tp-info { transition: opacity .28s ease-out, transform .28s ease-out; }
+.tp-info.tp-wait { opacity: 0; transform: translateY(6px); transition: none; }
+/* Big pictures fade in as they arrive (motion.js marks them .ld) — not on TVs and consoles (html.lite), nor with
+   Reduce motion. (Shown anyway after 3 s, should the mark never come.) */
+html:not(.lite):not(.reduce-motion) :is(.hero-bg, .tp-bg, .pp-face, .pc-face, .ep-art) > img { transition: opacity .45s ease-out; }
+html:not(.lite):not(.reduce-motion) :is(.hero-bg, .tp-bg, .pp-face, .pc-face, .ep-art) > img:not(.ld) { opacity: 0; animation: fadeSafe 0s 3s forwards; }
+@keyframes fadeSafe { to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { :is(.hero-bg, .tp-bg, .pp-face, .pc-face, .ep-art) > img:not(.ld) { opacity: 1 !important; } }
+
+/* A dialog or a tab's page: in with a short fade (and a dialog, a small lift) rather than all at once. */
+dialog.dlg[open] { animation: pop .16s ease-out; }
+dialog.dlg[open]::backdrop { animation: artFade .2s ease-out; }
+.tp-panel:not([hidden]) { animation: artFade .18s ease-out; }
+/* A press shows at once: buttons, round buttons, pills and posters give a little as they're pressed. */
+.icon-btn, .tp-pill, .chip, .chip-b { transition-property: background, color, border-color, transform; transition-duration: .15s, .15s, .15s, .1s; }
+.icon-btn:active, .tp-pill:active, .chip:active { transform: scale(.94); }
+.card:active .card-art { transform: scale(.98); transition-duration: .08s; }
+.lite .icon-btn:active, .lite .tp-pill:active, .lite .chip:active, .lite .card:active .card-art { transform: none; }
+
+/* Waiting for a page's details: grey shapes where they'll be (a person's page), gently pulsing — not a spinner and
+   then everything at once. */
+.sk { display: block; background: color-mix(in srgb, var(--text) 9%, transparent); border-radius: 8px; animation: skPulse 1.3s ease-in-out infinite alternate; }
+.sk-l { height: .95rem; margin: .55rem 0; }
+.sk-h { height: 2.2rem; width: min(22rem, 70%); margin: .2rem 0 .9rem; }
+@keyframes skPulse { from { opacity: .55; } to { opacity: 1; } }
+.lite .sk, .reduce-motion .sk { animation: none; }
+.pp-sk .pp-face { background: color-mix(in srgb, var(--text) 9%, transparent); }
+.sk-card { display: block; }
+.sk-art { aspect-ratio: 2 / 3; border-radius: var(--r); }
+/* Home's banner, the same (home.js). */
+.hero-body { transition: opacity .3s ease-out, transform .3s ease-out; }
+.hero-body.hb-wait { opacity: 0; transform: translateY(6px); transition: none; }
+/* (On a phone the banner is as tall as what's in it: room kept for its lettering and story from the start, so the
+   rows under it aren't pushed down when they arrive.) */
+@media (max-width: 600px) { .hero { min-height: max(min(58vh, 56vw + 120px), 26rem); } }

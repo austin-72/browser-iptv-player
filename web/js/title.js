@@ -183,7 +183,16 @@ V.route('title', function (view, r) {
   baseFacts = factsOf(it); drawFacts();
 
   // Full details from the server (plot, cast, trailer, episodes; TMDB when enabled).
-  V.api('/api/item/' + encodeURIComponent(it.k)).then(function (d) {
+  // (Both asked for together — TMDB's part used to wait for this one.)
+  var moreP = S.settings.tmdb && V.titleMoreData && (it.t === 'movie' || it.t === 'show') ? V.titleMoreData(it.k) : null;
+  if (moreP) moreP.catch(function () {});
+  // What it is and what to do (over the picture) shows once the story, credits and tagline are here, in one go — it
+  // used to be drawn bit by bit, the title and buttons jumping up as each arrived. (At most 1.5 s: then as it comes.)
+  var info = V.$('.tp-info', view), revealed = false;
+  var reveal = function () { if (revealed) return; revealed = true; clearTimeout(revealT); if (info) info.classList.remove('tp-wait'); };
+  var revealT = setTimeout(reveal, 1500);
+  if (info) info.classList.add('tp-wait');
+  (V.itemData ? V.itemData(it.k, true) : V.api('/api/item/' + encodeURIComponent(it.k))).then(function (d) {
     Object.keys(d).forEach(function (k) { if (d[k] && !it[k] && ['bd', 'gn', 'c', 'y', 'r', 'd'].indexOf(k) >= 0) it[k] = d[k]; });
     meta(d);
     if (d.bd) { var img = V.$('.tp-bg img', view); if (img) { img.src = d.bd; img.classList.remove('blur'); } else V.$('.tp-bg', view).innerHTML = '<img src="' + V.esc(d.bd) + '" alt="" referrerpolicy="no-referrer">'; V.$('.tp-hero', view).classList.remove('no-bd'); }
@@ -236,7 +245,11 @@ V.route('title', function (view, r) {
       drawActs(eps);
       drawBookmarks(); // (episode bookmarks, now the episodes are known)
     }
+    // (TMDB's tagline and logo: a moment's grace for them to come too.)
+    if (moreP && !revealed) Promise.race([moreP.then(function () { return view._tpLogo; }), new Promise(function (ok) { setTimeout(ok, 450); })]).then(reveal, reveal);
+    else reveal();
   }).catch(function (e) {
+    reveal();
     if (!isShow) return;
     V.$('.eps', view).innerHTML = '<p class="err">' + V.esc(e.message) + '</p><button class="btn" data-eps-retry>' + V.icon('refresh') + ' Try again</button>';
     V.$('[data-eps-retry]', view).onclick = function () { V.router.refresh(); };

@@ -92,7 +92,7 @@ body.scrolled #topbar, body:not([data-page=home]) #topbar { background: var(--bg
 
 /* Cards */
 .card { display: block; position: relative; text-decoration: none; color: var(--text); border-radius: var(--r); outline-offset: 3px; flex: none; }
-.card-art { position: relative; border-radius: var(--r); overflow: hidden; background: var(--tint, var(--card)); aspect-ratio: 2 / 3; display: flex; align-items: center; justify-content: center; transition: transform .2s, box-shadow .2s; }
+.card-art { position: relative; border-radius: var(--r); overflow: hidden; background: var(--tint, var(--card)); aspect-ratio: 2 / 3; display: flex; align-items: center; justify-content: center; transition: transform .2s; }
 @supports not (aspect-ratio: 1) { .card-art { padding-top: 150%; } .card-art img { position: absolute; top: 0; left: 0; } }
 .card.wide .card-art, .card.channel .card-art { aspect-ratio: 16 / 9; }
 .card-art img { width: 100%; height: 100%; object-fit: cover; display: block; }

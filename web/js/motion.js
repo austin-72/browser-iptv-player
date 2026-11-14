@@ -38,6 +38,16 @@
     queue.push(card);
     if (!queued) { queued = true; requestAnimationFrame(flush); }
   }, true);
+  // Big pictures (the one behind a title or Home, faces, episode pictures) fade in as they arrive, instead of popping in
+  // a line at a time over the colour behind them. (The CSS hides them until then: p27.css .fade-in — and shows them
+  // anyway after a few seconds, should this never be told.)
+  var FADE = /(^|\s)(hero-bg|tp-bg|pp-face|pc-face|ep-art)(\s|$)/;
+  var fadeIn = function (e) {
+    var img = e.target;
+    if (img && img.tagName === 'IMG' && img.parentNode && FADE.test(img.parentNode.className || '')) img.classList.add('ld');
+  };
+  document.addEventListener('load', fadeIn, true);
+  document.addEventListener('error', fadeIn, true);
   document.addEventListener('animationend', function (e) {
     if (/^artRock/.test(e.animationName) && e.target.classList) e.target.classList.remove('art-in', 'art-b', 'art-c');
   }, true);

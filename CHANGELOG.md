@@ -3,6 +3,33 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.10
+
+- **People's pages open in a second or two, not half a minute.** Everything the server asks TMDB goes through one line,
+  about 7 requests a second — and the background jobs (matching titles, filling in details, episode pictures) kept
+  that line full, so a page someone had open waited its turn behind them, then sat out any pause TMDB had asked for.
+  Now what a page is waiting for goes to the front of the line, waits out at most 3 s of a pause, and gives up on TMDB
+  after 8 s rather than 15 (showing the saved answer when there is one). Background jobs carry on behind it as before.
+- **Title pages are quicker:** TMDB's part of the page (cast with faces, tagline, logo, reviews) is asked for at the
+  same time as the title's own details instead of after them, and a slow provider is waited for at most 1.2 s for a
+  film's details when TMDB's are already here (what it sends is kept for next time).
+- **Pages fetched a moment ahead:** resting the pointer on a poster or a person's name (a finger touching it on a phone,
+  or a TV remote's focus staying on it) fetches what their page needs, so it opens with everything already there.
+  Not with a data saver on.
+- **Nothing jumping about as a page fills in:** a title's page and Home's banner show what it is and the buttons once
+  the story, credits, tagline and lettering are in, with a short fade (at most 1.5 s and 0.7 s of waiting), instead of
+  drawing them bit by bit with the title and Play button moving up as each arrived. A logo that arrives later takes no
+  more room than the words did. On a phone the banner keeps room for its lettering and story, so the rows under it
+  stay put. A person's page shows grey shapes where their picture, details and titles will be, instead of a spinner.
+- **Small touches:** big pictures (behind a title or Home, faces, episode pictures) fade in as they arrive rather than
+  appearing a line at a time; dialogs and a title's tabs come in with a short fade; buttons, pills, chips and posters
+  give a little when pressed. All of it is opacity and size changes only — none on TVs and consoles, or with Reduce
+  motion on.
+- **Lighter animations:** subtitles move up out of the way of the player's controls by sliding (they used to be laid
+  out again on every frame); a poster's hover shadow no longer animates (redrawn every frame); and the moving
+  background's three glows are drawn at half size and shown twice as big — the same soft look, a quarter of the
+  graphics memory.
+
 ## 2.8.9
 
 - **Voice and keyboard buttons on the top bar's search box**, on every page: each opens Search with that one going.

@@ -16,19 +16,28 @@
   };
 
   /** The title as its own lettering, in place of plain text (the text stays for screen readers and if the picture fails). */
+  /*  → a promise, settled once it's in place (or won't be). On a title's page already showing, it takes no more room
+   *  than the words did (Home's banner too): nothing next to it is pushed about. */
   V.titleLogo = function (el, url, name) {
-    if (!el || !url || el.querySelector('.t-logo')) return;
-    var img = new Image();
-    img.referrerPolicy = 'no-referrer';
-    img.onload = function () {
-      // (Gone, or showing another title by now.)
-      if (!inDoc(el) || el.textContent !== name || img.naturalWidth < 40) return;
-      el.innerHTML = '';
-      img.className = 't-logo'; img.alt = name;
-      el.appendChild(img);
-      el.classList.add('has-logo');
-    };
-    img.src = url;
+    if (!el || !url || el.querySelector('.t-logo')) return Promise.resolve();
+    return new Promise(function (done) {
+      var img = new Image();
+      img.referrerPolicy = 'no-referrer';
+      img.onload = function () {
+        // (Gone, or showing another title by now.)
+        if (!inDoc(el) || el.textContent !== name || img.naturalWidth < 40) { done(); return; }
+        var box = el.closest && (el.closest('.tp-info') || el.closest('.hero-body'));
+        var shown = box && !box.classList.contains('tp-wait') && !box.classList.contains('hb-wait');
+        if (shown) img.style.maxHeight = Math.max(56, el.offsetHeight) + 'px';
+        el.innerHTML = '';
+        img.className = 't-logo'; img.alt = name;
+        el.appendChild(img);
+        el.classList.add('has-logo');
+        done();
+      };
+      img.onerror = function () { done(); };
+      img.src = url;
+    });
   };
 
   /** One call, shared by whoever asks about the same title within a few minutes (the banner, then its page). */
@@ -44,13 +53,76 @@
     return p;
   };
 
+  /** A title's basics (/api/item): fetched ahead (below), then its page has them at once. take: the page itself —
+   *  what was fetched ahead is used once (a page opened again, after a fix to its details say, asks afresh). */
+  var items = {};
+  V.itemData = function (k, take) {
+    var c = items[k];
+    if (c && Date.now() - c.at < 60e3) { if (take) delete items[k]; return c.p; }
+    if (take) return V.api('/api/item/' + encodeURIComponent(k));
+    var p = V.api('/api/item/' + encodeURIComponent(k));
+    items[k] = { at: Date.now(), p: p };
+    p.catch(function () { delete items[k]; });
+    var keys = Object.keys(items);
+    if (keys.length > 30) delete items[keys[0]];
+    return p;
+  };
+  /** A person's page (/api/person/…), the same. */
+  var persons = {};
+  V.personData = function (url) {
+    var c = persons[url];
+    if (c && Date.now() - c.at < 10 * 60e3) return c.p;
+    var p = V.api(url);
+    persons[url] = { at: Date.now(), p: p };
+    p.catch(function () { delete persons[url]; });
+    var keys = Object.keys(persons);
+    if (keys.length > 20) delete persons[keys[0]];
+    return p;
+  };
+
+  // Fetched ahead: a title's or a person's page, when the pointer rests on a card or a name for a moment (or a remote's
+  // focus stays on it) — by the time it's opened, what it shows is here. One at a time; not on a data saver.
+  (function () {
+    var t = null, busy = false;
+    var ahead = function (el) {
+      if (busy || !S.profile || !el || !el.closest) return;
+      var a = el.closest('a[href^="#/title/"], a[href^="#/person"]');
+      if (!a) return;
+      var c = navigator.connection;
+      if (c && c.saveData) return;
+      var h = a.getAttribute('href'), m = /^#\/title\/([^?/]+)/.exec(h), pm = /^#\/person\/(\d+)/.exec(h);
+      var jobs = [];
+      if (m) {
+        var k = decodeURIComponent(m[1]), it = V.entry(k);
+        if (!it || (it.t !== 'movie' && it.t !== 'show')) return;
+        jobs.push(V.itemData(k));
+        if (S.settings.tmdb) jobs.push(V.titleMoreData(k));
+      } else if (S.settings.tmdb && !V.areaOff('people')) {
+        // (By name too — as the person's page asks for it.)
+        var nm = /^#\/person\?n=([^&]+)/.exec(h), n = '';
+        if (nm) { try { n = decodeURIComponent(nm[1].replace(/\+/g, ' ')); } catch (e2) {} }
+        if (pm) jobs.push(V.personData('/api/person/' + pm[1]));
+        else if (n) jobs.push(V.personData('/api/person/0?n=' + encodeURIComponent(n)));
+      }
+      if (!jobs.length) return;
+      busy = true;
+      Promise.all(jobs).catch(function () {}).then(function () { busy = false; });
+    };
+    var soon = function (el, ms) { clearTimeout(t); t = setTimeout(function () { ahead(el); }, ms); };
+    document.addEventListener('pointerover', function (e) { if (e.pointerType !== 'touch') soon(e.target, 180); }, { passive: true });
+    document.addEventListener('pointerout', function () { clearTimeout(t); }, { passive: true });
+    // (Touch: the moment a finger comes down on it — the tap that opens it follows a few hundred ms later.)
+    document.addEventListener('touchstart', function (e) { soon(e.target, 0); }, { passive: true });
+    document.addEventListener('focusin', function (e) { if (V.tvMode || (V.device && V.device.tv)) soon(e.target, 450); });
+  })();
+
   /** On a title's page, once its basics are drawn. d: what /api/item gave. */
   V.titleMore = function (view, it, d) {
     if (!S.settings.tmdb || (it.t !== 'movie' && it.t !== 'show')) return;
     var isShow = it.t === 'show';
     V.titleMoreData(it.k).then(function (m) {
       if (!m || m.none || !inDoc(view) || !V.$('.title-page', view)) return;
-      if (m.logo && !V.areaOff('logos')) V.titleLogo(V.$('.tp-info h1', view), m.logo, it.n);
+      if (m.logo && !V.areaOff('logos')) view._tpLogo = V.titleLogo(V.$('.tp-info h1', view), m.logo, it.n);
       var plot = V.$('.tp-plot', view);
       if (m.tagline && plot && !V.$('.tp-tag', view)) plot.insertAdjacentHTML('beforebegin', '<p class="tp-tag">' + V.esc(m.tagline) + '</p>');
       // An age rating found where there was none.
@@ -241,9 +313,14 @@
   V.route('person', function (view, r) {
     var id = r.args[0] || '', name = r.q.get('n') || '';
     if (V.areaOff('people') || !S.settings.tmdb) { view.innerHTML = V.empty('Not available', 'People’s pages are turned off on this server.', '<div class="btn-row empty-acts"><a class="btn" href="#/home">Home</a></div>'); return; }
-    view.innerHTML = '<div class="person-page"><div class="spinner"></div></div>';
+    // (Shapes where the page's parts will be while it's fetched — the name already, when it's known.)
+    var sk = '';
+    for (var si = 0; si < 14; si++) sk += '<span class="sk-card"><span class="sk sk-art"></span><span class="sk sk-l" style="width:72%"></span></span>';
+    view.innerHTML = '<div class="person-page pp-sk" aria-busy="true"><header class="pp-h"><div class="pp-face sk"></div><div class="pp-info" style="flex:1">' +
+      (name ? '<h1>' + V.esc(name) + '</h1>' : '<span class="sk sk-h"></span>') + '<span class="sk sk-l" style="width:40%"></span><span class="sk sk-l"></span><span class="sk sk-l"></span><span class="sk sk-l" style="width:75%"></span></div></header>' +
+      '<section class="pp-here"><h2>Here</h2><div class="grid">' + sk + '</div></section><span class="sr-only" role="status">Loading</span></div>';
     var url = '/api/person/' + (/^\d+$/.test(id) ? id : '0') + (name ? '?n=' + encodeURIComponent(name) : '');
-    Promise.all([V.api(url), V.areaOff('wishlist') || S.profile.kids ? Promise.resolve({ list: [] }) : V.api('/api/wishlist').catch(function () { return { list: [] }; })]).then(function (res) {
+    Promise.all([V.personData(url), V.areaOff('wishlist') || S.profile.kids ? Promise.resolve({ list: [] }) : V.api('/api/wishlist').catch(function () { return { list: [] }; })]).then(function (res) {
       var p = res[0], wishes = res[1].list || [];
       if (!inDoc(view)) return;
       // (Found by name: the page's own address from now on, so Back and sharing it work.)
