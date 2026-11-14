@@ -3,6 +3,15 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.13
+
+- **A film that doesn't look like the right one is caught sooner:** under 80% of TMDB's running time, or over 145%
+  (160% when the provider's name says it's an extended, director's, uncut or similar cut), instead of under 60% or over
+  175%. Real copies come within a few percent — on this household's watching, every real film within 9% — while a
+  European TV copy plays 4% fast, some drop the credits, and the longest director's cuts run about 40% longer (The
+  Lord of the Rings extended, Kingdom of Heaven, Das Boot) without the provider always saying so. Now caught too: an
+  older film under a new one's name, like "The Cat in the Hat" (2003, 82 min) for the 2026 one (108 min).
+
 ## 2.8.12
 
 - **Copies that play something else can be hidden for everyone.** Some providers put the wrong file under a title —

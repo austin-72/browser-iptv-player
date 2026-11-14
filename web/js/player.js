@@ -468,11 +468,24 @@ PP._sources = function (it, token, opts) {
 /**
  * A film whose file is far longer or shorter than the film is (TMDB's running time) is most likely something else
  * under its name — a provider's mix-up (an older version, a cartoon, a trailer, a placeholder for a film still in
- * cinemas). Then: another copy plays instead, when there is one; and either way the admin hears about it (Admin →
+ * cinemas); how far off counts: V.lengthOff. Then: another copy plays instead, when there is one; and either way the admin hears about it (Admin →
  * Error reports), where that copy can be hidden for everyone. Once per film on this device. (Not for a title without
  * TMDB's details, nor a short one — a film's length is only known well enough from TMDB.)
  */
 var lenChecked = {};
+/**
+ * Is a film's file too far from its running time (TMDB's) to be that film? A real copy is within a few percent — a
+ * European TV copy plays 4% fast, some drop the credits — so under 80% isn't it. Longer is allowed more: an extended or
+ * director's cut runs up to about 40% longer (The Lord of the Rings, Kingdom of Heaven, Das Boot) and providers don't
+ * always say so; 60% when the name says it's such a cut. (Checked on this household's watching: real films came within
+ * 9% of TMDB's time.)
+ */
+V.lengthOff = function (real, expected, name) {
+  if (!(real > 0) || !(expected > 0)) return false;
+  var r = real / expected;
+  var longCut = /\b(extended|director'?s|uncut|unrated|redux|final cut|ultimate|special edition|remastered|edici[oó]n extendida|version longue)\b/i.test(String(name || ''));
+  return r < 0.8 || r > (longCut ? 1.6 : 1.45);
+};
 PP._lengthCheck = function (token) {
   var self = this, it = this.it;
   if (!it || it.t !== 'movie' || !(it.d >= 40 * 60) || !(it.pp != null || it.bd) || !this.vod) return;
@@ -483,8 +496,7 @@ PP._lengthCheck = function (token) {
     var v = self.video, real = self.sessionDuration || (!self.mb && isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
     if (!(real > 60)) return;
     lenChecked[key] = 1;
-    var r = real / it.d;
-    if (r >= 0.6 && r <= 1.75) return;
+    if (!V.lengthOff(real, it.d, it.n)) return;
     var said = V.fmtLen(real).trim() + ' long — “' + it.n + '”' + (it.y ? ' (' + it.y + ')' : '') + ' runs ' + V.fmtLen(it.d).trim();
     if (V.crumb) V.crumb('player', 'copy ' + (self.alt + 2) + ' is ' + said + ': not the right film?');
     if (V.reportError) V.reportError('copy', { message: 'Doesn’t look like the right film: ' + it.n + (it.y ? ' (' + it.y + ')' : '') }, { item: { k: it.k, t: it.t, n: it.n, y: it.y, alt: self.alt, backups: (it.a || []).length }, real: Math.round(real), expected: it.d, said: 'This copy is ' + said + '.' });
