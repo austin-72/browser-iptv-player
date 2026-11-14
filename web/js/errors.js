@@ -269,6 +269,9 @@
     var proxys = /cloudflareinsights\.com|\/cdn-cgi\//i.test(what);
     if (!proxys && what === 'inline') { try { var ss = document.scripts, si; for (si = 0; si < ss.length; si++) if (!ss[si].src && /cdn-cgi|__CF\$/.test(ss[si].textContent || '')) proxys = true; } catch (x) {} }
     if (proxys) { crumb('log', 'security policy stopped a script the proxy in front added'); return; }
+    // (Nor a TV's own browser opening a page of its own on the TV itself — Samsung's does, on 127.0.0.1 — when this
+    // page isn't on that machine: nothing of the app's.)
+    if (/^(frame|child)-src/.test(String(e.violatedDirective || e.effectiveDirective || '')) && /^https?:\/\/(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:|\/|$)/i.test(what) && !/^(127\.|localhost$|\[::1\]$)/.test(location.hostname)) { crumb('log', 'security policy: the device’s own browser opened a page on itself'); return; }
     var m = /^(https?|wss?):\/\/[^/?#]+/i.exec(what);
     what = m ? m[0] : what.slice(0, 20);
     cspSeen++;

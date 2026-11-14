@@ -776,3 +776,7 @@ dialog.dlg[open]::backdrop { animation: artFade .2s ease-out; }
 .pv-dot.ban { background: var(--danger, #e5484d); }
 .pv-bans { margin-top: .75rem; }
 .kick-other:not([hidden]) { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+/* Admin → Languages & content: copies that play something else (admin.js). */
+.bc-ul { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .5rem; }
+.bc-ul li { display: flex; align-items: center; gap: .8rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; }
+.bc-ul li > div { flex: 1; min-width: 0; }

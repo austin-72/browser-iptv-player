@@ -49,6 +49,7 @@ const { Accounts } = require('./lib/accounts');
 const { UserData } = require('./lib/userdata');
 const { Hub, Social } = require('./lib/social');
 const { Bans, norm: ipNorm } = require('./lib/bans');
+const { BadCopies, copyId } = require('./lib/badcopies');
 const { Tmdb, ownYear: tmdbOwnYear } = require('./lib/tmdb');
 const { Recs } = require('./lib/recs');
 const { Markers } = require('./lib/markers');
@@ -149,6 +150,8 @@ const userdata = new UserData(path.join(D, 'users'));
 const hub = new Hub();
 // Addresses the admin has put off the server for a while (Admin → Overview → Remove): lib/bans.js.
 const bans = new Bans(D);
+// Copies that play something else (another title under this one's name), hidden by the admin: lib/badcopies.js.
+const badCopies = new BadCopies(D);
 const social = new Social(D, { hub, accounts });
 // The admin's channel edits, guide offsets and parental locks (Admin → Channels).
 const overrides = new Overrides(D);
@@ -169,6 +172,8 @@ const lists = new Lists({
   },
 });
 catalog = new Catalog({ lists, epg, getSettings: settings });
+// (Copies that play something else, hidden by the admin: lib/badcopies.js.)
+catalog.isBadCopy = (l, t, u) => badCopies.has(l, t, u);
 catalog.overrides = overrides;
 catalog.decorate = (it) => applyMeta(it, tmdb.meta.data.m[it.k]); // (applyMeta and tmdb: further down, used once built)
 // Smarter categories (lib/smartcats.js): each item's, worked out when the catalogue is built (and again when the
@@ -357,7 +362,7 @@ let builtSig = ''; // what the catalogue in use was made from (catalogInputs at 
 function catalogInputs() {
   const h = crypto.createHash('sha1').update(CODE_SIG);
   const S = settings();
-  h.update(JSON.stringify([S.tidyGroups, S.groupRules, S.hiddenGroups, S.hiddenKeys, S.defaultLangs, S.showUnknownLang, keepSig(), overrides.d, !!S.noAdult]));
+  h.update(JSON.stringify([S.tidyGroups, S.groupRules, S.hiddenGroups, S.hiddenKeys, S.defaultLangs, S.showUnknownLang, keepSig(), overrides.d, !!S.noAdult, badCopies.sig()]));
   for (const l of lists.all().concat(lists.extras || [])) {
     const { status, account, ...conf } = l; // (how its last refresh went doesn't change what's in it)
     h.update(JSON.stringify(conf));
@@ -826,6 +831,36 @@ route('DELETE', '/api/admin/bans/:id', (req, res, p, q, ctx) => {
   return { ok: true };
 });
 
+// ---- copies that play something else (lib/badcopies.js): hidden for everyone by the admin
+route('GET', '/api/admin/badcopies', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  return { copies: badCopies.list.slice().sort((a, b) => b.at - a.at) };
+});
+/** Hides one copy of a film or an episode: { k, sk (an episode's series), alt (-1 the first copy), why }. */
+route('POST', '/api/admin/badcopies', async (req, res, p, q, ctx) => {
+  const admin = requireAdmin(ctx);
+  const b = await readObj(req);
+  const it = await itemAsync(ctx, String(b.k || ''), b.sk ? String(b.sk) : undefined);
+  if (it.t !== 'movie' && it.t !== 'episode') throw new HttpError(400, 'Only a film’s or an episode’s copy can be hidden.');
+  const alt = Number.isInteger(b.alt) && b.alt >= 0 && it.alts && it.alts[b.alt] ? b.alt : -1;
+  const lid = srcList(it, alt);
+  const show = it.t === 'episode' && it.sk ? catalog.get(it.sk) : null;
+  const name = it.t === 'episode' ? `${(show && show.n) || it.n}${Number.isInteger(it.s) ? ` S${it.s}:E${it.e}` : ''}` : `${it.n}${it.y ? ` (${it.y})` : ''}`;
+  const l = lists.all().find((x) => x.id === lid);
+  const id = badCopies.add({ list: lid, t: it.t, url: alt >= 0 ? it.alts[alt].u : it.u, k: it.k, sk: it.sk || '', n: name, listName: (l && l.name) || '', why: String(b.why || '').slice(0, 200), by: admin.name });
+  const left = goodCopies(it).length;
+  log(`Admin: a copy of “${name}” from ${(l && l.name) || 'a provider'} hidden for everyone — it plays something else${left ? ` (${left} other ${left === 1 ? 'copy' : 'copies'} left)` : ' (no other copy: the title goes)'}`);
+  if (it.t === 'movie') scheduleRebuild(100);
+  return { ok: true, id, left };
+});
+route('DELETE', '/api/admin/badcopies/:id', (req, res, p, q, ctx) => {
+  requireAdmin(ctx);
+  const was = badCopies.remove(p.id);
+  if (!was) throw new HttpError(404, 'That copy isn’t hidden.');
+  if (was.t === 'movie') scheduleRebuild(100);
+  return { ok: true };
+});
+
 // ---- sign in (site password)
 route('POST', '/api/login', async (req, res) => {
   const { password } = await readObj(req);
@@ -1021,7 +1056,7 @@ route('GET', '/api/item/:k', async (req, res, p, q, ctx) => {
       const seasons = [...new Set(eps.map((e) => e.s).filter((n) => Number.isInteger(n)))];
       await Promise.race([tmdb.episodes(it, { seasons }).catch(() => null), new Promise((r) => setTimeout(r, 4000))]);
     }
-    out.episodes = withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
+    out.episodes = withEpisodeMeta(it, eps.filter((e) => goodCopies(e).length).map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
     Object.assign(out, comingEpisodes(it, eps));
   }
   if (it.sk) { const show = catalog.get(it.sk); if (show) out.show = { k: show.k, n: show.n, i: show.logo || '' }; }
@@ -1055,7 +1090,7 @@ route('GET', '/api/show/:k/episodes', async (req, res, p, q, ctx) => {
     // The provider didn't answer: say so plainly (the page offers to try again).
     throw new HttpError(502, `The provider didn’t send this series’ episodes (${String(e.message || e).replace(/^Couldn’t download it: /, '')}). Try again in a moment.`);
   }
-  return withEpisodeMeta(it, eps.map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
+  return withEpisodeMeta(it, eps.filter((e) => goodCopies(e).length).map((e) => ({ ...Catalog.compact(e), plot: (e.plot || '').slice(0, 400) })));
 });
 /**
  * Episodes TMDB knows of that come after the last one on the lists: ones still to air ("Airs 12 Nov") and ones aired
@@ -1578,6 +1613,12 @@ async function reachOf(req, it, b) {
 }
 /** Which list a copy of an item comes from. */
 function srcList(it, alt = -1) { return alt >= 0 && it.alts && it.alts[alt] ? it.alts[alt].l : it.src; }
+/** A title's copies the admin hasn't hidden for playing something else (-1: the first; then its backups' numbers). */
+function goodCopies(it) {
+  const all = [-1, ...(it.alts || []).map((x, i) => i)];
+  if (!badCopies.list.length) return all;
+  return all.filter((alt) => !badCopies.has(srcList(it, alt), it.t, alt >= 0 ? it.alts[alt].u : it.u));
+}
 /**
  * Admin → Lists: for each list, its live channels, series and films once duplicates are combined, and how many of
  * those no other list has ([count, only here] each). Worked out in slices after a catalogue change; the last counts
@@ -1837,7 +1878,9 @@ route('POST', '/api/play/sources', async (req, res, p, q, ctx) => {
   const https = /^https:/i.test(String(b.origin || ''));
   const use = listUsage();
   const out = [];
-  const copies = [-1, ...(it.alts || []).map((x, i) => i)];
+  // (Not a copy the admin hid because it plays something else: lib/badcopies.js.)
+  const copies = goodCopies(it);
+  if (!copies.length) throw new HttpError(410, 'This was taken off: what the provider has under this name plays something else.');
   // Films and episodes: also what each copy's file is like, so the one this browser plays as it is goes first
   // (the same episode is often an MP4 on one provider and an MKV with Dolby sound on another).
   const caps = b.caps && typeof b.caps === 'object' ? b.caps : null;
@@ -1950,7 +1993,7 @@ route('POST', '/api/play/race', async (req, res, p, q, ctx) => {
   // (current: the copy this device is trying right now — looked at too when its account has room for one more.)
   const current = Number.isInteger(b.current) ? b.current : null;
   const curList = current !== null ? srcList(it, current) : null;
-  const copies = [-1, ...(it.alts || []).map((x, i) => i)].filter((a) => !skip.has(a));
+  const copies = goodCopies(it).filter((a) => !skip.has(a));
   const use = listUsage();
   const others = (lid) => (use.get(lid) || []).filter((c) => !(c.relayShared ? (c.viewers || []).every((v) => v.id === ctx.conn) : c.id === ctx.conn));
   const out = [], tasks = [], lists = new Set();

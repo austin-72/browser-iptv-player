@@ -7,7 +7,7 @@
 (function () {
   var CHOICES = [
     ['play', 'Won’t play'], ['buffer', 'Stutters or buffers'], ['sound', 'No sound'], ['sync', 'Sound out of sync'],
-    ['subs', 'Wrong subtitles'], ['info', 'Wrong title or picture'], ['other', 'Other'],
+    ['wrong', 'Plays something else'], ['subs', 'Wrong subtitles'], ['info', 'Wrong title or picture'], ['other', 'Other'],
   ];
   /**
    * Likely secrets in the note ("my PIN is 4321", "password: hunter2") become "…" before it leaves the device (the
@@ -28,7 +28,7 @@
   var details = function (p, it, choice, failed) {
     var v = p.video || {};
     var o = {
-      item: { k: it.k, t: it.t, n: it.n, show: it.t === 'episode' ? (V.showOf(it) || {}).n : undefined, g: it.g, alt: p.alt, backups: (it.a || []).length, ext: (String(it.u || '').split('?')[0].match(/\.(\w{2,5})$/) || [])[1] || '' },
+      item: { k: it.k, sk: it.sk || undefined, t: it.t, n: it.n, show: it.t === 'episode' ? (V.showOf(it) || {}).n : undefined, g: it.g, alt: p.alt, backups: (it.a || []).length, ext: (String(it.u || '').split('?')[0].match(/\.(\w{2,5})$/) || [])[1] || '' },
       failed: failed,
     };
     // Something else started playing while the form was open: the player's details would be about that instead.
@@ -81,9 +81,36 @@
     });
   };
 
+  /**
+   * The admin: this copy plays something else (another title under this one's name) — hidden for everyone; another
+   * copy takes over, or the title goes when there's none (lib/badcopies.js). Undone in Admin → Languages & content.
+   * c: { k, sk, alt, name, t }. → a promise of whether it was hidden.
+   */
+  V.hideCopy = function (c) {
+    var many = c.copies > 1;
+    return V.confirm('Hide this copy of “' + c.name + '” for everyone? It plays something else.' + (many ? ' Another copy of it takes over.' : ' There’s no other copy, so the ' + (c.t === 'episode' ? 'episode' : 'film') + ' goes until you show it again.') + ' (Admin → Languages & content shows what’s hidden.)', { ok: 'Hide this copy', danger: true }).then(function (ok) {
+      if (!ok) return false;
+      return V.api('/api/admin/badcopies', { body: { k: c.k, sk: c.sk || undefined, alt: c.alt, why: c.why || '' } }).then(function (r) {
+        V.toast('Hidden for everyone' + (r.left ? ' — ' + V.plural(r.left, 'other copy', 'other copies') + ' left' : '') + '.');
+        return true;
+      });
+    }).catch(function (e) { V.fail(e); return false; });
+  };
+
   var prev = V.playerMenuExtras;
   V.playerMenuExtras = function (p, main, pages) {
     if (prev) prev(p, main, pages);
     if (p.it) main.push({ label: 'Report a problem', value: '', fn: function () { V.reportProblem(p); } });
+    if (p.it && S.profile && S.profile.admin && (p.it.t === 'movie' || p.it.t === 'episode')) {
+      main.push({ label: 'Plays something else', value: '', fn: function () {
+        var it = p.it;
+        V.hideCopy({ k: it.k, sk: it.sk, alt: p.alt, t: it.t, name: nameOf(it), copies: 1 + (it.a || []).length }).then(function (ok) {
+          if (!ok || p.it !== it) return;
+          // Another copy plays from here; with none, the player closes.
+          if (it.a && it.a.length) p.load(it, { startAt: p.vod ? p.position : 0 });
+          else V.closePlayer();
+        });
+      } });
+    }
   };
 })();

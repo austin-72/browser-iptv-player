@@ -3,6 +3,26 @@
 What was changed and fixed, in more detail than the README (which says what the app does). Newer first; versions
 from 2.7 on are named. The release notes on GitHub list each version.
 
+## 2.8.12
+
+- **Copies that play something else can be hidden for everyone.** Some providers put the wrong file under a title —
+  Blippi under "Clifford the Big Red Dog" S1:E2, a 58-minute video under "The Cat in the Hat (2026)" (added three months
+  before the film was out, under its name, cast and TMDB number). Nothing in the provider's details gives these away,
+  so the admin can now hide such a copy: from **Plays something else — hide this copy** on a viewer's report in
+  Admin → Error reports, or **Plays something else** in the player's menu while watching. Another provider's copy of
+  the title plays instead; a film with no other copy leaves the catalogue, and an episode its series. What's hidden is
+  listed in Admin → Languages & content, under **Copies that play something else**, with **Show again** for when the
+  provider fixes it. (A copy is known by its provider and the provider's own number for the file — never the address,
+  which holds the account's login.)
+- **Report a problem** has a **Plays something else** choice (until now only "Wrong title or picture", which is about
+  the details shown, not the video).
+- **A film far longer or shorter than it should be is spotted while it plays:** under 60% or over 175% of TMDB's
+  running time (films of 40 minutes or more, with TMDB's details). Another copy plays instead when there is one (from
+  where it started, within the first two minutes); either way the admin gets a report — "Doesn't look like the right
+  film" — with the hide button. Once per film and copy on each device.
+- Error reports: a Samsung TV's own browser opening a page on the TV itself (127.0.0.1) is no longer reported as a
+  problem with the app.
+
 ## 2.8.11
 
 - **The admin can remove someone who's watching, and keep them off for as long as they choose.** Admin → Overview →

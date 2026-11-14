@@ -44,8 +44,16 @@
     box.innerHTML = '<div class="spinner sm"></div>';
     V.api('/api/admin/errors/' + id).then(function (is) {
       var others = (is.samples || []).slice(1);
+      // A film or an episode said (or found) to play something else: open it, or hide that copy for everyone
+      // (lib/badcopies.js) — another copy takes over, or it goes when there's none.
+      var s0 = (is.samples || [])[0] || {}, ex0 = s0.extra || {}, pl0 = ((s0.ctx || {}).player || {}).item || {};
+      var ti = ex0.item && ex0.item.k ? ex0.item : pl0.k ? pl0 : null;
+      var pageKey = (/^#\/title\/([^?/]+)/.exec(s0.page || '') || [])[1];
+      var copyable = ti && (ti.t === 'movie' || ti.t === 'episode') && (s0.kind === 'copy' || s0.kind === 'user');
+      if (copyable && ti.t === 'episode' && !ti.sk && pageKey && pageKey !== ti.k) ti.sk = decodeURIComponent(pageKey);
       box.innerHTML = '<div class="btn-row er-acts">' +
         '<button class="btn sm primary" data-copy>' + V.icon('copy') + ' Copy report</button>' +
+        (copyable ? '<a class="btn sm" href="#/title/' + encodeURIComponent(ti.t === 'episode' && ti.sk ? ti.sk : ti.k) + '">Open the title</a><button class="btn sm adm-only" data-hidecopy>' + V.icon('eyeoff') + ' Plays something else — hide this copy</button>' : '') +
         (is.status === 'fixed' ? '<button class="btn sm" data-status="open">Reopen</button>' : '<button class="btn sm" data-status="fixed">' + V.icon('check') + ' Mark fixed</button>') +
         '<button class="btn sm danger adm-only" data-del>Delete</button></div>' +
         (Object.keys(is.devices || {}).length ? '<p class="small dim">Devices: ' + Object.keys(is.devices).map(function (d) { return esc(d) + ' (' + is.devices[d] + ')'; }).join(', ') + '</p>' : '') +
@@ -56,6 +64,10 @@
       var page = box.closest('.admin-body');
       box.onclick = function (e) {
         if (e.target.closest('[data-copy]')) V.copy(is.text, 'Report copied');
+        if (e.target.closest('[data-hidecopy]')) {
+          var nm = ti.t === 'episode' && ti.show && (ti.n || '').indexOf(ti.show) < 0 ? ti.show + ' ' + ti.n : ti.n;
+          V.hideCopy({ k: ti.k, sk: ti.sk, alt: typeof ti.alt === 'number' ? ti.alt : -1, t: ti.t, name: nm, copies: 1 + (ti.backups || 0), why: ex0.choiceLabel || is.title || '' });
+        }
         var st = e.target.closest('[data-status]');
         if (st) V.put('/api/admin/errors/' + id, { status: st.dataset.status }).then(function () { V.toast(st.dataset.status === 'fixed' ? 'Marked fixed — it reopens if it happens again on a newer version' : 'Reopened'); draw(page); }).catch(V.fail);
         if (e.target.closest('[data-del]')) V.confirm('Delete this report? Its details can’t be brought back.', { ok: 'Delete', danger: true }).then(function (yes) { if (yes) V.del('/api/admin/errors/' + id).then(function () { draw(page); }).catch(V.fail); });

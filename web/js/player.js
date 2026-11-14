@@ -362,6 +362,7 @@ PP.load = function (it, opts) {
       self.attempt = a;
       if (V.crumb) V.crumb('player', 'started via ' + a.via + (a.kind || a.mode ? ' (' + (a.kind || a.mode) + ')' : '') + ' in ' + (Date.now() - t0) + ' ms');
       self._afterStart();
+      self._lengthCheck(token);
     }, function (e) {
       clearTimeout(warmT);
       if (token !== self.token) return;
@@ -454,7 +455,51 @@ PP._sources = function (it, token, opts) {
       if (r && r.reach && r.reach.info) self._preReach = { k: it.k, alt: r.reach.alt, info: r.reach.info, mok: !!mok, token: token };
       return r;
     });
-  }).then(function (r) { return self._useSources(r, it, token, opts); }, function () { return true; });
+  }).then(function (r) { return self._useSources(r, it, token, opts); }, function (e) {
+    // (The admin hid every copy of this: what the provider has under its name plays something else.)
+    if (e && e.status === 410 && token === self.token) {
+      self._msg({ title: 'Not available', sub: e.message, actions: [{ label: 'OK', primary: true, fn: function () { V.closePlayer(); } }] });
+      return false;
+    }
+    return true;
+  });
+};
+
+/**
+ * A film whose file is far longer or shorter than the film is (TMDB's running time) is most likely something else
+ * under its name — a provider's mix-up (an older version, a cartoon, a trailer, a placeholder for a film still in
+ * cinemas). Then: another copy plays instead, when there is one; and either way the admin hears about it (Admin →
+ * Error reports), where that copy can be hidden for everyone. Once per film on this device. (Not for a title without
+ * TMDB's details, nor a short one — a film's length is only known well enough from TMDB.)
+ */
+var lenChecked = {};
+PP._lengthCheck = function (token) {
+  var self = this, it = this.it;
+  if (!it || it.t !== 'movie' || !(it.d >= 40 * 60) || !(it.pp != null || it.bd) || !this.vod) return;
+  var key = it.k + '|' + this.alt;
+  if (lenChecked[key]) return;
+  setTimeout(function () {
+    if (token !== self.token || self.it !== it) return;
+    var v = self.video, real = self.sessionDuration || (!self.mb && isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
+    if (!(real > 60)) return;
+    lenChecked[key] = 1;
+    var r = real / it.d;
+    if (r >= 0.6 && r <= 1.75) return;
+    var said = V.fmtLen(real).trim() + ' long — “' + it.n + '”' + (it.y ? ' (' + it.y + ')' : '') + ' runs ' + V.fmtLen(it.d).trim();
+    if (V.crumb) V.crumb('player', 'copy ' + (self.alt + 2) + ' is ' + said + ': not the right film?');
+    if (V.reportError) V.reportError('copy', { message: 'Doesn’t look like the right film: ' + it.n + (it.y ? ' (' + it.y + ')' : '') }, { item: { k: it.k, t: it.t, n: it.n, y: it.y, alt: self.alt, backups: (it.a || []).length }, real: Math.round(real), expected: it.d, said: 'This copy is ' + said + '.' });
+    var next = (self._altsLeft || []).filter(function (a) { return !lenChecked[it.k + '|' + a]; })[0];
+    // (Another copy, from where this one started — unless it's been watched a while already: then the viewer's
+    // happy with it, whatever its length.)
+    var from = self._loadAt || 0;
+    if (next !== undefined && self.position - from < 120) {
+      self._altsLeft = self._altsLeft.filter(function (a) { return a !== next; });
+      V.toast('That copy didn’t look like the right film (' + V.fmtLen(real).trim() + ' long, not ' + V.fmtLen(it.d).trim() + '). Trying another…', { ms: 6000 });
+      self.load(it, { alt: next, quiet: true, startAt: from || undefined });
+    } else {
+      V.toast('This might not be the right film: it’s ' + V.fmtLen(real).trim() + ' long, and “' + it.n + '” runs ' + V.fmtLen(it.d).trim() + '. The admin has been told.', { ms: 8000 });
+    }
+  }, 5000);
 };
 PP._useSources = function (r, it, token, opts) {
   if (token !== this.token) return false;
@@ -2558,7 +2603,7 @@ PP._titles = function () {
   if (it.t === 'episode') { var show = V.showOf(it); t.textContent = show ? show.n : it.n; s.textContent = V.epLabel(it) + (it.et ? ' · ' + it.et : ''); }
   else if (it.t === 'catchup') { t.textContent = it.channelName; s.textContent = it.n + ' · ' + V.fmtDay(it.prog.s) + ' ' + V.fmtClock(it.prog.s); }
   else if (it.t === 'live' || it.t === 'radio') { t.textContent = (it.no ? it.no + '  ' : '') + it.n; var nn = V.epg.nowNext(it); s.textContent = nn.now ? nn.now.t : ''; }
-  else { t.textContent = it.n; s.textContent = [it.y, it.d ? V.fmtLen(it.d) : ''].filter(Boolean).join(' · '); }
+  else { t.textContent = it.n; s.textContent = [it.y, it.d ? V.fmtLen(it.d).trim() : ''].filter(Boolean).join(' · '); }
   V.$('.vp-ttl', this.host).textContent = '';
   document.title = it.n + ' · ' + ((S.settings && S.settings.brand && S.settings.brand.name) || '');
 };

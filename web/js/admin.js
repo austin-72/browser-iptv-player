@@ -588,7 +588,29 @@ V.adminTabs.content = function (body, A) {
     '<button class="btn primary" data-save-l>Save languages</button><div class="lang-stats dim small"></div></section>' +
     // Adult (18+) content left out for everyone (lib/catalog.js isAdult; the counts come with /api/admin/groups).
     '<section class="card-sec adm-adult"><h2>Adult content</h2><label class="check"><input type="checkbox" data-noadult' + (s.noAdult ? ' checked' : '') + '><span>Leave out adult (18+) content for everyone <small class="dim">— porn channels and films are taken out of the catalogue altogether: no profile sees them (the admin neither), they can’t be searched for or played, and “Allow adult (18+) groups” on a profile no longer does anything.</small></span></label><p class="dim small adult-stats"></p></section>' +
-    '<section class="card-sec"><h2>Hidden categories</h2><p class="dim">Hidden for everyone (the admin too). Tick to hide.</p><input class="input" type="search" data-gf placeholder="Filter categories"><div class="groups-adm"><div class="spinner"></div></div><button class="btn primary" data-save-g>Save hidden categories</button></section>';
+    '<section class="card-sec"><h2>Hidden categories</h2><p class="dim">Hidden for everyone (the admin too). Tick to hide.</p><input class="input" type="search" data-gf placeholder="Filter categories"><div class="groups-adm"><div class="spinner"></div></div><button class="btn primary" data-save-g>Save hidden categories</button></section>' +
+    // Copies of films and episodes that play something else, hidden for everyone (lib/badcopies.js).
+    '<section class="card-sec adm-badcopies"><h2>Copies that play something else</h2><p class="dim">A provider’s file under a title that turned out to be another one (hidden from a viewer’s report, the player’s menu or Error reports). Another provider’s copy plays instead; a title with none is left out. Show one again if the provider has fixed it.</p><div class="bc-list"><div class="spinner sm"></div></div></section>';
+  // (Drawn, and redrawn when one is shown again.)
+  var bcDraw = function () {
+    var box = V.$('.bc-list', body);
+    if (!box) return;
+    V.api('/api/admin/badcopies').then(function (r) {
+      var l = r.copies || [];
+      box.innerHTML = l.length ? '<ul class="bc-ul">' + l.map(function (c) {
+        return '<li><div><b>' + V.esc(c.n || c.k) + '</b> <span class="dim">' + (c.t === 'episode' ? 'episode' : 'film') + (c.listName ? ' · ' + V.esc(c.listName) : '') + '</span>' +
+          '<div class="dim small">Hidden ' + V.fmtAgo(c.at) + (c.by ? ' by ' + V.esc(c.by) : '') + (c.why ? ' · ' + V.esc(c.why) : '') + '</div></div>' +
+          '<button class="btn sm" data-bcshow="' + V.esc(c.id) + '">' + V.icon('eye') + ' Show again</button></li>';
+      }).join('') + '</ul>' : '<p class="dim small">None hidden.</p>';
+    }).catch(function (e) { box.innerHTML = '<p class="err">' + V.esc(e.message) + '</p>'; });
+  };
+  bcDraw();
+  body.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-bcshow]');
+    if (!b || b.disabled) return;
+    b.disabled = true;
+    V.del('/api/admin/badcopies/' + encodeURIComponent(b.getAttribute('data-bcshow'))).then(function () { V.toast('Shown again'); bcDraw(); }).catch(function (x) { b.disabled = false; V.fail(x); });
+  });
   // What the lists hold that counts as adult, by the providers' own categories (so a missed one can be spotted).
   var adultEl = V.$('.adult-stats', body), adultTries = 0;
   var adultNote = function (a) {
